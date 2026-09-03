@@ -1137,3 +1137,219 @@ export function validateTransactionAccount(
   }
 }
 
+export interface ProcessRecurringBatchParams {
+  recurring: RecurringTransaction[];
+  transactions: Transaction[];
+  bills: CreditCardBill[];
+  accounts: Account[];
+  paymentMethods: PaymentMethod[];
+  creditCards: CreditCard[];
+  categories: Category[];
+  todayStr: string;
+  generateId?: (prefix: string) => string;
+}
+
+export interface ProcessRecurringBatchResult {
+  updatedRecurring: RecurringTransaction[];
+  newTransactions: Transaction[];
+  updatedBills: CreditCardBill[];
+  hasChanges: boolean;
+}
+
+/**
+ * Função pura de transição de estado para processamento em lote de recorrências.
+ * Utilizada como única fonte de verdade tanto pelo FinanceProvider quanto pela suíte de testes.
+ */
+export function processRecurringBatchState(
+  params: ProcessRecurringBatchParams
+): ProcessRecurringBatchResult {
+  const {
+    recurring,
+    transactions,
+    bills,
+    accounts,
+    paymentMethods,
+    creditCards,
+    categories,
+    todayStr,
+    generateId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  } = params;
+
+  let updatedBills = [...bills];
+  let updatedRecurring = [...recurring];
+  const newTransactions: Transaction[] = [];
+  let hasChanges = false;
+
+  const processedSet = new Set<string>(
+    transactions.map((t) => `${t.recurring_transaction_id || ''}:${t.transaction_date}`)
+  );
+
+  const getOrCreateAndAddBill = (
+    cardId: string,
+    refMonth: string,
+    closingDate: string,
+    dueDate: string,
+    amount: number,
+    wsId: string
+  ): string => {
+    const targetBillId = `bill-${cardId}-${refMonth}`;
+    const existingIdx = updatedBills.findIndex(
+      (b) => b.credit_card_id === cardId && b.reference_month === refMonth && b.workspace_id === wsId
+    );
+
+    if (existingIdx >= 0) {
+      const b = updatedBills[existingIdx];
+      const newTotal = b.total_amount + amount;
+      const newPaid = b.paid_amount || 0;
+      const fullyPaid = newPaid >= newTotal && newTotal > 0;
+      updatedBills = updatedBills.map((item, idx) =>
+        idx === existingIdx
+          ? {
+              ...item,
+              total_amount: newTotal,
+              status: fullyPaid ? 'paid' : newPaid > 0 ? 'partially_paid' : item.status,
+              paid_at: fullyPaid ? item.due_date : null,
+            }
+          : item
+      );
+    } else {
+      updatedBills = [
+        ...updatedBills,
+        {
+          id: targetBillId,
+          credit_card_id: cardId,
+          workspace_id: wsId,
+          reference_month: refMonth,
+          closing_date: closingDate,
+          due_date: dueDate,
+          total_amount: amount,
+          paid_amount: 0,
+          status: 'open',
+          paid_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ];
+    }
+    hasChanges = true;
+    return targetBillId;
+  };
+
+  // Desativação semântica para qualquer série cujo next_occurrence já ultrapassou end_date
+  updatedRecurring = updatedRecurring.map((r) => {
+    if (r.active && r.end_date && r.next_occurrence > r.end_date) {
+      hasChanges = true;
+      return { ...r, active: false };
+    }
+    return r;
+  });
+
+  for (const rec of updatedRecurring) {
+    if (!rec.active || !rec.auto_create || rec.next_occurrence > todayStr) continue;
+
+    let currOccurrence = rec.next_occurrence;
+    let iterations = 0;
+    let shouldDeactivate = false;
+
+    const validation = validateRecurringMaterialization(
+      rec,
+      accounts,
+      paymentMethods,
+      creditCards,
+      categories,
+      rec.workspace_id
+    );
+
+    if (!validation.isValid) {
+      shouldDeactivate = true;
+      hasChanges = true;
+      updatedRecurring = updatedRecurring.map((r) =>
+        r.id === rec.id ? { ...r, active: false, suspended_reason: validation.reason } : r
+      );
+      continue;
+    }
+
+    const effectiveCardId = validation.effectiveCardId || null;
+    const effectiveAccountId = validation.effectiveAccountId || rec.account_id;
+
+    while (
+      currOccurrence <= todayStr &&
+      (!rec.end_date || currOccurrence <= rec.end_date) &&
+      iterations < 120
+    ) {
+      iterations++;
+      const itemKey = `${rec.id}:${currOccurrence}`;
+
+      if (!processedSet.has(itemKey)) {
+        let billId: string | null = null;
+        let calculatedDueDate = currOccurrence;
+
+        if (effectiveCardId) {
+          const card = creditCards.find((c) => c.id === effectiveCardId && c.workspace_id === rec.workspace_id);
+          if (card) {
+            const billDates = calculateCardBillDates(currOccurrence, card.closing_day, card.due_day);
+            billId = getOrCreateAndAddBill(
+              card.id,
+              billDates.referenceMonth,
+              billDates.closingDate,
+              billDates.dueDate,
+              rec.amount,
+              rec.workspace_id
+            );
+            calculatedDueDate = billDates.dueDate;
+          }
+        }
+
+        const newTx: Transaction = {
+          id: generateId('tx-rec'),
+          workspace_id: rec.workspace_id,
+          account_id: effectiveAccountId,
+          category_id: rec.category_id,
+          payment_method_id: rec.payment_method_id,
+          credit_card_id: effectiveCardId || undefined,
+          credit_card_bill_id: billId || undefined,
+          recurring_transaction_id: rec.id,
+          description: rec.description,
+          amount: rec.amount,
+          type: rec.type,
+          transaction_date: currOccurrence,
+          due_date: calculatedDueDate,
+          status: 'pending',
+          paid_amount: 0,
+          created_at: new Date().toISOString(),
+        };
+        newTransactions.push(newTx);
+        processedSet.add(itemKey);
+        hasChanges = true;
+      }
+
+      const nextStep = stepNextOccurrence(currOccurrence, rec.start_date, rec.frequency, rec.interval_days);
+      if (rec.end_date && nextStep > rec.end_date) {
+        shouldDeactivate = true;
+        currOccurrence = nextStep;
+        break;
+      }
+      currOccurrence = nextStep;
+    }
+
+    if (rec.next_occurrence !== currOccurrence || shouldDeactivate) {
+      hasChanges = true;
+      updatedRecurring = updatedRecurring.map((r) =>
+        r.id === rec.id
+          ? {
+              ...r,
+              next_occurrence: currOccurrence,
+              active: shouldDeactivate ? false : r.active,
+            }
+          : r
+      );
+    }
+  }
+
+  return {
+    updatedRecurring,
+    newTransactions,
+    updatedBills,
+    hasChanges,
+  };
+}
+

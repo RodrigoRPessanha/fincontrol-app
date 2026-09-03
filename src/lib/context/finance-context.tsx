@@ -51,6 +51,7 @@ import {
   calculateCatchUpOccurrence,
   validateCategoryActive,
   validateTransactionAccount,
+  processRecurringBatchState,
 } from '../financial-engine';
 import { format } from 'date-fns';
 
@@ -364,142 +365,40 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     [allPaymentMethods, allCreditCards, allAccounts]
   );
 
-  // Processamento Reativo de Recorrências sem Loops com Desativação Semântica e Resolução de Cartão
+  // Processamento Reativo de Recorrências via função pura de transição de estado de produção
   const processPendingRecurring = useCallback(() => {
     if (!isLoaded) return;
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    let hasRecurringChanges = false;
-    let updatedRecurring = [...allRecurring];
-    let newTransactions: Transaction[] = [];
 
-    // 1. Passagem de desativação semântica para qualquer série cujo next_occurrence já ultrapassou end_date
-    updatedRecurring = updatedRecurring.map((r) => {
-      if (r.active && r.end_date && r.next_occurrence > r.end_date) {
-        hasRecurringChanges = true;
-        return { ...r, active: false };
-      }
-      return r;
+    const result = processRecurringBatchState({
+      recurring: allRecurring,
+      transactions: allTransactions,
+      bills: allCreditCardBills,
+      accounts: allAccounts,
+      paymentMethods: allPaymentMethods,
+      creditCards: allCreditCards,
+      categories: allCategories,
+      todayStr,
+      generateId,
     });
 
-    const recurringToProcess = updatedRecurring.filter(
-      (r) => r.active && r.auto_create && r.next_occurrence <= todayStr && (!r.end_date || r.next_occurrence <= r.end_date)
-    );
-
-    if (recurringToProcess.length > 0) {
-      const processedSet = new Set(
-        allTransactions.map((t) => `${t.recurring_transaction_id || ''}:${t.transaction_date}`)
-      );
-
-      for (const rec of recurringToProcess) {
-        let currOccurrence = rec.next_occurrence;
-        let iterations = 0;
-        let shouldDeactivate = false;
-
-        // Validação pura de integridade e regras de negócio para materialização (P1-01 V25)
-        const validation = validateRecurringMaterialization(
-          rec,
-          allAccounts,
-          allPaymentMethods,
-          allCreditCards,
-          allCategories,
-          rec.workspace_id
-        );
-
-        if (!validation.isValid) {
-          shouldDeactivate = true;
-          hasRecurringChanges = true;
-          updatedRecurring = updatedRecurring.map((r) =>
-            r.id === rec.id ? { ...r, active: false, suspended_reason: validation.reason } : r
-          );
-          continue;
-        }
-
-        const effectiveCardId = validation.effectiveCardId || null;
-        const effectiveAccountId = validation.effectiveAccountId || rec.account_id;
-
-        while (
-          currOccurrence <= todayStr &&
-          (!rec.end_date || currOccurrence <= rec.end_date) &&
-          iterations < 120
-        ) {
-          iterations++;
-          const itemKey = `${rec.id}:${currOccurrence}`;
-
-          if (!processedSet.has(itemKey)) {
-            let billId: string | null = null;
-            let calculatedDueDate = currOccurrence;
-
-            if (effectiveCardId) {
-              const card = allCreditCards.find((c) => c.id === effectiveCardId && c.workspace_id === rec.workspace_id);
-              if (card) {
-                const billDates = calculateCardBillDates(currOccurrence, card.closing_day, card.due_day);
-                billId = getOrCreateAndAddItemToBill(
-                  card.id,
-                  billDates.referenceMonth,
-                  billDates.closingDate,
-                  billDates.dueDate,
-                  rec.amount,
-                  rec.workspace_id
-                );
-                calculatedDueDate = billDates.dueDate;
-              }
-            }
-
-            const newTx: Transaction = {
-              id: generateId('tx-rec'),
-              workspace_id: rec.workspace_id,
-              account_id: effectiveAccountId,
-              category_id: rec.category_id,
-              payment_method_id: rec.payment_method_id,
-              credit_card_id: effectiveCardId || undefined,
-              credit_card_bill_id: billId,
-              recurring_transaction_id: rec.id,
-              description: rec.description,
-              amount: rec.amount,
-              type: rec.type,
-              transaction_date: currOccurrence,
-              due_date: calculatedDueDate,
-              status: 'pending',
-              paid_amount: 0,
-              created_at: new Date().toISOString(),
-            };
-            newTransactions.push(newTx);
-            processedSet.add(itemKey);
-            hasRecurringChanges = true;
-          }
-
-          const nextStep = stepNextOccurrence(currOccurrence, rec.start_date, rec.frequency, rec.interval_days);
-          if (rec.end_date && nextStep > rec.end_date) {
-            shouldDeactivate = true;
-            currOccurrence = nextStep;
-            break;
-          }
-          currOccurrence = nextStep;
-        }
-
-        if (rec.next_occurrence !== currOccurrence || shouldDeactivate) {
-          hasRecurringChanges = true;
-          updatedRecurring = updatedRecurring.map((r) =>
-            r.id === rec.id
-              ? {
-                  ...r,
-                  next_occurrence: currOccurrence,
-                  active: shouldDeactivate ? false : r.active,
-                }
-              : r
-          );
-        }
+    if (result.hasChanges) {
+      if (result.newTransactions.length > 0) {
+        setAllTransactions((prev) => [...result.newTransactions, ...prev]);
       }
-
-      if (newTransactions.length > 0) {
-        setAllTransactions((prev) => [...newTransactions, ...prev]);
-      }
+      setAllRecurring(result.updatedRecurring);
+      setAllCreditCardBills(result.updatedBills);
     }
-
-    if (hasRecurringChanges) {
-      setAllRecurring(updatedRecurring);
-    }
-  }, [isLoaded, allRecurring, allTransactions, allCreditCards, allAccounts, allPaymentMethods, allCategories, getOrCreateAndAddItemToBill]);
+  }, [
+    isLoaded,
+    allRecurring,
+    allTransactions,
+    allCreditCardBills,
+    allAccounts,
+    allPaymentMethods,
+    allCreditCards,
+    allCategories,
+  ]);
 
   // Executa processamento de recorrências SOMENTE após a conclusão da hidratação local (P1-02 V22/V23)
   useEffect(() => {
