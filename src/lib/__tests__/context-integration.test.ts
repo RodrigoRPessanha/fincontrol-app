@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { Account, Category, CreditCard, CreditCardBill, Payment, PaymentMethod, Transaction, Installment, RecurringTransaction } from '../types';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import { Account, Category, CreditCard, CreditCardBill, Payment, PaymentMethod, Transaction, Installment, RecurringTransaction, UpdateTransactionDTO } from '../types';
 import {
   calculateCardBillDates,
   splitInstallments,
@@ -19,6 +19,7 @@ import {
   calculateCatchUpOccurrence,
   validateCategoryActive,
   validateTransactionAccount,
+  processRecurringBatchState,
 } from '../financial-engine';
 import { sanitizeCsvCell } from '../utils';
 
@@ -1065,7 +1066,7 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(res.reason).toBe('Categoria vinculada inativa ou inválida.');
   });
 
-  it('deve executar pipeline de materialização do Provider: suspender séries inválidas, avançar série válida, criar exatamente 1 transação e não alterar faturas (Wiring Real Completo)', () => {
+  it('deve executar pipeline de produção processRecurringBatchState: suspender séries inválidas (divergente, receita em cartão, zero, negativo, NaN), avançar válidas e atualizar fatura de cartão (Wiring Real de Produção)', () => {
     const paymentMethods: PaymentMethod[] = [
       { id: 'pm-divergent', name: 'Método com Conta A', type: 'debit_card', workspace_id: 'ws-1', active: true, linked_account_id: 'acc-a', created_at: '2026-01-01' },
       { id: 'pm-card', name: 'Método Cartão', type: 'credit_card', workspace_id: 'ws-1', active: true, credit_card_id: 'card-1', created_at: '2026-01-01' },
@@ -1079,7 +1080,7 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
       { id: 'card-1', workspace_id: 'ws-1', name: 'Cartão 1', institution: 'Nu', closing_day: 5, due_day: 12, credit_limit: 5000, color: '#000', active: true, created_at: '2026-01-01' },
     ];
 
-    let allBills: CreditCardBill[] = [
+    const initialBills: CreditCardBill[] = [
       {
         id: 'bill-card-1-2026-08',
         credit_card_id: 'card-1',
@@ -1094,7 +1095,7 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
       },
     ];
 
-    let allTransactions: Transaction[] = [
+    const initialTransactions: Transaction[] = [
       {
         id: 'tx-existing',
         workspace_id: 'ws-1',
@@ -1108,7 +1109,7 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
       },
     ];
 
-    let allRecurring: RecurringTransaction[] = [
+    const initialRecurring: RecurringTransaction[] = [
       {
         id: 'rec-div',
         workspace_id: 'ws-1',
@@ -1139,9 +1140,9 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
         created_at: '2026-01-01',
       },
       {
-        id: 'rec-invalid-amount',
+        id: 'rec-invalid-zero',
         workspace_id: 'ws-1',
-        description: 'Série com Montante Inválido',
+        description: 'Série com Montante Zero',
         amount: 0,
         type: 'expense',
         frequency: 'monthly',
@@ -1153,9 +1154,37 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
         created_at: '2026-01-01',
       },
       {
-        id: 'rec-valid',
+        id: 'rec-invalid-negative',
         workspace_id: 'ws-1',
-        description: 'Série Válida',
+        description: 'Série com Montante Negativo',
+        amount: -50,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-valid',
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-invalid-nan',
+        workspace_id: 'ws-1',
+        description: 'Série com Montante NaN',
+        amount: NaN,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-valid',
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-valid-acc',
+        workspace_id: 'ws-1',
+        description: 'Assinatura Débito Válida',
         amount: 150,
         type: 'expense',
         frequency: 'monthly',
@@ -1167,123 +1196,118 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
         account_id: 'acc-a',
         created_at: '2026-01-01',
       },
-    ];
-
-    // Snapshot antes do ciclo
-    const initialTxCount = allTransactions.length;
-    const initialBillTotal = allBills[0].total_amount;
-
-    // Execução do pipeline de materialização do FinanceProvider
-    const todayStr = '2026-08-20';
-    const newTransactions: Transaction[] = [];
-
-    allRecurring = allRecurring.map((rec) => {
-      if (!rec.active || !rec.auto_create || rec.next_occurrence > todayStr) return rec;
-
-      const validation = validateRecurringMaterialization(
-        rec,
-        accounts,
-        paymentMethods,
-        creditCards,
-        [],
-        rec.workspace_id
-      );
-
-      if (!validation.isValid) {
-        return {
-          ...rec,
-          active: false,
-          suspended_reason: validation.reason,
-        };
-      }
-
-      // Materializa apenas se válida
-      newTransactions.push({
-        id: `tx-rec-${rec.id}`,
-        workspace_id: rec.workspace_id,
-        account_id: validation.effectiveAccountId || rec.account_id,
-        payment_method_id: rec.payment_method_id,
-        description: rec.description,
-        amount: rec.amount,
-        type: rec.type,
-        transaction_date: rec.next_occurrence,
-        due_date: rec.next_occurrence,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-      });
-
-      return {
-        ...rec,
-        next_occurrence: stepNextOccurrence(rec.next_occurrence, rec.start_date, rec.frequency),
-      };
-    });
-
-    allTransactions = [...newTransactions, ...allTransactions];
-
-    // 1. Prova suspensão exata das 3 séries inválidas com motivos explícitos
-    const recDivAfter = allRecurring.find((r) => r.id === 'rec-div');
-    expect(recDivAfter?.active).toBe(false);
-    expect(recDivAfter?.suspended_reason).toBe('A conta bancária informada diverge da conta bancária vinculada a este método de pagamento.');
-
-    const recIncAfter = allRecurring.find((r) => r.id === 'rec-inc-card');
-    expect(recIncAfter?.active).toBe(false);
-    expect(recIncAfter?.suspended_reason).toBe('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
-
-    const recAmountAfter = allRecurring.find((r) => r.id === 'rec-invalid-amount');
-    expect(recAmountAfter?.active).toBe(false);
-    expect(recAmountAfter?.suspended_reason).toBe('O valor da recorrência deve ser maior que zero.');
-
-    // 2. Prova avanço da série válida
-    const recValidAfter = allRecurring.find((r) => r.id === 'rec-valid');
-    expect(recValidAfter?.active).toBe(true);
-    expect(recValidAfter?.next_occurrence).toBe('2026-09-01');
-
-    // 3. Prova contagem estrita: exatamente +1 transação criada (somente para rec-valid)
-    expect(allTransactions).toHaveLength(initialTxCount + 1);
-    expect(allTransactions[0].description).toBe('Série Válida');
-    expect(allTransactions[0].account_id).toBe('acc-a');
-
-    // 4. Prova que as faturas permaneceram estritamente inalteradas
-    expect(allBills[0].total_amount).toBe(initialBillTotal);
-  });
-
-  it('deve garantir que updateTransaction não altera account_id de transação existente (P1-01 Regressão)', () => {
-    const activeWorkspaceId = 'ws-1';
-    let transactions: Transaction[] = [
       {
-        id: 'tx-1',
+        id: 'rec-valid-card',
         workspace_id: 'ws-1',
-        account_id: 'acc-original',
-        description: 'Transação Paga',
-        amount: 300,
+        description: 'Assinatura Cartão Válida',
+        amount: 80,
         type: 'expense',
-        transaction_date: '2026-08-01',
-        due_date: '2026-08-01',
-        status: 'paid',
-        paid_amount: 300,
-        created_at: '2026-08-01',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-card',
+        credit_card_id: 'card-1',
+        created_at: '2026-01-01',
       },
     ];
 
-    const updateTransaction = (id: string, data: { description?: string; amount?: number; notes?: string }) => {
-      transactions = transactions.map((t) => {
-        if (t.id === id && t.workspace_id === activeWorkspaceId) {
-          return {
-            ...t,
-            description: data.description !== undefined ? data.description.trim() : t.description,
-            amount: data.amount !== undefined ? data.amount : t.amount,
-            notes: data.notes !== undefined ? data.notes : t.notes,
-          };
-        }
-        return t;
-      });
-    };
+    // Execução da função pura real de produção que alimenta o FinanceProvider
+    const result = processRecurringBatchState({
+      recurring: initialRecurring,
+      transactions: initialTransactions,
+      bills: initialBills,
+      accounts,
+      paymentMethods,
+      creditCards,
+      categories: [],
+      todayStr: '2026-08-20',
+      generateId: (prefix: string) => `${prefix}-test`,
+    });
 
-    // Atualiza descrição
-    updateTransaction('tx-1', { description: 'Transação Atualizada' });
-    expect(transactions[0].description).toBe('Transação Atualizada');
-    // Garante que account_id permanece strictly intocado
-    expect(transactions[0].account_id).toBe('acc-original');
+    expect(result.hasChanges).toBe(true);
+
+    // 1. Prova suspensão exata das 5 séries inválidas com motivos explícitos
+    const recDivAfter = result.updatedRecurring.find((r) => r.id === 'rec-div');
+    expect(recDivAfter?.active).toBe(false);
+    expect(recDivAfter?.suspended_reason).toBe('A conta bancária informada diverge da conta bancária vinculada a este método de pagamento.');
+
+    const recIncAfter = result.updatedRecurring.find((r) => r.id === 'rec-inc-card');
+    expect(recIncAfter?.active).toBe(false);
+    expect(recIncAfter?.suspended_reason).toBe('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
+
+    const recZeroAfter = result.updatedRecurring.find((r) => r.id === 'rec-invalid-zero');
+    expect(recZeroAfter?.active).toBe(false);
+    expect(recZeroAfter?.suspended_reason).toBe('O valor da recorrência deve ser maior que zero.');
+
+    const recNegAfter = result.updatedRecurring.find((r) => r.id === 'rec-invalid-negative');
+    expect(recNegAfter?.active).toBe(false);
+    expect(recNegAfter?.suspended_reason).toBe('O valor da recorrência deve ser maior que zero.');
+
+    const recNanAfter = result.updatedRecurring.find((r) => r.id === 'rec-invalid-nan');
+    expect(recNanAfter?.active).toBe(false);
+    expect(recNanAfter?.suspended_reason).toBe('O valor da recorrência deve ser maior que zero.');
+
+    // 2. Prova avanço das 2 séries válidas
+    const recAccAfter = result.updatedRecurring.find((r) => r.id === 'rec-valid-acc');
+    expect(recAccAfter?.active).toBe(true);
+    expect(recAccAfter?.next_occurrence).toBe('2026-09-01');
+
+    const recCardAfter = result.updatedRecurring.find((r) => r.id === 'rec-valid-card');
+    expect(recCardAfter?.active).toBe(true);
+    expect(recCardAfter?.next_occurrence).toBe('2026-09-01');
+
+    // 3. Prova contagem estrita de transações geradas: exatamente 2 (zero para as 5 inválidas)
+    expect(result.newTransactions).toHaveLength(2);
+    const txAcc = result.newTransactions.find((t) => t.recurring_transaction_id === 'rec-valid-acc');
+    expect(txAcc).toBeDefined();
+    expect(txAcc?.account_id).toBe('acc-a');
+    expect(txAcc?.credit_card_bill_id).toBeUndefined();
+
+    const txCard = result.newTransactions.find((t) => t.recurring_transaction_id === 'rec-valid-card');
+    expect(txCard).toBeDefined();
+    expect(txCard?.credit_card_id).toBe('card-1');
+    expect(txCard?.credit_card_bill_id).toBe('bill-card-1-2026-08');
+
+    // 4. Prova mutação na fatura de cartão da série válida e proteção contra as séries suspensas
+    const targetBill = result.updatedBills.find((b) => b.id === 'bill-card-1-2026-08');
+    // Saldo inicial 500 + 80 da série válida = 580 (zero mutações das 5 inválidas)
+    expect(targetBill?.total_amount).toBe(580);
+
+    // 5. Prova idempotência: executar ciclo novamente com o estado resultante não deve gerar duplicações
+    const resultCycle2 = processRecurringBatchState({
+      recurring: result.updatedRecurring,
+      transactions: [...result.newTransactions, ...initialTransactions],
+      bills: result.updatedBills,
+      accounts,
+      paymentMethods,
+      creditCards,
+      categories: [],
+      todayStr: '2026-08-20',
+    });
+    expect(resultCycle2.hasChanges).toBe(false);
+    expect(resultCycle2.newTransactions).toHaveLength(0);
+  });
+
+  it('deve garantir tipagem estrita de UpdateTransactionDTO em tempo de compilação com expectTypeOf (P2-01)', () => {
+    // Prova em nível de tipo de compilação que campos restritos não existem no DTO
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('account_id');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('status');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('paid_amount');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('paid_at');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('workspace_id');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('id');
+
+    // Prova que apenas campos editáveis seguros são aceitos
+    expectTypeOf<UpdateTransactionDTO>().toMatchTypeOf<{
+      description?: string;
+      amount?: number;
+      category_id?: string | null;
+      due_date?: string;
+      transaction_date?: string;
+      notes?: string | null;
+    }>();
   });
 
   it('deve proteger campos imutáveis (workspace_id, id, created_at) contra sobrescrita em updateAccount, updateCreditCard, updateTransaction e updateGoal', () => {
