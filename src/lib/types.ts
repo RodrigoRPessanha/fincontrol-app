@@ -140,7 +140,6 @@ export type UpdateTransactionDTO = {
   description?: string;
   amount?: number;
   category_id?: string | null;
-  account_id?: string | null;
   due_date?: string;
   transaction_date?: string;
   notes?: string | null;
