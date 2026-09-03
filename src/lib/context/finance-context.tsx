@@ -38,7 +38,6 @@ import {
 import {
   calculateCardBillDates,
   splitInstallments,
-  getActualDaysInMonth,
   isValidCustomInterval,
   validateCreditCardResolution,
   validateTransactionBusinessRules,
@@ -53,7 +52,7 @@ import {
   validateCategoryActive,
   validateTransactionAccount,
 } from '../financial-engine';
-import { format, parseISO, addDays } from 'date-fns';
+import { format } from 'date-fns';
 
 interface FinanceContextType {
   isLoaded: boolean;
@@ -416,6 +415,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         }
 
         const effectiveCardId = validation.effectiveCardId || null;
+        const effectiveAccountId = validation.effectiveAccountId || rec.account_id;
 
         while (
           currOccurrence <= todayStr &&
@@ -448,7 +448,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             const newTx: Transaction = {
               id: generateId('tx-rec'),
               workspace_id: rec.workspace_id,
-              account_id: rec.account_id,
+              account_id: effectiveAccountId,
               category_id: rec.category_id,
               payment_method_id: rec.payment_method_id,
               credit_card_id: effectiveCardId || undefined,
@@ -976,10 +976,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       validateActiveCategory(activeWorkspace.id, data.category_id);
     }
 
-    if (data.account_id !== undefined) {
-      validateTransactionAccount(data.account_id, allAccounts, activeWorkspace.id);
-    }
-
     setAllTransactions((prev) =>
       prev.map((t) => {
         if (t.id === id && t.workspace_id === activeWorkspace.id) {
@@ -988,7 +984,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             description: data.description !== undefined ? data.description.trim() : t.description,
             amount: data.amount !== undefined ? data.amount : t.amount,
             category_id: data.category_id !== undefined ? data.category_id : t.category_id,
-            account_id: data.account_id !== undefined ? (data.account_id || undefined) : t.account_id,
             due_date: data.due_date !== undefined ? data.due_date : t.due_date,
             transaction_date: data.transaction_date !== undefined ? data.transaction_date : t.transaction_date,
             notes: data.notes !== undefined ? data.notes : t.notes,
@@ -1092,8 +1087,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       throw new Error('O valor total da compra parcelada deve ser maior que zero.');
     }
 
-    if (data.account_id) {
-      const a = allAccounts.find((acc) => acc.id === data.account_id && acc.workspace_id === activeWorkspace.id);
+    const effectiveAccountId = resolveTransactionAccountId(
+      data.payment_method_id,
+      data.account_id,
+      allPaymentMethods,
+      activeWorkspace.id
+    );
+
+    if (effectiveAccountId) {
+      const a = allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === activeWorkspace.id);
       if (!a) throw new Error('Conta bancária informada não pertence ao workspace ativo.');
       if (a.active === false) throw new Error('A conta bancária informada está inativa.');
     }
@@ -1104,7 +1106,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         type: 'expense',
         credit_card_id: effectiveCardId || data.credit_card_id,
         payment_method_id: data.payment_method_id,
-        account_id: data.account_id,
+        account_id: effectiveAccountId,
       },
       allPaymentMethods,
       activeWorkspace.id
@@ -1120,17 +1122,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     }
 
     const newPurchase: Purchase = {
+      ...data,
       id: generateId('pur'),
       workspace_id: activeWorkspace.id,
-      description: data.description,
-      total_amount: data.total_amount,
-      installment_count: data.installment_count,
       paid_installments_count: paidCount,
-      purchase_date: data.purchase_date,
       credit_card_id: effectiveCardId,
-      category_id: data.category_id,
-      account_id: data.account_id,
-      payment_method_id: data.payment_method_id,
+      account_id: effectiveAccountId,
       created_by: 'usr-1',
       created_at: new Date().toISOString(),
     };
@@ -1164,14 +1161,14 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     });
 
     const generatedPayments: Payment[] = [];
-    if (data.account_id && paidCount > 0) {
+    if (effectiveAccountId && paidCount > 0) {
       generatedInstallments.forEach((inst, idx) => {
         if (split[idx]?.isPaid) {
           generatedPayments.push({
             id: generateId('pay'),
             workspace_id: activeWorkspace.id,
             installment_id: inst.id,
-            account_id: data.account_id!,
+            account_id: effectiveAccountId,
             payment_method_id: data.payment_method_id,
             amount: inst.amount,
             payment_date: inst.paid_at || inst.due_date,
@@ -1392,8 +1389,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Intervalo em dias inválido para recorrência personalizada (deve ser número inteiro entre 1 e 3650 dias).');
       }
     }
-    if (data.account_id) {
-      const a = allAccounts.find((acc) => acc.id === data.account_id && acc.workspace_id === activeWorkspace.id);
+    const effectiveAccountId = resolveTransactionAccountId(
+      data.payment_method_id,
+      data.account_id,
+      allPaymentMethods,
+      activeWorkspace.id
+    );
+
+    if (effectiveAccountId) {
+      const a = allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === activeWorkspace.id);
       if (!a) throw new Error('Conta bancária informada não pertence ao workspace ativo.');
       if (a.active === false) throw new Error('A conta bancária informada está inativa.');
     }
@@ -1403,7 +1407,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         type: data.type,
         credit_card_id: effectiveCardId || data.credit_card_id,
         payment_method_id: data.payment_method_id,
-        account_id: data.account_id,
+        account_id: effectiveAccountId,
       },
       allPaymentMethods,
       activeWorkspace.id
@@ -1414,6 +1418,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       ...data,
       id: generateId('rec'),
       workspace_id: activeWorkspace.id,
+      account_id: effectiveAccountId,
       credit_card_id: effectiveCardId || undefined,
       active: true,
       suspended_reason: null,

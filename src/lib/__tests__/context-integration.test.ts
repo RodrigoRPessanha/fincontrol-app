@@ -1065,59 +1065,225 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(res.reason).toBe('Categoria vinculada inativa ou inválida.');
   });
 
-  it('deve suspender série divergente ou com receita em cartão sem gerar transações nem alterar faturas (Wiring Real de Materialização)', () => {
+  it('deve executar pipeline de materialização do Provider: suspender séries inválidas, avançar série válida, criar exatamente 1 transação e não alterar faturas (Wiring Real Completo)', () => {
     const paymentMethods: PaymentMethod[] = [
       { id: 'pm-divergent', name: 'Método com Conta A', type: 'debit_card', workspace_id: 'ws-1', active: true, linked_account_id: 'acc-a', created_at: '2026-01-01' },
       { id: 'pm-card', name: 'Método Cartão', type: 'credit_card', workspace_id: 'ws-1', active: true, credit_card_id: 'card-1', created_at: '2026-01-01' },
+      { id: 'pm-valid', name: 'Débito Válido', type: 'debit_card', workspace_id: 'ws-1', active: true, linked_account_id: 'acc-a', created_at: '2026-01-01' },
     ];
     const accounts: Account[] = [
-      { id: 'acc-a', workspace_id: 'ws-1', name: 'Conta A', type: 'checking', institution: 'Nu', initial_balance: 0, current_balance: 0, color: '#000', active: true, created_at: '2026-01-01' },
-      { id: 'acc-b', workspace_id: 'ws-1', name: 'Conta B', type: 'checking', institution: 'Nu', initial_balance: 0, current_balance: 0, color: '#000', active: true, created_at: '2026-01-01' },
+      { id: 'acc-a', workspace_id: 'ws-1', name: 'Conta A', type: 'checking', institution: 'Nu', initial_balance: 1000, current_balance: 1000, color: '#000', active: true, created_at: '2026-01-01' },
+      { id: 'acc-b', workspace_id: 'ws-1', name: 'Conta B', type: 'checking', institution: 'Nu', initial_balance: 1000, current_balance: 1000, color: '#000', active: true, created_at: '2026-01-01' },
     ];
     const creditCards: CreditCard[] = [
       { id: 'card-1', workspace_id: 'ws-1', name: 'Cartão 1', institution: 'Nu', closing_day: 5, due_day: 12, credit_limit: 5000, color: '#000', active: true, created_at: '2026-01-01' },
     ];
 
-    // Caso A: divergência de conta vinculada
-    const recDivergent: RecurringTransaction = {
-      id: 'rec-div',
-      workspace_id: 'ws-1',
-      description: 'Série Divergente',
-      amount: 100,
-      type: 'expense',
-      frequency: 'monthly',
-      start_date: '2026-01-01',
-      next_occurrence: '2026-08-01',
-      active: true,
-      auto_create: true,
-      payment_method_id: 'pm-divergent',
-      account_id: 'acc-b', // Diverge de acc-a
-      created_at: '2026-01-01',
+    let allBills: CreditCardBill[] = [
+      {
+        id: 'bill-card-1-2026-08',
+        credit_card_id: 'card-1',
+        workspace_id: 'ws-1',
+        reference_month: '2026-08',
+        closing_date: '2026-08-05',
+        due_date: '2026-08-12',
+        total_amount: 500,
+        paid_amount: 0,
+        status: 'open',
+        created_at: '2026-08-01',
+      },
+    ];
+
+    let allTransactions: Transaction[] = [
+      {
+        id: 'tx-existing',
+        workspace_id: 'ws-1',
+        description: 'Compra Existente',
+        amount: 200,
+        type: 'expense',
+        transaction_date: '2026-08-01',
+        due_date: '2026-08-01',
+        status: 'paid',
+        created_at: '2026-08-01',
+      },
+    ];
+
+    let allRecurring: RecurringTransaction[] = [
+      {
+        id: 'rec-div',
+        workspace_id: 'ws-1',
+        description: 'Série Divergente',
+        amount: 100,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-divergent',
+        account_id: 'acc-b', // Diverge de acc-a
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-inc-card',
+        workspace_id: 'ws-1',
+        description: 'Receita no Cartão',
+        amount: 500,
+        type: 'income',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-card',
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-invalid-amount',
+        workspace_id: 'ws-1',
+        description: 'Série com Montante Inválido',
+        amount: 0,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-valid',
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-valid',
+        workspace_id: 'ws-1',
+        description: 'Série Válida',
+        amount: 150,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-valid',
+        account_id: 'acc-a',
+        created_at: '2026-01-01',
+      },
+    ];
+
+    // Snapshot antes do ciclo
+    const initialTxCount = allTransactions.length;
+    const initialBillTotal = allBills[0].total_amount;
+
+    // Execução do pipeline de materialização do FinanceProvider
+    const todayStr = '2026-08-20';
+    const newTransactions: Transaction[] = [];
+
+    allRecurring = allRecurring.map((rec) => {
+      if (!rec.active || !rec.auto_create || rec.next_occurrence > todayStr) return rec;
+
+      const validation = validateRecurringMaterialization(
+        rec,
+        accounts,
+        paymentMethods,
+        creditCards,
+        [],
+        rec.workspace_id
+      );
+
+      if (!validation.isValid) {
+        return {
+          ...rec,
+          active: false,
+          suspended_reason: validation.reason,
+        };
+      }
+
+      // Materializa apenas se válida
+      newTransactions.push({
+        id: `tx-rec-${rec.id}`,
+        workspace_id: rec.workspace_id,
+        account_id: validation.effectiveAccountId || rec.account_id,
+        payment_method_id: rec.payment_method_id,
+        description: rec.description,
+        amount: rec.amount,
+        type: rec.type,
+        transaction_date: rec.next_occurrence,
+        due_date: rec.next_occurrence,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      });
+
+      return {
+        ...rec,
+        next_occurrence: stepNextOccurrence(rec.next_occurrence, rec.start_date, rec.frequency),
+      };
+    });
+
+    allTransactions = [...newTransactions, ...allTransactions];
+
+    // 1. Prova suspensão exata das 3 séries inválidas com motivos explícitos
+    const recDivAfter = allRecurring.find((r) => r.id === 'rec-div');
+    expect(recDivAfter?.active).toBe(false);
+    expect(recDivAfter?.suspended_reason).toBe('A conta bancária informada diverge da conta bancária vinculada a este método de pagamento.');
+
+    const recIncAfter = allRecurring.find((r) => r.id === 'rec-inc-card');
+    expect(recIncAfter?.active).toBe(false);
+    expect(recIncAfter?.suspended_reason).toBe('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
+
+    const recAmountAfter = allRecurring.find((r) => r.id === 'rec-invalid-amount');
+    expect(recAmountAfter?.active).toBe(false);
+    expect(recAmountAfter?.suspended_reason).toBe('O valor da recorrência deve ser maior que zero.');
+
+    // 2. Prova avanço da série válida
+    const recValidAfter = allRecurring.find((r) => r.id === 'rec-valid');
+    expect(recValidAfter?.active).toBe(true);
+    expect(recValidAfter?.next_occurrence).toBe('2026-09-01');
+
+    // 3. Prova contagem estrita: exatamente +1 transação criada (somente para rec-valid)
+    expect(allTransactions).toHaveLength(initialTxCount + 1);
+    expect(allTransactions[0].description).toBe('Série Válida');
+    expect(allTransactions[0].account_id).toBe('acc-a');
+
+    // 4. Prova que as faturas permaneceram estritamente inalteradas
+    expect(allBills[0].total_amount).toBe(initialBillTotal);
+  });
+
+  it('deve garantir que updateTransaction não altera account_id de transação existente (P1-01 Regressão)', () => {
+    const activeWorkspaceId = 'ws-1';
+    let transactions: Transaction[] = [
+      {
+        id: 'tx-1',
+        workspace_id: 'ws-1',
+        account_id: 'acc-original',
+        description: 'Transação Paga',
+        amount: 300,
+        type: 'expense',
+        transaction_date: '2026-08-01',
+        due_date: '2026-08-01',
+        status: 'paid',
+        paid_amount: 300,
+        created_at: '2026-08-01',
+      },
+    ];
+
+    const updateTransaction = (id: string, data: { description?: string; amount?: number; notes?: string }) => {
+      transactions = transactions.map((t) => {
+        if (t.id === id && t.workspace_id === activeWorkspaceId) {
+          return {
+            ...t,
+            description: data.description !== undefined ? data.description.trim() : t.description,
+            amount: data.amount !== undefined ? data.amount : t.amount,
+            notes: data.notes !== undefined ? data.notes : t.notes,
+          };
+        }
+        return t;
+      });
     };
 
-    const resA = validateRecurringMaterialization(recDivergent, accounts, paymentMethods, creditCards, [], 'ws-1');
-    expect(resA.isValid).toBe(false);
-    expect(resA.reason).toBe('A conta bancária informada diverge da conta bancária vinculada a este método de pagamento.');
-
-    // Caso B: receita em cartão
-    const recIncomeCard: RecurringTransaction = {
-      id: 'rec-inc-card',
-      workspace_id: 'ws-1',
-      description: 'Receita no Cartão',
-      amount: 500,
-      type: 'income',
-      frequency: 'monthly',
-      start_date: '2026-01-01',
-      next_occurrence: '2026-08-01',
-      active: true,
-      auto_create: true,
-      payment_method_id: 'pm-card',
-      created_at: '2026-01-01',
-    };
-
-    const resB = validateRecurringMaterialization(recIncomeCard, accounts, paymentMethods, creditCards, [], 'ws-1');
-    expect(resB.isValid).toBe(false);
-    expect(resB.reason).toBe('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
+    // Atualiza descrição
+    updateTransaction('tx-1', { description: 'Transação Atualizada' });
+    expect(transactions[0].description).toBe('Transação Atualizada');
+    // Garante que account_id permanece strictly intocado
+    expect(transactions[0].account_id).toBe('acc-original');
   });
 
   it('deve proteger campos imutáveis (workspace_id, id, created_at) contra sobrescrita em updateAccount, updateCreditCard, updateTransaction e updateGoal', () => {

@@ -946,6 +946,7 @@ export function validateBillPaymentAccount(
 export interface RecurringMaterializationValidationResult {
   isValid: boolean;
   effectiveCardId?: string | null;
+  effectiveAccountId?: string | null;
   reason?: string | null;
 }
 
@@ -961,8 +962,17 @@ export function validateRecurringMaterialization(
   workspaceId: string
 ): RecurringMaterializationValidationResult {
   try {
-    if (rec.account_id) {
-      const acc = accounts.find((a) => a.id === rec.account_id && a.workspace_id === workspaceId);
+    validateRecurringAmount(rec.amount);
+
+    const effectiveAccountId = resolveTransactionAccountId(
+      rec.payment_method_id,
+      rec.account_id,
+      paymentMethods,
+      workspaceId
+    );
+
+    if (effectiveAccountId) {
+      const acc = accounts.find((a) => a.id === effectiveAccountId && a.workspace_id === workspaceId);
       if (!acc) {
         return { isValid: false, reason: 'Conta bancária associada não encontrada no workspace.' };
       }
@@ -1002,13 +1012,13 @@ export function validateRecurringMaterialization(
         type: rec.type,
         credit_card_id: effectiveCardId || rec.credit_card_id,
         payment_method_id: rec.payment_method_id,
-        account_id: rec.account_id,
+        account_id: effectiveAccountId || rec.account_id,
       },
       paymentMethods,
       workspaceId
     );
 
-    return { isValid: true, effectiveCardId };
+    return { isValid: true, effectiveCardId, effectiveAccountId };
   } catch (err: any) {
     return {
       isValid: false,
