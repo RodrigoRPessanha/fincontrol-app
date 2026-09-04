@@ -277,6 +277,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const targetWsId = wsId || activeWorkspaceId;
       const targetBillId = `bill-${cardId}-${referenceMonth}`;
 
+      const existingBill = allCreditCardBills.find(
+        (b) =>
+          b.credit_card_id === cardId &&
+          b.reference_month === referenceMonth &&
+          b.workspace_id === targetWsId
+      );
+
+      const returnedBillId = existingBill ? existingBill.id : targetBillId;
+
       setAllCreditCardBills((prev) => {
         const existingIndex = prev.findIndex(
           (b) =>
@@ -319,9 +328,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-      return targetBillId;
+      return returnedBillId;
     },
-    [activeWorkspaceId]
+    [activeWorkspaceId, allCreditCardBills]
   );
 
   // Helper centralizado para validar categoria/subcategoria ativa e de mesmo workspace
