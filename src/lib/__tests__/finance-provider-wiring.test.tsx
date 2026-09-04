@@ -353,25 +353,127 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
       /Valor total da fatura/i
     );
 
-    // 3. Robustez contra paid_amount corrompido em faturas legadas
+    // 3. Robustez contra paid_amount corrompido em faturas legadas (reconcileBillAfterItemDeletion)
     expect(() => reconcileBillAfterItemDeletion({ ...sampleBill, paid_amount: NaN }, 50)).toThrow(
       /Valor pago da fatura corrompido/i
     );
     expect(() => reconcileBillAfterItemDeletion({ ...sampleBill, paid_amount: -20 }, 50)).toThrow(
       /Valor pago da fatura corrompido/i
     );
+  });
 
-    // resolveOrCreateCreditCardBill com fatura legada de paid_amount corrompido normaliza com resiliência
-    const resCorrupted = resolveOrCreateCreditCardBill({
-      bills: [{ ...sampleBill, paid_amount: -50 as any }],
+  it('deve rejeitar paid_amount corrompido e impedir status pago com saldo zero em resolveOrCreateCreditCardBill (P1-01 V32)', () => {
+    const corruptedPaidBill: CreditCardBill = {
+      id: 'b-corrupted',
+      credit_card_id: 'card-1',
+      workspace_id: 'ws-1',
+      reference_month: '2026-08',
+      closing_date: '2026-08-05',
+      due_date: '2026-08-12',
+      total_amount: 200,
+      paid_amount: NaN,
+      status: 'paid',
+      created_at: '2026-08-01',
+    };
+
+    // Teste regressivo mínimo exigido pela auditoria V31 (P1):
+    // 1. Rejeição explícita de fatura com paid_amount = NaN
+    expect(() =>
+      resolveOrCreateCreditCardBill({
+        bills: [corruptedPaidBill],
+        cardId: 'card-1',
+        referenceMonth: '2026-08',
+        closingDate: '2026-08-05',
+        dueDate: '2026-08-12',
+        amount: 100,
+        workspaceId: 'ws-1',
+      })
+    ).toThrow(/Valor pago da fatura existente corrompido/i);
+
+    // 2. Rejeição explícita de fatura com paid_amount negativo (-1)
+    expect(() =>
+      resolveOrCreateCreditCardBill({
+        bills: [{ ...corruptedPaidBill, paid_amount: -1, status: 'partially_paid' }],
+        cardId: 'card-1',
+        referenceMonth: '2026-08',
+        closingDate: '2026-08-05',
+        dueDate: '2026-08-12',
+        amount: 100,
+        workspaceId: 'ws-1',
+      })
+    ).toThrow(/Valor pago da fatura existente corrompido/i);
+
+    // 3. Garantia anti-status inconsistente: se paid_amount for 0 mas status legado for 'paid',
+    // ao adicionar nova despesa unpaid, o status NÃO PODE ser 'paid' nem 'partially_paid'
+    const legacyZeroPaidBill: CreditCardBill = {
+      ...corruptedPaidBill,
+      paid_amount: 0,
+      status: 'paid', // Status inconsistente com paid_amount = 0
+    };
+    const resSanitized = resolveOrCreateCreditCardBill({
+      bills: [legacyZeroPaidBill],
       cardId: 'card-1',
       referenceMonth: '2026-08',
       closingDate: '2026-08-05',
       dueDate: '2026-08-12',
       amount: 100,
       workspaceId: 'ws-1',
+      isPaid: false,
     });
-    expect(resCorrupted.updatedBills[0].paid_amount).toBe(0);
-    expect(resCorrupted.updatedBills[0].total_amount).toBe(300);
+    expect(resSanitized.updatedBills[0].total_amount).toBe(300);
+    expect(resSanitized.updatedBills[0].paid_amount).toBe(0);
+    expect(resSanitized.updatedBills[0].status).toBe('open'); // Normalizado com sucesso!
+  });
+
+  it('deve executar updateCreditCard e depositGoal através das APIs reais do FinanceProvider (P2-01)', async () => {
+    storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+    const { getCtx } = await mountProvider();
+    expect(getCtx().isLoaded).toBe(true);
+
+    // 1. updateCreditCard real no Provider
+    const card = getCtx().creditCards[0];
+    expect(card).toBeDefined();
+    await act(async () => {
+      getCtx().updateCreditCard(card.id, {
+        name: 'Cartão Atualizado Real',
+        credit_limit: 9500,
+      });
+    });
+    const updatedCard = getCtx().creditCards.find((c) => c.id === card.id);
+    expect(updatedCard?.name).toBe('Cartão Atualizado Real');
+    expect(updatedCard?.credit_limit).toBe(9500);
+
+    // 2. depositGoal real no Provider
+    const acc = getCtx().accounts.find((a) => a.active);
+    expect(acc).toBeDefined();
+    const initialBalance = acc!.current_balance;
+
+    let createdGoal: any;
+    await act(async () => {
+      createdGoal = getCtx().addGoal({
+        name: 'Viagem dos Sonhos',
+        target_amount: 5000,
+        current_amount: 1000,
+        color: '#10b981',
+        icon: 'plane',
+        status: 'in_progress',
+      });
+    });
+
+    // Depósito válido de 500 na meta debitando da conta
+    await act(async () => {
+      getCtx().depositGoal(createdGoal.id, 500, acc!.id);
+    });
+
+    const goalAfter = getCtx().goals.find((g) => g.id === createdGoal.id);
+    expect(goalAfter?.current_amount).toBe(1500);
+
+    const accAfter = getCtx().accounts.find((a) => a.id === acc!.id);
+    expect(accAfter?.current_balance).toBe(initialBalance - 500);
+
+    // Depósito com valor inválido deve rejeitar
+    expect(() => getCtx().depositGoal(createdGoal.id, 0, acc!.id)).toThrow(/Valor inválido/i);
+    expect(() => getCtx().depositGoal(createdGoal.id, -100, acc!.id)).toThrow(/Valor inválido/i);
   });
 });

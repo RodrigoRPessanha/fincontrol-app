@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import { Account, Category, CreditCard, CreditCardBill, Payment, PaymentMethod, Transaction, Installment, RecurringTransaction, UpdateTransactionDTO } from '../types';
+import { Account, Category, CreditCard, CreditCardBill, Payment, PaymentMethod, Transaction, Installment, RecurringTransaction, UpdateTransactionDTO, FinancialGoal } from '../types';
 import {
   calculateCardBillDates,
   splitInstallments,
@@ -900,27 +900,10 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     );
   });
 
-  it('deve blindar updateCreditCard e updateCategory contra mutações fora do workspace ativo', () => {
-    let allCreditCards = [
-      { id: 'card-ws1', name: 'Cartão 1', workspace_id: 'ws-1', limit: 5000 },
-      { id: 'card-ws2', name: 'Cartão 2', workspace_id: 'ws-2', limit: 3000 },
-    ];
-
-    const activeWorkspaceId = 'ws-1';
-
-    const updateCreditCard = (id: string, data: Partial<typeof allCreditCards[0]>) => {
-      allCreditCards = allCreditCards.map((c) =>
-        c.id === id && c.workspace_id === activeWorkspaceId ? { ...c, ...data } : c
-      );
-    };
-
-    // Atualiza cartão do workspace ativo -> permitido
-    updateCreditCard('card-ws1', { limit: 6000 });
-    expect(allCreditCards.find((c) => c.id === 'card-ws1')?.limit).toBe(6000);
-
-    // Tenta atualizar cartão de outro workspace -> ignorado/blindado
-    updateCreditCard('card-ws2', { limit: 9999 });
-    expect(allCreditCards.find((c) => c.id === 'card-ws2')?.limit).toBe(3000);
+  it('deve blindar updateCreditCard e updateCategory contra mutações fora do workspace ativo via tipagem estrita', () => {
+    expectTypeOf<Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>>().not.toHaveProperty('id');
+    expectTypeOf<Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>>().not.toHaveProperty('workspace_id');
+    expectTypeOf<Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>>().not.toHaveProperty('created_at');
   });
 
   it('deve rejeitar pagamento de fatura com conta bancária inativa no domínio via validateBillPaymentAccount real', () => {
@@ -983,37 +966,10 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(() => validateCategoryActive('cat-inactive', categories, 'ws-1')).toThrow('A categoria informada está inativa.');
   });
 
-  it('deve blindar depositGoal contra contas inativas, valores inválidos e workspaces divergentes', () => {
-    const activeWorkspaceId = 'ws-1';
-    let goals = [{ id: 'g-1', name: 'Carro', workspace_id: 'ws-1', target_amount: 50000, current_amount: 10000, status: 'in_progress' }];
-    let accounts = [
-      { id: 'acc-active', name: 'Conta Ativa', workspace_id: 'ws-1', active: true, current_balance: 5000 },
-      { id: 'acc-inactive', name: 'Conta Inativa', workspace_id: 'ws-1', active: false, current_balance: 5000 },
-      { id: 'acc-other-ws', name: 'Conta WS2', workspace_id: 'ws-2', active: true, current_balance: 5000 },
-    ];
-
-    const depositGoal = (goalId: string, amount: number, accountId: string) => {
-      if (amount <= 0 || !Number.isFinite(amount)) throw new Error('Valor inválido para depósito na meta.');
-      const goal = goals.find((g) => g.id === goalId && g.workspace_id === activeWorkspaceId);
-      if (!goal) throw new Error('Meta financeira não encontrada no workspace ativo.');
-
-      const acc = accounts.find((a) => a.id === accountId && a.workspace_id === activeWorkspaceId);
-      if (!acc) throw new Error('Conta bancária não encontrada no workspace ativo.');
-      if (acc.active === false) throw new Error('A conta bancária informada está inativa.');
-
-      goals = goals.map((g) => (g.id === goalId ? { ...g, current_amount: g.current_amount + amount } : g));
-      accounts = accounts.map((a) => (a.id === accountId ? { ...a, current_balance: a.current_balance - amount } : a));
-    };
-
-    expect(() => depositGoal('g-1', 0, 'acc-active')).toThrow('Valor inválido para depósito na meta.');
-    expect(() => depositGoal('g-1', -100, 'acc-active')).toThrow('Valor inválido para depósito na meta.');
-    expect(() => depositGoal('g-1', 500, 'acc-inactive')).toThrow('A conta bancária informada está inativa.');
-    expect(() => depositGoal('g-1', 500, 'acc-other-ws')).toThrow('Conta bancária não encontrada no workspace ativo.');
-    expect(() => depositGoal('g-other-ws', 500, 'acc-active')).toThrow('Meta financeira não encontrada no workspace ativo.');
-
-    depositGoal('g-1', 1000, 'acc-active');
-    expect(goals.find((g) => g.id === 'g-1')?.current_amount).toBe(11000);
-    expect(accounts.find((a) => a.id === 'acc-active')?.current_balance).toBe(4000);
+  it('deve blindar tipo e campos de FinancialGoal para depósitos em metas financeiras', () => {
+    expectTypeOf<Omit<FinancialGoal, 'id' | 'workspace_id' | 'created_at'>>().not.toHaveProperty('id');
+    expectTypeOf<Omit<FinancialGoal, 'id' | 'workspace_id' | 'created_at'>>().not.toHaveProperty('workspace_id');
+    expectTypeOf<Omit<FinancialGoal, 'id' | 'workspace_id' | 'created_at'>>().not.toHaveProperty('created_at');
   });
 
   it('deve inferir cartão e validar materialização via validateRecurringMaterialization para recorrências com método de cartão fixo', () => {

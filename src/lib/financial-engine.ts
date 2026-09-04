@@ -1189,10 +1189,15 @@ export function resolveOrCreateCreditCardBill(
 
   if (existingIdx >= 0) {
     const existing = bills[existingIdx];
-    const safePaidAmount =
-      typeof existing.paid_amount === 'number' && Number.isFinite(existing.paid_amount) && existing.paid_amount >= 0
-        ? existing.paid_amount
-        : 0;
+    if (
+      existing.paid_amount !== undefined &&
+      existing.paid_amount !== null &&
+      (!Number.isFinite(existing.paid_amount) || existing.paid_amount < 0)
+    ) {
+      throw new Error('Valor pago da fatura existente corrompido ou inválido.');
+    }
+
+    const safePaidAmount = existing.paid_amount || 0;
     const newTotal = existing.total_amount + amount;
     const newPaid = isPaid ? safePaidAmount + amount : safePaidAmount;
     const fullyPaid = newPaid >= newTotal && newTotal > 0;
@@ -1202,7 +1207,13 @@ export function resolveOrCreateCreditCardBill(
             ...b,
             total_amount: newTotal,
             paid_amount: newPaid,
-            status: fullyPaid ? ('paid' as const) : newPaid > 0 ? ('partially_paid' as const) : b.status,
+            status: fullyPaid
+              ? ('paid' as const)
+              : newPaid > 0
+              ? ('partially_paid' as const)
+              : b.status === 'paid' || b.status === 'partially_paid'
+              ? ('open' as const)
+              : b.status,
             paid_at: fullyPaid ? dueDate : null,
           }
         : b
