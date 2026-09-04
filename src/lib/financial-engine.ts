@@ -1161,6 +1161,30 @@ export interface ResolveOrCreateBillResult {
  * incrementa o total e retorna o ID real existente (b.id).
  * Se não existir, cria a nova fatura e retorna targetBillId.
  */
+/**
+ * Validação pura de integridade contábil e estrutural de uma fatura de cartão.
+ * Garante que total_amount e paid_amount sejam finitos e não-negativos,
+ * e que paid_amount não exceda total_amount (proteção contra sobrepagamento corrompido).
+ */
+export function validateCreditCardBillIntegrity(bill: CreditCardBill): void {
+  if (!bill || typeof bill !== 'object') {
+    throw new Error('Fatura inválida para operação.');
+  }
+  if (!Number.isFinite(bill.total_amount) || bill.total_amount < 0) {
+    throw new Error('Valor total da fatura inválido ou negativo.');
+  }
+  if (bill.paid_amount !== undefined && bill.paid_amount !== null) {
+    if (!Number.isFinite(bill.paid_amount) || bill.paid_amount < 0) {
+      throw new Error('Valor pago da fatura corrompido ou inválido.');
+    }
+    if (bill.paid_amount > bill.total_amount) {
+      throw new Error(
+        `Inconsistência contábil na fatura: valor pago (R$ ${bill.paid_amount.toFixed(2)}) excede o valor total (R$ ${bill.total_amount.toFixed(2)}).`
+      );
+    }
+  }
+}
+
 export function resolveOrCreateCreditCardBill(
   params: ResolveOrCreateBillParams
 ): ResolveOrCreateBillResult {
@@ -1189,13 +1213,7 @@ export function resolveOrCreateCreditCardBill(
 
   if (existingIdx >= 0) {
     const existing = bills[existingIdx];
-    if (
-      existing.paid_amount !== undefined &&
-      existing.paid_amount !== null &&
-      (!Number.isFinite(existing.paid_amount) || existing.paid_amount < 0)
-    ) {
-      throw new Error('Valor pago da fatura existente corrompido ou inválido.');
-    }
+    validateCreditCardBillIntegrity(existing);
 
     const safePaidAmount = existing.paid_amount || 0;
     const newTotal = existing.total_amount + amount;
@@ -1256,21 +1274,10 @@ export function reconcileBillAfterItemDeletion(
   bill: CreditCardBill,
   itemAmount: number
 ): CreditCardBill {
-  if (!bill || typeof bill !== 'object') {
-    throw new Error('Fatura inválida para reconciliação.');
-  }
+  validateCreditCardBillIntegrity(bill);
+
   if (!Number.isFinite(itemAmount) || itemAmount <= 0) {
     throw new Error('O valor do item a ser estornado deve ser um número positivo e finito.');
-  }
-  if (!Number.isFinite(bill.total_amount)) {
-    throw new Error('Valor total da fatura inválido para reconciliação.');
-  }
-  if (
-    bill.paid_amount !== undefined &&
-    bill.paid_amount !== null &&
-    (!Number.isFinite(bill.paid_amount) || bill.paid_amount < 0)
-  ) {
-    throw new Error('Valor pago da fatura corrompido ou inválido para reconciliação.');
   }
 
   const safePaid = bill.paid_amount || 0;

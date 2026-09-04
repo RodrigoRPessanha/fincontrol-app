@@ -54,6 +54,7 @@ import {
   processRecurringBatchState,
   resolveOrCreateCreditCardBill,
   reconcileBillAfterItemDeletion,
+  validateCreditCardBillIntegrity,
 } from '../financial-engine';
 import { format } from 'date-fns';
 
@@ -648,6 +649,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const bill = allCreditCardBills.find((b) => b.id === billId && b.workspace_id === activeWorkspace.id);
     if (!bill) throw new Error('Fatura não encontrada no workspace ativo.');
 
+    validateCreditCardBillIntegrity(bill);
     validateBillPaymentAccount(accountId, allAccounts, activeWorkspace.id);
 
     if (amount <= 0 || !Number.isFinite(amount)) throw new Error('Valor inválido para pagamento.');

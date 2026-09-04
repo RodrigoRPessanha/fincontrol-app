@@ -5,6 +5,7 @@ import { FinanceProvider, useFinance } from '../context/finance-context';
 import {
   resolveOrCreateCreditCardBill,
   reconcileBillAfterItemDeletion,
+  validateCreditCardBillIntegrity,
 } from '../financial-engine';
 import { CreditCardBill } from '../types';
 
@@ -388,7 +389,7 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
         amount: 100,
         workspaceId: 'ws-1',
       })
-    ).toThrow(/Valor pago da fatura existente corrompido/i);
+    ).toThrow(/Valor pago da fatura corrompido/i);
 
     // 2. Rejeição explícita de fatura com paid_amount negativo (-1)
     expect(() =>
@@ -401,7 +402,7 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
         amount: 100,
         workspaceId: 'ws-1',
       })
-    ).toThrow(/Valor pago da fatura existente corrompido/i);
+    ).toThrow(/Valor pago da fatura corrompido/i);
 
     // 3. Garantia anti-status inconsistente: se paid_amount for 0 mas status legado for 'paid',
     // ao adicionar nova despesa unpaid, o status NÃO PODE ser 'paid' nem 'partially_paid'
@@ -475,5 +476,93 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
     // Depósito com valor inválido deve rejeitar
     expect(() => getCtx().depositGoal(createdGoal.id, 0, acc!.id)).toThrow(/Valor inválido/i);
     expect(() => getCtx().depositGoal(createdGoal.id, -100, acc!.id)).toThrow(/Valor inválido/i);
+  });
+
+  it('deve validar integridade contábil completa de faturas com validateCreditCardBillIntegrity (P1 V33)', () => {
+    const validBill: CreditCardBill = {
+      id: 'bill-ok',
+      credit_card_id: 'card-1',
+      workspace_id: 'ws-1',
+      reference_month: '2026-08',
+      closing_date: '2026-08-05',
+      due_date: '2026-08-12',
+      total_amount: 500,
+      paid_amount: 200,
+      status: 'partially_paid',
+      created_at: '2026-08-01',
+    };
+
+    // 1. Fatura íntegra não lança erro
+    expect(() => validateCreditCardBillIntegrity(validBill)).not.toThrow();
+
+    // 2. Fatura nula ou não-objeto
+    expect(() => validateCreditCardBillIntegrity(null as any)).toThrow(/Fatura inválida/i);
+    expect(() => validateCreditCardBillIntegrity('string' as any)).toThrow(/Fatura inválida/i);
+
+    // 3. total_amount NaN ou negativo
+    expect(() => validateCreditCardBillIntegrity({ ...validBill, total_amount: NaN })).toThrow(
+      /Valor total da fatura inválido ou negativo/i
+    );
+    expect(() => validateCreditCardBillIntegrity({ ...validBill, total_amount: -50 })).toThrow(
+      /Valor total da fatura inválido ou negativo/i
+    );
+    expect(() => validateCreditCardBillIntegrity({ ...validBill, total_amount: Infinity })).toThrow(
+      /Valor total da fatura inválido ou negativo/i
+    );
+
+    // 4. paid_amount NaN ou negativo
+    expect(() => validateCreditCardBillIntegrity({ ...validBill, paid_amount: NaN })).toThrow(
+      /Valor pago da fatura corrompido ou inválido/i
+    );
+    expect(() => validateCreditCardBillIntegrity({ ...validBill, paid_amount: -10 })).toThrow(
+      /Valor pago da fatura corrompido ou inválido/i
+    );
+
+    // 5. Inconsistência contábil: sobrepagamento corrompido (paid_amount > total_amount)
+    expect(() => validateCreditCardBillIntegrity({ ...validBill, total_amount: 200, paid_amount: 500 })).toThrow(
+      /Inconsistência contábil na fatura: valor pago .* excede o valor total/i
+    );
+
+    // 6. Prova de proteção simétrica em resolveOrCreateCreditCardBill com fatura corrompida
+    expect(() =>
+      resolveOrCreateCreditCardBill({
+        bills: [{ ...validBill, total_amount: NaN }],
+        cardId: 'card-1',
+        referenceMonth: '2026-08',
+        closingDate: '2026-08-05',
+        dueDate: '2026-08-12',
+        amount: 100,
+        workspaceId: 'ws-1',
+      })
+    ).toThrow(/Valor total da fatura inválido ou negativo/i);
+
+    expect(() =>
+      resolveOrCreateCreditCardBill({
+        bills: [{ ...validBill, total_amount: -100 }],
+        cardId: 'card-1',
+        referenceMonth: '2026-08',
+        closingDate: '2026-08-05',
+        dueDate: '2026-08-12',
+        amount: 100,
+        workspaceId: 'ws-1',
+      })
+    ).toThrow(/Valor total da fatura inválido ou negativo/i);
+
+    expect(() =>
+      resolveOrCreateCreditCardBill({
+        bills: [{ ...validBill, total_amount: 200, paid_amount: 500 }],
+        cardId: 'card-1',
+        referenceMonth: '2026-08',
+        closingDate: '2026-08-05',
+        dueDate: '2026-08-12',
+        amount: 100,
+        workspaceId: 'ws-1',
+      })
+    ).toThrow(/Inconsistência contábil na fatura/i);
+
+    // 7. Prova de proteção simétrica em reconcileBillAfterItemDeletion com sobrepagamento
+    expect(() => reconcileBillAfterItemDeletion({ ...validBill, total_amount: 200, paid_amount: 500 }, 50)).toThrow(
+      /Inconsistência contábil na fatura/i
+    );
   });
 });
