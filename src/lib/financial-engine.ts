@@ -1162,9 +1162,39 @@ export interface ResolveOrCreateBillResult {
  * Se não existir, cria a nova fatura e retorna targetBillId.
  */
 /**
+ * Converte um valor monetário (em reais/unidade principal) para centavos inteiros.
+ * Adiciona Number.EPSILON antes de Math.round para evitar artefatos binários IEEE 754.
+ */
+export function toCents(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100);
+}
+
+/**
+ * Converte centavos inteiros de volta para valor monetário float com até 2 casas decimais.
+ */
+export function fromCents(cents: number): number {
+  return Math.round(cents) / 100;
+}
+
+/**
+ * Arredonda de forma pura e determinística qualquer montante monetário para 2 casas decimais.
+ */
+export function roundCurrency(amount: number): number {
+  return fromCents(toCents(amount));
+}
+
+/**
+ * Compara dois valores monetários operando estritamente em centavos inteiros.
+ * Retorna > 0 se a > b, < 0 se a < b, e 0 se a === b dentro da precisão de centavos.
+ */
+export function compareCurrency(a: number, b: number): number {
+  return toCents(a) - toCents(b);
+}
+
+/**
  * Validação pura de integridade contábil e estrutural de uma fatura de cartão.
  * Garante que total_amount e paid_amount sejam finitos e não-negativos,
- * e que paid_amount não exceda total_amount (proteção contra sobrepagamento corrompido).
+ * e que paid_amount não exceda total_amount em centavos (proteção contra sobrepagamento corrompido).
  */
 export function validateCreditCardBillIntegrity(bill: CreditCardBill): void {
   if (!bill || typeof bill !== 'object') {
@@ -1177,7 +1207,7 @@ export function validateCreditCardBillIntegrity(bill: CreditCardBill): void {
     if (!Number.isFinite(bill.paid_amount) || bill.paid_amount < 0) {
       throw new Error('Valor pago da fatura corrompido ou inválido.');
     }
-    if (bill.paid_amount > bill.total_amount) {
+    if (toCents(bill.paid_amount) > toCents(bill.total_amount)) {
       throw new Error(
         `Inconsistência contábil na fatura: valor pago (R$ ${bill.paid_amount.toFixed(2)}) excede o valor total (R$ ${bill.total_amount.toFixed(2)}).`
       );
@@ -1216,9 +1246,12 @@ export function resolveOrCreateCreditCardBill(
     validateCreditCardBillIntegrity(existing);
 
     const safePaidAmount = existing.paid_amount || 0;
-    const newTotal = existing.total_amount + amount;
-    const newPaid = isPaid ? safePaidAmount + amount : safePaidAmount;
-    const fullyPaid = newPaid >= newTotal && newTotal > 0;
+    const newTotalCents = toCents(existing.total_amount) + toCents(amount);
+    const newPaidCents = isPaid ? toCents(safePaidAmount) + toCents(amount) : toCents(safePaidAmount);
+    const fullyPaid = newPaidCents >= newTotalCents && newTotalCents > 0;
+    const newTotal = fromCents(newTotalCents);
+    const newPaid = fromCents(newPaidCents);
+
     const updatedBills = bills.map((b, idx) =>
       idx === existingIdx
         ? {
@@ -1227,7 +1260,7 @@ export function resolveOrCreateCreditCardBill(
             paid_amount: newPaid,
             status: fullyPaid
               ? ('paid' as const)
-              : newPaid > 0
+              : newPaidCents > 0
               ? ('partially_paid' as const)
               : b.status === 'paid' || b.status === 'partially_paid'
               ? ('open' as const)
@@ -1244,6 +1277,7 @@ export function resolveOrCreateCreditCardBill(
   }
 
   const targetBillId = `bill-${cardId}-${referenceMonth}`;
+  const roundedAmount = roundCurrency(amount);
   const newBill: CreditCardBill = {
     id: targetBillId,
     credit_card_id: cardId,
@@ -1251,8 +1285,8 @@ export function resolveOrCreateCreditCardBill(
     reference_month: referenceMonth,
     closing_date: closingDate,
     due_date: dueDate,
-    total_amount: amount,
-    paid_amount: isPaid ? amount : 0,
+    total_amount: roundedAmount,
+    paid_amount: isPaid ? roundedAmount : 0,
     status: isPaid ? 'paid' : 'open',
     paid_at: isPaid ? dueDate : null,
     created_at: nowIso,
@@ -1268,7 +1302,7 @@ export function resolveOrCreateCreditCardBill(
 /**
  * Reconciliação pura de fatura de cartão após exclusão de item faturado.
  * Subtrai o valor do item e garante que o novo total nunca seja inferior
- * ao valor já pago da fatura (proteção anti-overpayment).
+ * ao valor já pago da fatura (proteção anti-overpayment com precisão de centavos).
  */
 export function reconcileBillAfterItemDeletion(
   bill: CreditCardBill,
@@ -1280,15 +1314,19 @@ export function reconcileBillAfterItemDeletion(
     throw new Error('O valor do item a ser estornado deve ser um número positivo e finito.');
   }
 
-  const safePaid = bill.paid_amount || 0;
-  const newTotal = Math.max(0, bill.total_amount - itemAmount);
-  if (safePaid > newTotal) {
+  const safePaidCents = toCents(bill.paid_amount || 0);
+  const newTotalCents = Math.max(0, toCents(bill.total_amount) - toCents(itemAmount));
+
+  if (safePaidCents > newTotalCents) {
     throw new Error(
-      `Não é possível excluir o item da fatura: o valor pago (R$ ${safePaid.toFixed(2)}) excederia o novo total (R$ ${newTotal.toFixed(2)}). Estorne o pagamento da fatura antes de excluir o item.`
+      `Não é possível excluir o item da fatura: o valor pago (R$ ${(safePaidCents / 100).toFixed(2)}) excederia o novo total (R$ ${(newTotalCents / 100).toFixed(2)}). Estorne o pagamento da fatura antes de excluir o item.`
     );
   }
-  const newPaid = Math.min(safePaid, newTotal);
-  const isNowPaid = newPaid >= newTotal && newTotal > 0;
+  const newPaidCents = Math.min(safePaidCents, newTotalCents);
+  const isNowPaid = newPaidCents >= newTotalCents && newTotalCents > 0;
+  const newTotal = fromCents(newTotalCents);
+  const newPaid = fromCents(newPaidCents);
+
   return {
     ...bill,
     total_amount: newTotal,

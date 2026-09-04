@@ -55,6 +55,9 @@ import {
   resolveOrCreateCreditCardBill,
   reconcileBillAfterItemDeletion,
   validateCreditCardBillIntegrity,
+  toCents,
+  fromCents,
+  roundCurrency,
 } from '../financial-engine';
 import { format } from 'date-fns';
 
@@ -654,12 +657,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
     if (amount <= 0 || !Number.isFinite(amount)) throw new Error('Valor inválido para pagamento.');
 
-    const remaining = Math.max(0, bill.total_amount - (bill.paid_amount || 0));
-    if (amount > remaining) {
-      throw new Error(`Valor do pagamento (R$ ${amount.toFixed(2)}) excede o saldo restante da fatura (R$ ${remaining.toFixed(2)}).`);
+    const totalCents = toCents(bill.total_amount);
+    const paidCents = toCents(bill.paid_amount || 0);
+    const remainingCents = Math.max(0, totalCents - paidCents);
+    const paymentCents = toCents(amount);
+
+    if (paymentCents > remainingCents) {
+      throw new Error(`Valor do pagamento (R$ ${amount.toFixed(2)}) excede o saldo restante da fatura (R$ ${(remainingCents / 100).toFixed(2)}).`);
     }
 
-    const finalAmount = amount;
+    const finalAmount = fromCents(paymentCents);
 
     const newPay: Payment = {
       id: generateId('pay'),
@@ -675,11 +682,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setAllPayments((prev) => [newPay, ...prev]);
 
     setAllAccounts((prev) =>
-      prev.map((a) => (a.id === accountId ? { ...a, current_balance: a.current_balance - finalAmount } : a))
+      prev.map((a) =>
+        a.id === accountId
+          ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+          : a
+      )
     );
 
-    const newPaid = (bill.paid_amount || 0) + finalAmount;
-    const isPaid = newPaid >= bill.total_amount;
+    const newPaidCents = paidCents + paymentCents;
+    const isPaid = newPaidCents >= totalCents;
+    const newPaid = fromCents(newPaidCents);
 
     setAllCreditCardBills((prev) =>
       prev.map((b) =>
@@ -1097,15 +1109,19 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Itens vinculados a cartão de crédito devem ser quitados exclusivamente através da fatura correspondente.');
       }
 
-      const remaining = Math.max(0, tx.amount - (tx.paid_amount || 0));
-      if (data.amount > remaining) {
+      const totalCents = toCents(tx.amount);
+      const paidCents = toCents(tx.paid_amount || 0);
+      const remainingCents = Math.max(0, totalCents - paidCents);
+      const paymentCents = toCents(data.amount);
+      if (paymentCents > remainingCents) {
         throw new Error(
-          `Valor do pagamento (R$ ${data.amount.toFixed(2)}) excede o saldo restante da transação (R$ ${remaining.toFixed(2)}).`
+          `Valor do pagamento (R$ ${data.amount.toFixed(2)}) excede o saldo restante da transação (R$ ${(remainingCents / 100).toFixed(2)}).`
         );
       }
 
-      const currentPaid = (tx.paid_amount || 0) + data.amount;
-      const isFull = currentPaid >= tx.amount;
+      const currentPaidCents = paidCents + paymentCents;
+      const isFull = currentPaidCents >= totalCents;
+      const currentPaid = fromCents(currentPaidCents);
 
       setAllTransactions((prev) =>
         prev.map((t) =>
@@ -1123,8 +1139,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       setAllAccounts((prev) =>
         prev.map((a) => {
           if (a.id === data.account_id) {
-            const diff = tx.type === 'expense' ? -data.amount : data.amount;
-            return { ...a, current_balance: a.current_balance + diff };
+            const currentBalanceCents = toCents(a.current_balance);
+            const diffCents = tx.type === 'expense' ? -paymentCents : paymentCents;
+            return { ...a, current_balance: fromCents(currentBalanceCents + diffCents) };
           }
           return a;
         })
@@ -1143,15 +1160,19 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Parcelas vinculadas a cartão de crédito devem ser quitadas exclusivamente através da fatura correspondente.');
       }
 
-      const remaining = Math.max(0, inst.amount - (inst.paid_amount || 0));
-      if (data.amount > remaining) {
+      const totalCents = toCents(inst.amount);
+      const paidCents = toCents(inst.paid_amount || 0);
+      const remainingCents = Math.max(0, totalCents - paidCents);
+      const paymentCents = toCents(data.amount);
+      if (paymentCents > remainingCents) {
         throw new Error(
-          `Valor do pagamento (R$ ${data.amount.toFixed(2)}) excede o saldo restante da parcela (R$ ${remaining.toFixed(2)}).`
+          `Valor do pagamento (R$ ${data.amount.toFixed(2)}) excede o saldo restante da parcela (R$ ${(remainingCents / 100).toFixed(2)}).`
         );
       }
 
-      const currentPaid = (inst.paid_amount || 0) + data.amount;
-      const isFull = currentPaid >= inst.amount;
+      const currentPaidCents = paidCents + paymentCents;
+      const isFull = currentPaidCents >= totalCents;
+      const currentPaid = fromCents(currentPaidCents);
 
       setAllInstallments((prev) =>
         prev.map((i) =>
@@ -1168,7 +1189,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
       setAllAccounts((prev) =>
         prev.map((a) =>
-          a.id === data.account_id ? { ...a, current_balance: a.current_balance - data.amount } : a
+          a.id === data.account_id
+            ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+            : a
         )
       );
     }
@@ -1178,6 +1201,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       return payCreditCardBill(data.credit_card_bill_id, data.account_id, data.amount, data.payment_date, data.notes);
     }
 
+    const finalAmount = fromCents(toCents(data.amount));
     const newPay: Payment = {
       id: generateId('pay'),
       workspace_id: activeWorkspace.id,
@@ -1186,7 +1210,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       credit_card_bill_id: data.credit_card_bill_id,
       account_id: data.account_id,
       payment_method_id: data.payment_method_id,
-      amount: data.amount,
+      amount: finalAmount,
       payment_date: data.payment_date,
       notes: data.notes,
       created_by: 'usr-1',

@@ -6,6 +6,10 @@ import {
   resolveOrCreateCreditCardBill,
   reconcileBillAfterItemDeletion,
   validateCreditCardBillIntegrity,
+  toCents,
+  fromCents,
+  roundCurrency,
+  compareCurrency,
 } from '../financial-engine';
 import { CreditCardBill } from '../types';
 
@@ -564,5 +568,209 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
     expect(() => reconcileBillAfterItemDeletion({ ...validBill, total_amount: 200, paid_amount: 500 }, 50)).toThrow(
       /Inconsistência contábil na fatura/i
     );
+  });
+
+  describe('Aritmética Monetária em Centavos Inteiros e Proteção Contra IEEE 754 Float Drift (V34)', () => {
+    it('deve converter e comparar valores monetários sem distorção de float', () => {
+      // 10.10 + 20.20 no IEEE 754 cru é 30.299999999999997
+      const rawFloatSum = 10.1 + 20.2;
+      expect(rawFloatSum).not.toBe(30.3);
+      expect(toCents(rawFloatSum)).toBe(3030);
+      expect(fromCents(3030)).toBe(30.3);
+      expect(roundCurrency(rawFloatSum)).toBe(30.3);
+
+      // Comparações de centavos
+      expect(compareCurrency(rawFloatSum, 30.3)).toBe(0);
+      expect(compareCurrency(30.31, 30.3)).toBeGreaterThan(0);
+      expect(compareCurrency(30.29, 30.3)).toBeLessThan(0);
+
+      // 0.30 - 0.10 no IEEE 754 cru é 0.19999999999999998
+      const rawFloatDiff = 0.3 - 0.1;
+      expect(rawFloatDiff).not.toBe(0.2);
+      expect(toCents(rawFloatDiff)).toBe(20);
+      expect(fromCents(20)).toBe(0.2);
+      expect(roundCurrency(rawFloatDiff)).toBe(0.2);
+    });
+
+    it('deve realizar pagamento total de fatura com soma decimal (10.10 + 20.20 = 30.30) sem falso bloqueio de overpayment', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      // Fatura resultante de duas transações: 10.10 + 20.20
+      const floatBill: CreditCardBill = {
+        id: 'bill-float-1',
+        credit_card_id: 'card-1',
+        workspace_id: 'ws-1',
+        reference_month: '2026-08',
+        closing_date: '2026-08-05',
+        due_date: '2026-08-12',
+        total_amount: 30.3,
+        paid_amount: 0,
+        status: 'open',
+        created_at: '2026-08-01T00:00:00Z',
+      };
+      storageMap.set('fincontrol_v2_bills', JSON.stringify([floatBill]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      const accBefore = getCtx().accounts.find((a) => a.id === 'acc-1');
+      const balanceBefore = accBefore?.current_balance || 0;
+
+      // Pagar o valor total exato de 30.30 não deve estourar erro de overpayment
+      let paymentRes: any;
+      await act(async () => {
+        paymentRes = getCtx().payCreditCardBill('bill-float-1', 'acc-1', 30.3);
+      });
+
+      expect(paymentRes).toBeDefined();
+      expect(paymentRes.amount).toBe(30.3);
+
+      const updatedBill = getCtx().creditCardBills.find((b) => b.id === 'bill-float-1');
+      expect(updatedBill?.status).toBe('paid');
+      expect(updatedBill?.paid_amount).toBe(30.3);
+
+      const accAfter = getCtx().accounts.find((a) => a.id === 'acc-1');
+      expect(accAfter?.current_balance).toBe(fromCents(toCents(balanceBefore) - 3030));
+    });
+
+    it('deve realizar pagamento parcial e quitação subsequente em fatura com float drift (0.30 total, 0.10 pago, 0.20 restante)', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const floatBill: CreditCardBill = {
+        id: 'bill-float-2',
+        credit_card_id: 'card-1',
+        workspace_id: 'ws-1',
+        reference_month: '2026-08',
+        closing_date: '2026-08-05',
+        due_date: '2026-08-12',
+        total_amount: 0.3,
+        paid_amount: 0.1,
+        status: 'partially_paid',
+        created_at: '2026-08-01T00:00:00Z',
+      };
+      storageMap.set('fincontrol_v2_bills', JSON.stringify([floatBill]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      // Pagar restante 0.20 (0.30 - 0.10) não deve ser bloqueado
+      await act(async () => {
+        getCtx().payCreditCardBill('bill-float-2', 'acc-1', 0.2);
+      });
+
+      const updatedBill = getCtx().creditCardBills.find((b) => b.id === 'bill-float-2');
+      expect(updatedBill?.status).toBe('paid');
+      expect(updatedBill?.paid_amount).toBe(0.3);
+    });
+
+    it('deve rejeitar pagamento que exceda o saldo restante em 1 centavo (30.31 em fatura de 30.30)', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const floatBill: CreditCardBill = {
+        id: 'bill-float-3',
+        credit_card_id: 'card-1',
+        workspace_id: 'ws-1',
+        reference_month: '2026-08',
+        closing_date: '2026-08-05',
+        due_date: '2026-08-12',
+        total_amount: 30.3,
+        paid_amount: 0,
+        status: 'open',
+        created_at: '2026-08-01T00:00:00Z',
+      };
+      storageMap.set('fincontrol_v2_bills', JSON.stringify([floatBill]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      expect(() => {
+        getCtx().payCreditCardBill('bill-float-3', 'acc-1', 30.31);
+      }).toThrow(/Valor do pagamento \(R\$ 30\.31\) excede o saldo restante da fatura \(R\$ 30\.30\)/i);
+    });
+
+    it('deve validar integridade contábil e rejeitar payCreditCardBill em fatura corrompida', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const corruptedBill: CreditCardBill = {
+        id: 'bill-corrupt-1',
+        credit_card_id: 'card-1',
+        workspace_id: 'ws-1',
+        reference_month: '2026-08',
+        closing_date: '2026-08-05',
+        due_date: '2026-08-12',
+        total_amount: 100,
+        paid_amount: 150, // sobrepagamento corrompido
+        status: 'paid',
+        created_at: '2026-08-01T00:00:00Z',
+      };
+      storageMap.set('fincontrol_v2_bills', JSON.stringify([corruptedBill]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      expect(() => {
+        getCtx().payCreditCardBill('bill-corrupt-1', 'acc-1', 10);
+      }).toThrow(/Inconsistência contábil na fatura/i);
+    });
+
+    it('deve aplicar precisão de centavos em recordPayment para transações e parcelas', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      // 1. Criar transação à vista com valor 30.30
+      let tx: any;
+      await act(async () => {
+        tx = getCtx().addTransaction({
+          description: 'Serviço pontual 30.30',
+          amount: 30.3,
+          type: 'expense',
+          transaction_date: '2026-08-02',
+          due_date: '2026-08-02',
+          account_id: 'acc-1',
+          category_id: getCtx().categories[0]?.id,
+          status: 'pending',
+        });
+      });
+
+      // Pagar parcial de 10.10
+      await act(async () => {
+        getCtx().recordPayment({
+          transaction_id: tx.id,
+          account_id: 'acc-1',
+          amount: 10.1,
+          payment_date: '2026-08-02',
+        });
+      });
+
+      let currentTx = getCtx().transactions.find((t) => t.id === tx.id);
+      expect(currentTx?.status).toBe('partially_paid');
+      expect(currentTx?.paid_amount).toBe(10.1);
+
+      // Pagar restante de 20.20 (total 30.30) - sem erro de float
+      await act(async () => {
+        getCtx().recordPayment({
+          transaction_id: tx.id,
+          account_id: 'acc-1',
+          amount: 20.2,
+          payment_date: '2026-08-02',
+        });
+      });
+
+      currentTx = getCtx().transactions.find((t) => t.id === tx.id);
+      expect(currentTx?.status).toBe('paid');
+      expect(currentTx?.paid_amount).toBe(30.3);
+
+      // Tentar pagar mais 0.01 deve ser rejeitado
+      expect(() => {
+        getCtx().recordPayment({
+          transaction_id: tx.id,
+          account_id: 'acc-1',
+          amount: 0.01,
+          payment_date: '2026-08-02',
+        });
+      }).toThrow(/excede o saldo restante da transação/i);
+    });
   });
 });
