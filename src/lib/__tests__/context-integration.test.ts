@@ -20,6 +20,8 @@ import {
   validateCategoryActive,
   validateTransactionAccount,
   processRecurringBatchState,
+  resolveOrCreateCreditCardBill,
+  reconcileBillAfterItemDeletion,
 } from '../financial-engine';
 import { sanitizeCsvCell } from '../utils';
 
@@ -1407,14 +1409,11 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(billNewAfter).toBeDefined();
     expect(billNewAfter?.total_amount).toBe(120);
 
-    // 6. PROVA DE RECONCILIAÇÃO / ESTORNO: excluir a transação vinculada a "bill-2" estorna o saldo perfeitamente aos 500 originais
+    // 6. PROVA DE RECONCILIAÇÃO / ESTORNO REAL: executa a função pura de produção reconcileBillAfterItemDeletion
     const billToReconcile = result.updatedBills.find((b) => b.id === txCardExisting!.credit_card_bill_id);
     expect(billToReconcile).toBeDefined();
     expect(billToReconcile?.id).toBe('bill-2');
-    const reconciledBill = {
-      ...billToReconcile!,
-      total_amount: billToReconcile!.total_amount - txCardExisting!.amount,
-    };
+    const reconciledBill = reconcileBillAfterItemDeletion(billToReconcile!, txCardExisting!.amount);
     expect(reconciledBill.total_amount).toBe(500); // Saldo restaurado sem perda de referência!
 
     // 7. Prova de idempotência: executar ciclo novamente não gera duplicações
@@ -1452,8 +1451,8 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     }>();
   });
 
-  it('deve retornar o ID real de fatura pré-existente arbitrária ao adicionar item em vez de gerar ID sintético (P0 Validação)', () => {
-    let allCreditCardBills: CreditCardBill[] = [
+  it('deve retornar o ID real de fatura pré-existente arbitrária ao adicionar item via resolveOrCreateCreditCardBill real (P0/P2 Resolução)', () => {
+    const allCreditCardBills: CreditCardBill[] = [
       {
         id: 'bill-arbitrary-uuid-999',
         credit_card_id: 'card-1',
@@ -1468,55 +1467,60 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
       },
     ];
 
-    const getOrCreateAndAddItemToBill = (
-      cardId: string,
-      referenceMonth: string,
-      closingDate: string,
-      dueDate: string,
-      amount: number,
-      targetWsId: string
-    ): string => {
-      const targetBillId = `bill-${cardId}-${referenceMonth}`;
-      const existingBill = allCreditCardBills.find(
-        (b) =>
-          b.credit_card_id === cardId &&
-          b.reference_month === referenceMonth &&
-          b.workspace_id === targetWsId
-      );
+    // 1. Ao reutilizar fatura existente, DEVE retornar 'bill-arbitrary-uuid-999' e isNew: false
+    const res1 = resolveOrCreateCreditCardBill({
+      bills: allCreditCardBills,
+      cardId: 'card-1',
+      referenceMonth: '2026-09',
+      closingDate: '2026-09-05',
+      dueDate: '2026-09-12',
+      amount: 150,
+      workspaceId: 'ws-1',
+    });
+    expect(res1.billId).toBe('bill-arbitrary-uuid-999');
+    expect(res1.isNew).toBe(false);
+    expect(res1.updatedBills.find((b) => b.id === 'bill-arbitrary-uuid-999')?.total_amount).toBe(450);
 
-      const returnedBillId = existingBill ? existingBill.id : targetBillId;
+    // 2. Ao criar fatura nova do zero, cria com targetBillId e isNew: true
+    const res2 = resolveOrCreateCreditCardBill({
+      bills: allCreditCardBills,
+      cardId: 'card-1',
+      referenceMonth: '2026-10',
+      closingDate: '2026-10-05',
+      dueDate: '2026-10-12',
+      amount: 200,
+      workspaceId: 'ws-1',
+      nowIso: '2026-09-01T00:00:00.000Z',
+    });
+    expect(res2.billId).toBe('bill-card-1-2026-10');
+    expect(res2.isNew).toBe(true);
+    expect(res2.updatedBills.find((b) => b.id === 'bill-card-1-2026-10')?.total_amount).toBe(200);
+  });
 
-      if (existingBill) {
-        allCreditCardBills = allCreditCardBills.map((b) =>
-          b.id === existingBill.id ? { ...b, total_amount: b.total_amount + amount } : b
-        );
-      } else {
-        allCreditCardBills.push({
-          id: targetBillId,
-          credit_card_id: cardId,
-          workspace_id: targetWsId,
-          reference_month: referenceMonth,
-          closing_date: closingDate,
-          due_date: dueDate,
-          total_amount: amount,
-          paid_amount: 0,
-          status: 'open',
-          paid_at: null,
-          created_at: '2026-09-01',
-        });
-      }
-      return returnedBillId;
+  it('deve bloquear exclusão de item faturado se valor pago exceder o novo total da fatura via reconcileBillAfterItemDeletion real', () => {
+    const partialBill: CreditCardBill = {
+      id: 'bill-partial-test',
+      credit_card_id: 'card-1',
+      workspace_id: 'ws-1',
+      reference_month: '2026-08',
+      closing_date: '2026-08-05',
+      due_date: '2026-08-12',
+      total_amount: 500,
+      paid_amount: 400, // Já foram pagos 400 de 500
+      status: 'partially_paid',
+      created_at: '2026-08-01',
     };
 
-    // 1. Ao reutilizar fatura existente, DEVE retornar 'bill-arbitrary-uuid-999'
-    const returnedId1 = getOrCreateAndAddItemToBill('card-1', '2026-09', '2026-09-05', '2026-09-12', 150, 'ws-1');
-    expect(returnedId1).toBe('bill-arbitrary-uuid-999');
-    expect(allCreditCardBills.find((b) => b.id === 'bill-arbitrary-uuid-999')?.total_amount).toBe(450);
+    // Tentar excluir item de 200 faria o novo total ser 300, menor que os 400 já pagos!
+    expect(() => reconcileBillAfterItemDeletion(partialBill, 200)).toThrow(
+      'Não é possível excluir o item da fatura: o valor pago (R$ 400.00) excederia o novo total (R$ 300.00). Estorne o pagamento da fatura antes de excluir o item.'
+    );
 
-    // 2. Ao criar fatura nova do zero, retorna o ID sintético
-    const returnedId2 = getOrCreateAndAddItemToBill('card-1', '2026-10', '2026-10-05', '2026-10-12', 200, 'ws-1');
-    expect(returnedId2).toBe('bill-card-1-2026-10');
-    expect(allCreditCardBills.find((b) => b.id === 'bill-card-1-2026-10')?.total_amount).toBe(200);
+    // Excluir item de 50 é permitido: novo total 450 >= 400
+    const reconciledOk = reconcileBillAfterItemDeletion(partialBill, 50);
+    expect(reconciledOk.total_amount).toBe(450);
+    expect(reconciledOk.paid_amount).toBe(400);
+    expect(reconciledOk.status).toBe('partially_paid');
   });
 
   it('deve proteger campos imutáveis (workspace_id, id, created_at) contra sobrescrita em updateAccount, updateCreditCard, updateTransaction e updateGoal', () => {

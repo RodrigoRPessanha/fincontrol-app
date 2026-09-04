@@ -1137,6 +1137,123 @@ export function validateTransactionAccount(
   }
 }
 
+export interface ResolveOrCreateBillParams {
+  bills: CreditCardBill[];
+  cardId: string;
+  referenceMonth: string;
+  closingDate: string;
+  dueDate: string;
+  amount: number;
+  workspaceId: string;
+  isPaid?: boolean;
+  nowIso?: string;
+}
+
+export interface ResolveOrCreateBillResult {
+  updatedBills: CreditCardBill[];
+  billId: string;
+  isNew: boolean;
+}
+
+/**
+ * Resolve ou cria fatura de cartão de crédito deterministicamente.
+ * Se a fatura já existe pelo par (cardId, referenceMonth, workspaceId),
+ * incrementa o total e retorna o ID real existente (b.id).
+ * Se não existir, cria a nova fatura e retorna targetBillId.
+ */
+export function resolveOrCreateCreditCardBill(
+  params: ResolveOrCreateBillParams
+): ResolveOrCreateBillResult {
+  const {
+    bills,
+    cardId,
+    referenceMonth,
+    closingDate,
+    dueDate,
+    amount,
+    workspaceId,
+    isPaid = false,
+    nowIso = new Date().toISOString(),
+  } = params;
+
+  const existingIdx = bills.findIndex(
+    (b) =>
+      b.credit_card_id === cardId &&
+      b.reference_month === referenceMonth &&
+      b.workspace_id === workspaceId
+  );
+
+  if (existingIdx >= 0) {
+    const existing = bills[existingIdx];
+    const newTotal = existing.total_amount + amount;
+    const newPaid = isPaid ? (existing.paid_amount || 0) + amount : (existing.paid_amount || 0);
+    const fullyPaid = newPaid >= newTotal && newTotal > 0;
+    const updatedBills = bills.map((b, idx) =>
+      idx === existingIdx
+        ? {
+            ...b,
+            total_amount: newTotal,
+            paid_amount: newPaid,
+            status: fullyPaid ? ('paid' as const) : newPaid > 0 ? ('partially_paid' as const) : b.status,
+            paid_at: fullyPaid ? dueDate : null,
+          }
+        : b
+    );
+    return {
+      updatedBills,
+      billId: existing.id,
+      isNew: false,
+    };
+  }
+
+  const targetBillId = `bill-${cardId}-${referenceMonth}`;
+  const newBill: CreditCardBill = {
+    id: targetBillId,
+    credit_card_id: cardId,
+    workspace_id: workspaceId,
+    reference_month: referenceMonth,
+    closing_date: closingDate,
+    due_date: dueDate,
+    total_amount: amount,
+    paid_amount: isPaid ? amount : 0,
+    status: isPaid ? 'paid' : 'open',
+    paid_at: isPaid ? dueDate : null,
+    created_at: nowIso,
+  };
+
+  return {
+    updatedBills: [...bills, newBill],
+    billId: targetBillId,
+    isNew: true,
+  };
+}
+
+/**
+ * Reconciliação pura de fatura de cartão após exclusão de item faturado.
+ * Subtrai o valor do item e garante que o novo total nunca seja inferior
+ * ao valor já pago da fatura (proteção anti-overpayment).
+ */
+export function reconcileBillAfterItemDeletion(
+  bill: CreditCardBill,
+  itemAmount: number
+): CreditCardBill {
+  const newTotal = Math.max(0, bill.total_amount - itemAmount);
+  if (bill.paid_amount && bill.paid_amount > newTotal) {
+    throw new Error(
+      `Não é possível excluir o item da fatura: o valor pago (R$ ${bill.paid_amount.toFixed(2)}) excederia o novo total (R$ ${newTotal.toFixed(2)}). Estorne o pagamento da fatura antes de excluir o item.`
+    );
+  }
+  const newPaid = Math.min(bill.paid_amount || 0, newTotal);
+  const isNowPaid = newPaid >= newTotal && newTotal > 0;
+  return {
+    ...bill,
+    total_amount: newTotal,
+    paid_amount: newPaid,
+    status: newTotal === 0 ? 'open' : isNowPaid ? 'paid' : newPaid > 0 ? 'partially_paid' : 'open',
+    paid_at: isNowPaid ? bill.paid_at : null,
+  };
+}
+
 export interface ProcessRecurringBatchParams {
   recurring: RecurringTransaction[];
   transactions: Transaction[];
@@ -1185,58 +1302,6 @@ export function processRecurringBatchState(
   const processedSet = new Set<string>(
     transactions.map((t) => `${t.recurring_transaction_id || ''}:${t.transaction_date}`)
   );
-
-  const getOrCreateAndAddBill = (
-    cardId: string,
-    refMonth: string,
-    closingDate: string,
-    dueDate: string,
-    amount: number,
-    wsId: string
-  ): string => {
-    const existingIdx = updatedBills.findIndex(
-      (b) => b.credit_card_id === cardId && b.reference_month === refMonth && b.workspace_id === wsId
-    );
-
-    if (existingIdx >= 0) {
-      const b = updatedBills[existingIdx];
-      const newTotal = b.total_amount + amount;
-      const newPaid = b.paid_amount || 0;
-      const fullyPaid = newPaid >= newTotal && newTotal > 0;
-      updatedBills = updatedBills.map((item, idx) =>
-        idx === existingIdx
-          ? {
-              ...item,
-              total_amount: newTotal,
-              status: fullyPaid ? 'paid' : newPaid > 0 ? 'partially_paid' : item.status,
-              paid_at: fullyPaid ? item.due_date : null,
-            }
-          : item
-      );
-      hasChanges = true;
-      return b.id;
-    } else {
-      const targetBillId = `bill-${cardId}-${refMonth}`;
-      updatedBills = [
-        ...updatedBills,
-        {
-          id: targetBillId,
-          credit_card_id: cardId,
-          workspace_id: wsId,
-          reference_month: refMonth,
-          closing_date: closingDate,
-          due_date: dueDate,
-          total_amount: amount,
-          paid_amount: 0,
-          status: 'open',
-          paid_at: null,
-          created_at: nowIso,
-        },
-      ];
-      hasChanges = true;
-      return targetBillId;
-    }
-  };
 
   // Desativação semântica para qualquer série cujo next_occurrence já ultrapassou end_date
   updatedRecurring = updatedRecurring.map((r) => {
@@ -1291,14 +1356,20 @@ export function processRecurringBatchState(
           const card = creditCards.find((c) => c.id === effectiveCardId && c.workspace_id === rec.workspace_id);
           if (card) {
             const billDates = calculateCardBillDates(currOccurrence, card.closing_day, card.due_day);
-            billId = getOrCreateAndAddBill(
-              card.id,
-              billDates.referenceMonth,
-              billDates.closingDate,
-              billDates.dueDate,
-              rec.amount,
-              rec.workspace_id
-            );
+            const billRes = resolveOrCreateCreditCardBill({
+              bills: updatedBills,
+              cardId: card.id,
+              referenceMonth: billDates.referenceMonth,
+              closingDate: billDates.closingDate,
+              dueDate: billDates.dueDate,
+              amount: rec.amount,
+              workspaceId: rec.workspace_id,
+              isPaid: false,
+              nowIso,
+            });
+            updatedBills = billRes.updatedBills;
+            billId = billRes.billId;
+            hasChanges = true;
             calculatedDueDate = billDates.dueDate;
           }
         }
