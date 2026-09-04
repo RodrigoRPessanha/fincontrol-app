@@ -1176,6 +1176,10 @@ export function resolveOrCreateCreditCardBill(
     nowIso = new Date().toISOString(),
   } = params;
 
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('O valor a ser adicionado à fatura deve ser um número positivo e finito.');
+  }
+
   const existingIdx = bills.findIndex(
     (b) =>
       b.credit_card_id === cardId &&
@@ -1237,6 +1241,16 @@ export function reconcileBillAfterItemDeletion(
   bill: CreditCardBill,
   itemAmount: number
 ): CreditCardBill {
+  if (!bill || typeof bill !== 'object') {
+    throw new Error('Fatura inválida para reconciliação.');
+  }
+  if (!Number.isFinite(itemAmount) || itemAmount <= 0) {
+    throw new Error('O valor do item a ser estornado deve ser um número positivo e finito.');
+  }
+  if (!Number.isFinite(bill.total_amount)) {
+    throw new Error('Valor total da fatura inválido para reconciliação.');
+  }
+
   const newTotal = Math.max(0, bill.total_amount - itemAmount);
   if (bill.paid_amount && bill.paid_amount > newTotal) {
     throw new Error(
