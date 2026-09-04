@@ -1524,41 +1524,35 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
   });
 
   it('deve proteger campos imutáveis (workspace_id, id, created_at) contra sobrescrita em updateAccount, updateCreditCard, updateTransaction e updateGoal', () => {
-    let account = { id: 'acc-1', workspace_id: 'ws-1', name: 'Conta Original', created_at: '2026-01-01T00:00:00Z' };
-    let transaction = { id: 'tx-1', workspace_id: 'ws-1', description: 'Tx Original', credit_card_bill_id: 'bill-1', created_at: '2026-01-01T00:00:00Z', created_by: 'usr-1', amount: 100, status: 'pending' as const };
+    // 1. Prova em nível de tipo de compilação que campos imutáveis não existem em UpdateTransactionDTO
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('id');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('workspace_id');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('created_at');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('credit_card_bill_id');
+    expectTypeOf<UpdateTransactionDTO>().not.toHaveProperty('account_id');
 
-    const updateAccount = (id: string, data: any) => {
-      if (account.id === id && account.workspace_id === 'ws-1') {
-        account = { ...account, ...data, id: account.id, workspace_id: account.workspace_id, created_at: account.created_at };
-      }
+    // 2. Prova em tempo de execução que transação vinculada a fatura tem restrição de mutação de data via função real
+    const existingBilledTx: Transaction = {
+      id: 'tx-1',
+      workspace_id: 'ws-1',
+      description: 'Tx Original',
+      credit_card_bill_id: 'bill-1',
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'usr-1',
+      amount: 100,
+      status: 'pending',
+      transaction_date: '2026-01-01',
+      due_date: '2026-01-10',
+      type: 'expense',
     };
 
-    const updateTransaction = (id: string, data: any) => {
-      if (transaction.id === id && transaction.workspace_id === 'ws-1') {
-        transaction = {
-          ...transaction,
-          ...data,
-          id: transaction.id,
-          workspace_id: transaction.workspace_id,
-          credit_card_bill_id: transaction.credit_card_bill_id,
-          created_at: transaction.created_at,
-          created_by: transaction.created_by,
-        };
-      }
-    };
+    expect(() =>
+      validateBilledTransactionDateImmutability(existingBilledTx, { transaction_date: '2026-02-01' })
+    ).toThrow(/vinculadas a faturas/i);
 
-    // Tentativa maliciosa/inválida de mover a conta e alterar ID e timestamp
-    updateAccount('acc-1', { workspace_id: 'ws-hacked', id: 'acc-hacked', created_at: '2099-01-01T00:00:00Z', name: 'Conta Atualizada' });
-    expect(account.workspace_id).toBe('ws-1');
-    expect(account.id).toBe('acc-1');
-    expect(account.created_at).toBe('2026-01-01T00:00:00Z');
-    expect(account.name).toBe('Conta Atualizada');
-
-    // Tentativa de alterar workspace_id e credit_card_bill_id em updateTransaction
-    updateTransaction('tx-1', { workspace_id: 'ws-hacked', credit_card_bill_id: 'bill-arbitrary', description: 'Tx Modificada' });
-    expect(transaction.workspace_id).toBe('ws-1');
-    expect(transaction.credit_card_bill_id).toBe('bill-1');
-    expect(transaction.description).toBe('Tx Modificada');
+    expect(() =>
+      validateBilledTransactionDateImmutability(existingBilledTx, { transaction_date: '2026-01-01' })
+    ).not.toThrow();
   });
 
   it('deve revalidar novas referências em updateTransaction contra entidades inativas ou de outros workspaces via validateTransactionAccount real', () => {
