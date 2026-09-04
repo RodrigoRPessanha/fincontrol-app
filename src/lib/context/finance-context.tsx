@@ -52,6 +52,8 @@ import {
   validateCategoryActive,
   validateTransactionAccount,
   processRecurringBatchState,
+  resolveOrCreateCreditCardBill,
+  reconcileBillAfterItemDeletion,
 } from '../financial-engine';
 import { format } from 'date-fns';
 
@@ -275,62 +277,26 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       isPaid: boolean = false
     ): string => {
       const targetWsId = wsId || activeWorkspaceId;
-      const targetBillId = `bill-${cardId}-${referenceMonth}`;
-
-      const existingBill = allCreditCardBills.find(
-        (b) =>
-          b.credit_card_id === cardId &&
-          b.reference_month === referenceMonth &&
-          b.workspace_id === targetWsId
-      );
-
-      const returnedBillId = existingBill ? existingBill.id : targetBillId;
+      let returnedBillId = '';
 
       setAllCreditCardBills((prev) => {
-        const existingIndex = prev.findIndex(
-          (b) =>
-            b.credit_card_id === cardId &&
-            b.reference_month === referenceMonth &&
-            b.workspace_id === targetWsId
-        );
-
-        if (existingIndex >= 0) {
-          return prev.map((b, idx) => {
-            if (idx === existingIndex) {
-              const newTotal = b.total_amount + amount;
-              const newPaid = isPaid ? (b.paid_amount || 0) + amount : (b.paid_amount || 0);
-              const fullyPaid = newPaid >= newTotal && newTotal > 0;
-              return {
-                ...b,
-                total_amount: newTotal,
-                paid_amount: newPaid,
-                status: fullyPaid ? 'paid' : newPaid > 0 ? 'partially_paid' : b.status,
-                paid_at: fullyPaid ? dueDate : null,
-              };
-            }
-            return b;
-          });
-        } else {
-          const newBill: CreditCardBill = {
-            id: targetBillId,
-            credit_card_id: cardId,
-            workspace_id: targetWsId,
-            reference_month: referenceMonth,
-            closing_date: closingDate,
-            due_date: dueDate,
-            total_amount: amount,
-            paid_amount: isPaid ? amount : 0,
-            status: isPaid ? 'paid' : 'open',
-            paid_at: isPaid ? dueDate : null,
-            created_at: new Date().toISOString(),
-          };
-          return [...prev, newBill];
-        }
+        const res = resolveOrCreateCreditCardBill({
+          bills: prev,
+          cardId,
+          referenceMonth,
+          closingDate,
+          dueDate,
+          amount,
+          workspaceId: targetWsId,
+          isPaid,
+        });
+        returnedBillId = res.billId;
+        return res.updatedBills;
       });
 
       return returnedBillId;
     },
-    [activeWorkspaceId, allCreditCardBills]
+    [activeWorkspaceId]
   );
 
   // Helper centralizado para validar categoria/subcategoria ativa e de mesmo workspace
@@ -911,28 +877,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     if (tx.credit_card_bill_id) {
       const bill = allCreditCardBills.find((b) => b.id === tx.credit_card_bill_id);
       if (bill) {
-        const newTotal = Math.max(0, bill.total_amount - tx.amount);
-        if (bill.paid_amount && bill.paid_amount > newTotal) {
-          throw new Error(
-            `Não é possível excluir o item da fatura: o valor pago (R$ ${bill.paid_amount.toFixed(2)}) excederia o novo total (R$ ${newTotal.toFixed(2)}). Estorne o pagamento da fatura antes de excluir o item.`
-          );
-        }
-
+        const reconciled = reconcileBillAfterItemDeletion(bill, tx.amount);
         setAllCreditCardBills((prev) =>
-          prev.map((b) => {
-            if (b.id === tx.credit_card_bill_id) {
-              const newPaid = Math.min(b.paid_amount || 0, newTotal);
-              const isNowPaid = newPaid >= newTotal && newTotal > 0;
-              return {
-                ...b,
-                total_amount: newTotal,
-                paid_amount: newPaid,
-                status: newTotal === 0 ? 'open' : isNowPaid ? 'paid' : newPaid > 0 ? 'partially_paid' : 'open',
-                paid_at: isNowPaid ? b.paid_at : null,
-              };
-            }
-            return b;
-          })
+          prev.map((b) => (b.id === tx.credit_card_bill_id ? reconciled : b))
         );
       }
     }
