@@ -277,10 +277,22 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       isPaid: boolean = false
     ): string => {
       const targetWsId = wsId || activeWorkspaceId;
-      let returnedBillId = '';
 
+      // 1. Calcula o ID da fatura de forma síncrona usando a lista atual de faturas via função pura
+      const preview = resolveOrCreateCreditCardBill({
+        bills: allCreditCardBills,
+        cardId,
+        referenceMonth,
+        closingDate,
+        dueDate,
+        amount,
+        workspaceId: targetWsId,
+        isPaid,
+      });
+
+      // 2. Enfileira a atualização de estado funcional garantindo atomicidade com prev
       setAllCreditCardBills((prev) => {
-        const res = resolveOrCreateCreditCardBill({
+        return resolveOrCreateCreditCardBill({
           bills: prev,
           cardId,
           referenceMonth,
@@ -289,14 +301,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           amount,
           workspaceId: targetWsId,
           isPaid,
-        });
-        returnedBillId = res.billId;
-        return res.updatedBills;
+        }).updatedBills;
       });
 
-      return returnedBillId;
+      // 3. Retorna o ID síncrono imediatamente sem depender do timing do setter React
+      return preview.billId;
     },
-    [activeWorkspaceId]
+    [activeWorkspaceId, allCreditCardBills]
   );
 
   // Helper centralizado para validar categoria/subcategoria ativa e de mesmo workspace
