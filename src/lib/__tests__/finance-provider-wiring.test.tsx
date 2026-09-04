@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FinanceProvider, useFinance } from '../context/finance-context';
@@ -70,6 +70,21 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
     };
   });
 
+  const activeRoots: any[] = [];
+
+  afterEach(async () => {
+    while (activeRoots.length > 0) {
+      const root = activeRoots.pop();
+      try {
+        await act(async () => {
+          root.unmount();
+        });
+      } catch {
+        // cleanup silencioso
+      }
+    }
+  });
+
   async function mountProvider(): Promise<{
     getCtx: () => ReturnType<typeof useFinance>;
     root: any;
@@ -83,6 +98,7 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
 
     const container = (globalThis as any).document.createElement('div');
     const root = createRoot(container);
+    activeRoots.push(root);
 
     await act(async () => {
       root.render(React.createElement(FinanceProvider, null, React.createElement(Consumer)));
@@ -336,5 +352,26 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
     expect(() => reconcileBillAfterItemDeletion({ ...sampleBill, total_amount: NaN }, 50)).toThrow(
       /Valor total da fatura/i
     );
+
+    // 3. Robustez contra paid_amount corrompido em faturas legadas
+    expect(() => reconcileBillAfterItemDeletion({ ...sampleBill, paid_amount: NaN }, 50)).toThrow(
+      /Valor pago da fatura corrompido/i
+    );
+    expect(() => reconcileBillAfterItemDeletion({ ...sampleBill, paid_amount: -20 }, 50)).toThrow(
+      /Valor pago da fatura corrompido/i
+    );
+
+    // resolveOrCreateCreditCardBill com fatura legada de paid_amount corrompido normaliza com resiliência
+    const resCorrupted = resolveOrCreateCreditCardBill({
+      bills: [{ ...sampleBill, paid_amount: -50 as any }],
+      cardId: 'card-1',
+      referenceMonth: '2026-08',
+      closingDate: '2026-08-05',
+      dueDate: '2026-08-12',
+      amount: 100,
+      workspaceId: 'ws-1',
+    });
+    expect(resCorrupted.updatedBills[0].paid_amount).toBe(0);
+    expect(resCorrupted.updatedBills[0].total_amount).toBe(300);
   });
 });

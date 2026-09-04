@@ -1189,8 +1189,12 @@ export function resolveOrCreateCreditCardBill(
 
   if (existingIdx >= 0) {
     const existing = bills[existingIdx];
+    const safePaidAmount =
+      typeof existing.paid_amount === 'number' && Number.isFinite(existing.paid_amount) && existing.paid_amount >= 0
+        ? existing.paid_amount
+        : 0;
     const newTotal = existing.total_amount + amount;
-    const newPaid = isPaid ? (existing.paid_amount || 0) + amount : (existing.paid_amount || 0);
+    const newPaid = isPaid ? safePaidAmount + amount : safePaidAmount;
     const fullyPaid = newPaid >= newTotal && newTotal > 0;
     const updatedBills = bills.map((b, idx) =>
       idx === existingIdx
@@ -1250,14 +1254,22 @@ export function reconcileBillAfterItemDeletion(
   if (!Number.isFinite(bill.total_amount)) {
     throw new Error('Valor total da fatura inválido para reconciliação.');
   }
+  if (
+    bill.paid_amount !== undefined &&
+    bill.paid_amount !== null &&
+    (!Number.isFinite(bill.paid_amount) || bill.paid_amount < 0)
+  ) {
+    throw new Error('Valor pago da fatura corrompido ou inválido para reconciliação.');
+  }
 
+  const safePaid = bill.paid_amount || 0;
   const newTotal = Math.max(0, bill.total_amount - itemAmount);
-  if (bill.paid_amount && bill.paid_amount > newTotal) {
+  if (safePaid > newTotal) {
     throw new Error(
-      `Não é possível excluir o item da fatura: o valor pago (R$ ${bill.paid_amount.toFixed(2)}) excederia o novo total (R$ ${newTotal.toFixed(2)}). Estorne o pagamento da fatura antes de excluir o item.`
+      `Não é possível excluir o item da fatura: o valor pago (R$ ${safePaid.toFixed(2)}) excederia o novo total (R$ ${newTotal.toFixed(2)}). Estorne o pagamento da fatura antes de excluir o item.`
     );
   }
-  const newPaid = Math.min(bill.paid_amount || 0, newTotal);
+  const newPaid = Math.min(safePaid, newTotal);
   const isNowPaid = newPaid >= newTotal && newTotal > 0;
   return {
     ...bill,
