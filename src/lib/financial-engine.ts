@@ -1147,6 +1147,7 @@ export interface ProcessRecurringBatchParams {
   categories: Category[];
   todayStr: string;
   generateId?: (prefix: string) => string;
+  nowIso?: string;
 }
 
 export interface ProcessRecurringBatchResult {
@@ -1173,6 +1174,7 @@ export function processRecurringBatchState(
     categories,
     todayStr,
     generateId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    nowIso = new Date().toISOString(),
   } = params;
 
   let updatedBills = [...bills];
@@ -1192,7 +1194,6 @@ export function processRecurringBatchState(
     amount: number,
     wsId: string
   ): string => {
-    const targetBillId = `bill-${cardId}-${refMonth}`;
     const existingIdx = updatedBills.findIndex(
       (b) => b.credit_card_id === cardId && b.reference_month === refMonth && b.workspace_id === wsId
     );
@@ -1212,7 +1213,10 @@ export function processRecurringBatchState(
             }
           : item
       );
+      hasChanges = true;
+      return b.id;
     } else {
+      const targetBillId = `bill-${cardId}-${refMonth}`;
       updatedBills = [
         ...updatedBills,
         {
@@ -1226,12 +1230,12 @@ export function processRecurringBatchState(
           paid_amount: 0,
           status: 'open',
           paid_at: null,
-          created_at: new Date().toISOString(),
+          created_at: nowIso,
         },
       ];
+      hasChanges = true;
+      return targetBillId;
     }
-    hasChanges = true;
-    return targetBillId;
   };
 
   // Desativação semântica para qualquer série cujo next_occurrence já ultrapassou end_date
@@ -1315,7 +1319,7 @@ export function processRecurringBatchState(
           due_date: calculatedDueDate,
           status: 'pending',
           paid_amount: 0,
-          created_at: new Date().toISOString(),
+          created_at: nowIso,
         };
         newTransactions.push(newTx);
         processedSet.add(itemKey);

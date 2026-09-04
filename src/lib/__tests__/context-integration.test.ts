@@ -1066,10 +1066,113 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(res.reason).toBe('Categoria vinculada inativa ou inválida.');
   });
 
-  it('deve executar pipeline de produção processRecurringBatchState: suspender séries inválidas (divergente, receita em cartão, zero, negativo, NaN), avançar válidas e atualizar fatura de cartão (Wiring Real de Produção)', () => {
+  it('deve validar subcategoria aninhada ativa e inativa em validateRecurringMaterialization', () => {
+    const categories: Category[] = [
+      {
+        id: 'cat-main',
+        name: 'Moradia',
+        type: 'expense',
+        workspace_id: 'ws-1',
+        icon: 'home',
+        color: '#000',
+        active: true,
+        created_at: '2026-01-01',
+        subcategories: [
+          { id: 'sub-active', name: 'Aluguel', active: true, parent_id: 'cat-main', type: 'expense', workspace_id: 'ws-1', icon: 'home', color: '#000', created_at: '2026-01-01' },
+          { id: 'sub-inactive', name: 'Reforma', active: false, parent_id: 'cat-main', type: 'expense', workspace_id: 'ws-1', icon: 'home', color: '#000', created_at: '2026-01-01' },
+        ],
+      },
+    ];
+
+    const recActiveSub: RecurringTransaction = {
+      id: 'rec-sub-ok',
+      workspace_id: 'ws-1',
+      description: 'Aluguel Mensal',
+      category_id: 'sub-active',
+      amount: 1200,
+      type: 'expense',
+      frequency: 'monthly',
+      start_date: '2026-01-01',
+      next_occurrence: '2026-08-20',
+      active: true,
+      auto_create: true,
+      created_at: '2026-01-01',
+    };
+
+    const resOk = validateRecurringMaterialization(recActiveSub, [], [], [], categories, 'ws-1');
+    expect(resOk.isValid).toBe(true);
+
+    const recInactiveSub: RecurringTransaction = {
+      ...recActiveSub,
+      id: 'rec-sub-bad',
+      category_id: 'sub-inactive',
+    };
+
+    const resBad = validateRecurringMaterialization(recInactiveSub, [], [], [], categories, 'ws-1');
+    expect(resBad.isValid).toBe(false);
+    expect(resBad.reason).toBe('A subcategoria informada está inativa.');
+  });
+
+  it('deve usar gerador de ID padrão e desativar série com end_date ultrapassada no processRecurringBatchState', () => {
+    const initialRecurring: RecurringTransaction[] = [
+      {
+        id: 'rec-expired',
+        workspace_id: 'ws-1',
+        description: 'Série Expirada',
+        amount: 50,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-05-01',
+        end_date: '2026-04-01',
+        active: true,
+        auto_create: true,
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-one-step',
+        workspace_id: 'ws-1',
+        description: 'Série com Fim no Próximo Passo',
+        amount: 60,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        end_date: '2026-08-15',
+        active: true,
+        auto_create: true,
+        created_at: '2026-01-01',
+      },
+    ];
+
+    // Executa sem passar generateId nem nowIso para exercitar os defaults
+    const result = processRecurringBatchState({
+      recurring: initialRecurring,
+      transactions: [],
+      bills: [],
+      accounts: [],
+      paymentMethods: [],
+      creditCards: [],
+      categories: [],
+      todayStr: '2026-08-20',
+    });
+
+    expect(result.hasChanges).toBe(true);
+    const expired = result.updatedRecurring.find((r) => r.id === 'rec-expired');
+    expect(expired?.active).toBe(false);
+
+    const oneStep = result.updatedRecurring.find((r) => r.id === 'rec-one-step');
+    expect(oneStep?.active).toBe(false);
+    expect(oneStep?.next_occurrence).toBe('2026-09-01');
+    expect(result.newTransactions).toHaveLength(1);
+    expect(result.newTransactions[0].id).toMatch(/^tx-rec-/);
+  });
+
+  it('deve executar pipeline de produção processRecurringBatchState: preservar ID arbitrário de fatura existente (bill-2), criar nova fatura quando inexistente, suspender séries inválidas e permitir estorno (Wiring Real e Reconciliação V28)', () => {
     const paymentMethods: PaymentMethod[] = [
       { id: 'pm-divergent', name: 'Método com Conta A', type: 'debit_card', workspace_id: 'ws-1', active: true, linked_account_id: 'acc-a', created_at: '2026-01-01' },
-      { id: 'pm-card', name: 'Método Cartão', type: 'credit_card', workspace_id: 'ws-1', active: true, credit_card_id: 'card-1', created_at: '2026-01-01' },
+      { id: 'pm-card', name: 'Método Cartão 1', type: 'credit_card', workspace_id: 'ws-1', active: true, credit_card_id: 'card-1', created_at: '2026-01-01' },
+      { id: 'pm-card-new', name: 'Método Cartão 2', type: 'credit_card', workspace_id: 'ws-1', active: true, credit_card_id: 'card-2', created_at: '2026-01-01' },
       { id: 'pm-valid', name: 'Débito Válido', type: 'debit_card', workspace_id: 'ws-1', active: true, linked_account_id: 'acc-a', created_at: '2026-01-01' },
     ];
     const accounts: Account[] = [
@@ -1078,11 +1181,13 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     ];
     const creditCards: CreditCard[] = [
       { id: 'card-1', workspace_id: 'ws-1', name: 'Cartão 1', institution: 'Nu', closing_day: 5, due_day: 12, credit_limit: 5000, color: '#000', active: true, created_at: '2026-01-01' },
+      { id: 'card-2', workspace_id: 'ws-1', name: 'Cartão 2', institution: 'Inter', closing_day: 10, due_day: 20, credit_limit: 3000, color: '#f97316', active: true, created_at: '2026-01-01' },
     ];
 
+    // Fixture com ID de fatura existente ARBITRÁRIO realista (exatamente como bill-2 dos mocks)
     const initialBills: CreditCardBill[] = [
       {
-        id: 'bill-card-1-2026-08',
+        id: 'bill-2',
         credit_card_id: 'card-1',
         workspace_id: 'ws-1',
         reference_month: '2026-08',
@@ -1197,9 +1302,9 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
         created_at: '2026-01-01',
       },
       {
-        id: 'rec-valid-card',
+        id: 'rec-valid-card-existing',
         workspace_id: 'ws-1',
-        description: 'Assinatura Cartão Válida',
+        description: 'Assinatura Cartão com Fatura Existente',
         amount: 80,
         type: 'expense',
         frequency: 'monthly',
@@ -1209,6 +1314,21 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
         auto_create: true,
         payment_method_id: 'pm-card',
         credit_card_id: 'card-1',
+        created_at: '2026-01-01',
+      },
+      {
+        id: 'rec-valid-card-new-bill',
+        workspace_id: 'ws-1',
+        description: 'Assinatura Cartão sem Fatura Prévia',
+        amount: 120,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-08-01',
+        active: true,
+        auto_create: true,
+        payment_method_id: 'pm-card-new',
+        credit_card_id: 'card-2',
         created_at: '2026-01-01',
       },
     ];
@@ -1224,6 +1344,7 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
       categories: [],
       todayStr: '2026-08-20',
       generateId: (prefix: string) => `${prefix}-test`,
+      nowIso: '2026-08-20T12:00:00.000Z',
     });
 
     expect(result.hasChanges).toBe(true);
@@ -1249,33 +1370,54 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(recNanAfter?.active).toBe(false);
     expect(recNanAfter?.suspended_reason).toBe('O valor da recorrência deve ser maior que zero.');
 
-    // 2. Prova avanço das 2 séries válidas
+    // 2. Prova avanço das 3 séries válidas
     const recAccAfter = result.updatedRecurring.find((r) => r.id === 'rec-valid-acc');
     expect(recAccAfter?.active).toBe(true);
     expect(recAccAfter?.next_occurrence).toBe('2026-09-01');
 
-    const recCardAfter = result.updatedRecurring.find((r) => r.id === 'rec-valid-card');
-    expect(recCardAfter?.active).toBe(true);
-    expect(recCardAfter?.next_occurrence).toBe('2026-09-01');
+    const recCardExistAfter = result.updatedRecurring.find((r) => r.id === 'rec-valid-card-existing');
+    expect(recCardExistAfter?.active).toBe(true);
+    expect(recCardExistAfter?.next_occurrence).toBe('2026-09-01');
 
-    // 3. Prova contagem estrita de transações geradas: exatamente 2 (zero para as 5 inválidas)
-    expect(result.newTransactions).toHaveLength(2);
-    const txAcc = result.newTransactions.find((t) => t.recurring_transaction_id === 'rec-valid-acc');
-    expect(txAcc).toBeDefined();
-    expect(txAcc?.account_id).toBe('acc-a');
-    expect(txAcc?.credit_card_bill_id).toBeUndefined();
+    const recCardNewAfter = result.updatedRecurring.find((r) => r.id === 'rec-valid-card-new-bill');
+    expect(recCardNewAfter?.active).toBe(true);
+    expect(recCardNewAfter?.next_occurrence).toBe('2026-09-01');
 
-    const txCard = result.newTransactions.find((t) => t.recurring_transaction_id === 'rec-valid-card');
-    expect(txCard).toBeDefined();
-    expect(txCard?.credit_card_id).toBe('card-1');
-    expect(txCard?.credit_card_bill_id).toBe('bill-card-1-2026-08');
+    // 3. Prova contagem estrita de transações geradas: exatamente 3 (zero para as 5 inválidas)
+    expect(result.newTransactions).toHaveLength(3);
 
-    // 4. Prova mutação na fatura de cartão da série válida e proteção contra as séries suspensas
-    const targetBill = result.updatedBills.find((b) => b.id === 'bill-card-1-2026-08');
-    // Saldo inicial 500 + 80 da série válida = 580 (zero mutações das 5 inválidas)
-    expect(targetBill?.total_amount).toBe(580);
+    // 4. PROVA DO P0 LOCAL: Transaction em fatura existente DEVE apontar estritamente para o ID existente "bill-2"
+    const txCardExisting = result.newTransactions.find((t) => t.recurring_transaction_id === 'rec-valid-card-existing');
+    expect(txCardExisting).toBeDefined();
+    expect(txCardExisting?.credit_card_id).toBe('card-1');
+    expect(txCardExisting?.credit_card_bill_id).toBe('bill-2'); // NUNCA bill-card-1-2026-08!
 
-    // 5. Prova idempotência: executar ciclo novamente com o estado resultante não deve gerar duplicações
+    // Prova que a fatura "bill-2" existe em updatedBills e teve saldo incrementado (500 + 80 = 580)
+    const bill2After = result.updatedBills.find((b) => b.id === 'bill-2');
+    expect(bill2After).toBeDefined();
+    expect(bill2After?.total_amount).toBe(580);
+
+    // 5. PROVA DE FATURA CRIADA DO ZERO: quando não existe fatura prévia, usa a convenção determinística
+    const txCardNew = result.newTransactions.find((t) => t.recurring_transaction_id === 'rec-valid-card-new-bill');
+    expect(txCardNew).toBeDefined();
+    expect(txCardNew?.credit_card_id).toBe('card-2');
+    expect(txCardNew?.credit_card_bill_id).toBe('bill-card-2-2026-08');
+
+    const billNewAfter = result.updatedBills.find((b) => b.id === 'bill-card-2-2026-08');
+    expect(billNewAfter).toBeDefined();
+    expect(billNewAfter?.total_amount).toBe(120);
+
+    // 6. PROVA DE RECONCILIAÇÃO / ESTORNO: excluir a transação vinculada a "bill-2" estorna o saldo perfeitamente aos 500 originais
+    const billToReconcile = result.updatedBills.find((b) => b.id === txCardExisting!.credit_card_bill_id);
+    expect(billToReconcile).toBeDefined();
+    expect(billToReconcile?.id).toBe('bill-2');
+    const reconciledBill = {
+      ...billToReconcile!,
+      total_amount: billToReconcile!.total_amount - txCardExisting!.amount,
+    };
+    expect(reconciledBill.total_amount).toBe(500); // Saldo restaurado sem perda de referência!
+
+    // 7. Prova de idempotência: executar ciclo novamente não gera duplicações
     const resultCycle2 = processRecurringBatchState({
       recurring: result.updatedRecurring,
       transactions: [...result.newTransactions, ...initialTransactions],
@@ -1308,6 +1450,73 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
       transaction_date?: string;
       notes?: string | null;
     }>();
+  });
+
+  it('deve retornar o ID real de fatura pré-existente arbitrária ao adicionar item em vez de gerar ID sintético (P0 Validação)', () => {
+    let allCreditCardBills: CreditCardBill[] = [
+      {
+        id: 'bill-arbitrary-uuid-999',
+        credit_card_id: 'card-1',
+        workspace_id: 'ws-1',
+        reference_month: '2026-09',
+        closing_date: '2026-09-05',
+        due_date: '2026-09-12',
+        total_amount: 300,
+        paid_amount: 0,
+        status: 'open',
+        created_at: '2026-09-01',
+      },
+    ];
+
+    const getOrCreateAndAddItemToBill = (
+      cardId: string,
+      referenceMonth: string,
+      closingDate: string,
+      dueDate: string,
+      amount: number,
+      targetWsId: string
+    ): string => {
+      const targetBillId = `bill-${cardId}-${referenceMonth}`;
+      const existingBill = allCreditCardBills.find(
+        (b) =>
+          b.credit_card_id === cardId &&
+          b.reference_month === referenceMonth &&
+          b.workspace_id === targetWsId
+      );
+
+      const returnedBillId = existingBill ? existingBill.id : targetBillId;
+
+      if (existingBill) {
+        allCreditCardBills = allCreditCardBills.map((b) =>
+          b.id === existingBill.id ? { ...b, total_amount: b.total_amount + amount } : b
+        );
+      } else {
+        allCreditCardBills.push({
+          id: targetBillId,
+          credit_card_id: cardId,
+          workspace_id: targetWsId,
+          reference_month: referenceMonth,
+          closing_date: closingDate,
+          due_date: dueDate,
+          total_amount: amount,
+          paid_amount: 0,
+          status: 'open',
+          paid_at: null,
+          created_at: '2026-09-01',
+        });
+      }
+      return returnedBillId;
+    };
+
+    // 1. Ao reutilizar fatura existente, DEVE retornar 'bill-arbitrary-uuid-999'
+    const returnedId1 = getOrCreateAndAddItemToBill('card-1', '2026-09', '2026-09-05', '2026-09-12', 150, 'ws-1');
+    expect(returnedId1).toBe('bill-arbitrary-uuid-999');
+    expect(allCreditCardBills.find((b) => b.id === 'bill-arbitrary-uuid-999')?.total_amount).toBe(450);
+
+    // 2. Ao criar fatura nova do zero, retorna o ID sintético
+    const returnedId2 = getOrCreateAndAddItemToBill('card-1', '2026-10', '2026-10-05', '2026-10-12', 200, 'ws-1');
+    expect(returnedId2).toBe('bill-card-1-2026-10');
+    expect(allCreditCardBills.find((b) => b.id === 'bill-card-1-2026-10')?.total_amount).toBe(200);
   });
 
   it('deve proteger campos imutáveis (workspace_id, id, created_at) contra sobrescrita em updateAccount, updateCreditCard, updateTransaction e updateGoal', () => {
