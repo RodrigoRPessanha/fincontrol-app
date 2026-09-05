@@ -10,6 +10,8 @@ import {
   fromCents,
   roundCurrency,
   compareCurrency,
+  calculateDashboardSummary,
+  calculateFutureCommitments,
 } from '../financial-engine';
 import { CreditCardBill } from '../types';
 
@@ -771,6 +773,213 @@ describe('FinanceProvider Wiring & Integracao Real React (P1-01 Obrigatorio V30)
           payment_date: '2026-08-02',
         });
       }).toThrow(/excede o saldo restante da transação/i);
+
+      // 2. Criar compra parcelada fora de cartão com parcela de 30.30 (V35 / P2-01)
+      let pur: any;
+      await act(async () => {
+        pur = getCtx().createInstallmentPurchase({
+          description: 'Parcelamento 30.30',
+          total_amount: 30.3,
+          installment_count: 1,
+          purchase_date: '2026-08-02',
+          account_id: 'acc-1',
+          category_id: getCtx().categories[0]?.id,
+        });
+      });
+      const inst = getCtx().installments.find((i) => i.purchase_id === pur.id);
+      expect(inst).toBeDefined();
+      const instId = inst!.id;
+
+      // Pagar parcial de 10.10 na parcela
+      await act(async () => {
+        getCtx().recordPayment({
+          installment_id: instId,
+          account_id: 'acc-1',
+          amount: 10.1,
+          payment_date: '2026-08-02',
+        });
+      });
+      let currentInst = getCtx().installments.find((i) => i.id === instId);
+      expect(currentInst?.status).toBe('partially_paid');
+      expect(currentInst?.paid_amount).toBe(10.1);
+
+      // Pagar restante de 20.20 (total 30.30)
+      await act(async () => {
+        getCtx().recordPayment({
+          installment_id: instId,
+          account_id: 'acc-1',
+          amount: 20.2,
+          payment_date: '2026-08-02',
+        });
+      });
+      currentInst = getCtx().installments.find((i) => i.id === instId);
+      expect(currentInst?.status).toBe('paid');
+      expect(currentInst?.paid_amount).toBe(30.3);
+
+      // Tentar pagar 0.01 adicional deve ser rejeitado
+      expect(() => {
+        getCtx().recordPayment({
+          installment_id: instId,
+          account_id: 'acc-1',
+          amount: 0.01,
+          payment_date: '2026-08-02',
+        });
+      }).toThrow(/excede o saldo restante da parcela/i);
+    });
+
+    it('deve concluir meta financeira sem falha por float drift (0.30 + 0.60 = 0.90) (V35 / P1)', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      const accBefore = getCtx().accounts.find((a) => a.id === 'acc-1');
+      const balanceBefore = accBefore?.current_balance || 0;
+
+      // Criar meta com target de 0.90
+      let goal: any;
+      await act(async () => {
+        goal = getCtx().addGoal({
+          name: 'Meta Teste Float',
+          target_amount: 0.9,
+          current_amount: 0,
+          target_date: '2026-12-31',
+          status: 'in_progress',
+          color: '#10b981',
+          icon: 'piggy-bank',
+        });
+      });
+
+      // Primeiro depósito de 0.30
+      await act(async () => {
+        getCtx().depositGoal(goal.id, 0.3, 'acc-1');
+      });
+      let currentGoal = getCtx().goals.find((g) => g.id === goal.id);
+      expect(currentGoal?.current_amount).toBe(0.3);
+      expect(currentGoal?.status).toBe('in_progress');
+
+      // Segundo depósito de 0.60 (0.30 + 0.60 = 0.90; em float cru seria 0.8999999999999999)
+      await act(async () => {
+        getCtx().depositGoal(goal.id, 0.6, 'acc-1');
+      });
+      currentGoal = getCtx().goals.find((g) => g.id === goal.id);
+      expect(currentGoal?.current_amount).toBe(0.9);
+      expect(currentGoal?.status).toBe('completed');
+
+      // Verificar que saldo da conta debitou exatamente 0.90 em centavos
+      const accAfter = getCtx().accounts.find((a) => a.id === 'acc-1');
+      expect(accAfter?.current_balance).toBe(fromCents(toCents(balanceBefore) - 90));
+    });
+
+    it('deve transferir valores decimais preservando saldos em centavos exatos (V35 / P1)', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      const acc1Before = getCtx().accounts.find((a) => a.id === 'acc-1')!;
+      const acc2Before = getCtx().accounts.find((a) => a.id === 'acc-2')!;
+      const balance1Before = acc1Before.current_balance;
+      const balance2Before = acc2Before.current_balance;
+
+      // Transferência 1: 10.15
+      await act(async () => {
+        getCtx().createTransfer('acc-1', 'acc-2', 10.15);
+      });
+
+      // Transferência 2: 20.25
+      await act(async () => {
+        getCtx().createTransfer('acc-1', 'acc-2', 20.25);
+      });
+
+      const acc1After = getCtx().accounts.find((a) => a.id === 'acc-1')!;
+      const acc2After = getCtx().accounts.find((a) => a.id === 'acc-2')!;
+
+      // 10.15 + 20.25 = 30.40
+      expect(acc1After.current_balance).toBe(fromCents(toCents(balance1Before) - 3040));
+      expect(acc2After.current_balance).toBe(fromCents(toCents(balance2Before) + 3040));
+    });
+
+    it('deve retornar saldo exatamente ao original após addTransaction paga e deleteTransaction (V35 / P1)', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+
+      const { getCtx } = await mountProvider();
+      expect(getCtx().isLoaded).toBe(true);
+
+      const accBefore = getCtx().accounts.find((a) => a.id === 'acc-1')!;
+      const originalBalance = accBefore.current_balance;
+
+      let tx: any;
+      await act(async () => {
+        tx = getCtx().addTransaction({
+          description: 'Despesa paga imediata',
+          amount: 30.3,
+          type: 'expense',
+          transaction_date: '2026-08-02',
+          due_date: '2026-08-02',
+          account_id: 'acc-1',
+          category_id: getCtx().categories[0]?.id,
+          status: 'paid',
+        });
+      });
+
+      const accDuring = getCtx().accounts.find((a) => a.id === 'acc-1')!;
+      expect(accDuring.current_balance).toBe(fromCents(toCents(originalBalance) - 3030));
+
+      await act(async () => {
+        getCtx().deleteTransaction(tx.id);
+      });
+
+      const accAfter = getCtx().accounts.find((a) => a.id === 'acc-1')!;
+      expect(accAfter.current_balance).toBe(originalBalance);
+    });
+
+    it('deve normalizar agregações de Dashboard e Previsões em centavos (V35 / P2-02)', () => {
+      const mockTxs: any[] = [
+        {
+          id: 'tx-1',
+          workspace_id: 'ws-1',
+          amount: 10.1,
+          type: 'expense',
+          transaction_date: '2026-08-01',
+          due_date: '2026-08-01',
+          status: 'pending',
+        },
+        {
+          id: 'tx-2',
+          workspace_id: 'ws-1',
+          amount: 20.2,
+          type: 'expense',
+          transaction_date: '2026-08-02',
+          due_date: '2026-08-02',
+          status: 'pending',
+        },
+      ];
+
+      const dashboard = calculateDashboardSummary(
+        mockTxs,
+        [],
+        [],
+        [{ current_balance: 100.1 }, { current_balance: 200.2 }],
+        [],
+        '2026-08'
+      );
+      expect(dashboard.planned.expense).toBe(30.3);
+      expect(dashboard.planned.net).toBe(-30.3);
+      expect(dashboard.totalBalance).toBe(300.3);
+
+      const commitments = calculateFutureCommitments([], [], mockTxs, 1, new Date(2026, 7, 1));
+      expect(commitments[0].pendingTransactionsAmount).toBe(30.3);
+      expect(commitments[0].totalCommitment).toBe(30.3);
+      expect(commitments[0].netForecast).toBe(-30.3);
+    });
+
+    it('deve formalizar política determinística de arredondamento para >2 casas decimais (V35 / P2-03)', () => {
+      expect(roundCurrency(1.005)).toBe(1.01);
+      expect(roundCurrency(1.004)).toBe(1.0);
+      expect(toCents(1.005)).toBe(101);
+      expect(toCents(1.004)).toBe(100);
+      expect(fromCents(101)).toBe(1.01);
     });
   });
 });

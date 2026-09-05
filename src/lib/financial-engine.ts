@@ -457,11 +457,11 @@ export function calculateFutureCommitments(
     const monthLabel = monthLabelRaw.charAt(0).toUpperCase() + monthLabelRaw.slice(1);
 
     const items: MonthlyCommitment['items'] = [];
-    let installmentsAmount = 0;
+    let installmentsAmountCents = 0;
     let installmentsCount = 0;
-    let recurringAmount = 0;
-    let pendingTransactionsAmount = 0;
-    let expectedIncome = 0;
+    let recurringAmountCents = 0;
+    let pendingTransactionsAmountCents = 0;
+    let expectedIncomeCents = 0;
 
     // 1. Parcelas ativas fora de cartão
     for (const inst of installments) {
@@ -469,12 +469,12 @@ export function calculateFutureCommitments(
 
       const instMonth = inst.due_date ? inst.due_date.slice(0, 7) : '';
       if (instMonth === monthKey) {
-        const remaining = Math.max(0, inst.amount - (inst.paid_amount || 0));
-        installmentsAmount += remaining;
+        const remainingCents = Math.max(0, toCents(inst.amount) - toCents(inst.paid_amount || 0));
+        installmentsAmountCents += remainingCents;
         installmentsCount += 1;
         items.push({
           title: `${inst.purchase?.description || 'Compra Parcelada'} (${inst.installment_number}/${inst.purchase?.installment_count || '?'})`,
-          amount: remaining,
+          amount: fromCents(remainingCents),
           type: 'installment',
           dueDate: inst.due_date,
           categoryName: inst.purchase?.category?.name,
@@ -486,13 +486,13 @@ export function calculateFutureCommitments(
     for (const bill of creditCardBills) {
       if (bill.status === 'cancelled' || bill.status === 'paid') continue;
       if (bill.reference_month === monthKey) {
-        const remaining = Math.max(0, bill.total_amount - (bill.paid_amount || 0));
-        if (remaining > 0) {
-          installmentsAmount += remaining;
+        const remainingCents = Math.max(0, toCents(bill.total_amount) - toCents(bill.paid_amount || 0));
+        if (remainingCents > 0) {
+          installmentsAmountCents += remainingCents;
           installmentsCount += 1;
           items.push({
             title: `Fatura Cartão (${bill.reference_month})`,
-            amount: remaining,
+            amount: fromCents(remainingCents),
             type: 'installment',
             dueDate: bill.due_date,
           });
@@ -515,19 +515,19 @@ export function calculateFutureCommitments(
       const remainingOccurrences = Math.max(0, multiplier - materializedCount);
       if (remainingOccurrences <= 0) continue;
 
-      const recTotal = rec.amount * remainingOccurrences;
+      const recTotalCents = toCents(rec.amount) * remainingOccurrences;
 
       if (rec.type === 'expense') {
-        recurringAmount += recTotal;
+        recurringAmountCents += recTotalCents;
         items.push({
           title: remainingOccurrences > 1 ? `${rec.description} (${remainingOccurrences}x)` : rec.description,
-          amount: recTotal,
+          amount: fromCents(recTotalCents),
           type: 'recurring',
           dueDate: `${monthKey}-10`,
           categoryName: rec.category?.name,
         });
       } else {
-        expectedIncome += recTotal;
+        expectedIncomeCents += recTotalCents;
       }
     }
 
@@ -537,34 +537,34 @@ export function calculateFutureCommitments(
 
       const txMonth = tx.due_date ? tx.due_date.slice(0, 7) : tx.transaction_date.slice(0, 7);
       if (txMonth === monthKey) {
-        const remaining = Math.max(0, tx.amount - (tx.paid_amount || 0));
+        const remainingCents = Math.max(0, toCents(tx.amount) - toCents(tx.paid_amount || 0));
         if (tx.type === 'expense') {
-          pendingTransactionsAmount += remaining;
+          pendingTransactionsAmountCents += remainingCents;
           items.push({
             title: tx.description,
-            amount: remaining,
+            amount: fromCents(remainingCents),
             type: 'transaction',
             dueDate: tx.due_date,
             categoryName: tx.category?.name,
           });
         } else {
-          expectedIncome += remaining;
+          expectedIncomeCents += remainingCents;
         }
       }
     }
 
-    const totalCommitment = installmentsAmount + recurringAmount + pendingTransactionsAmount;
-    const netForecast = expectedIncome - totalCommitment;
+    const totalCommitmentCents = installmentsAmountCents + recurringAmountCents + pendingTransactionsAmountCents;
+    const netForecastCents = expectedIncomeCents - totalCommitmentCents;
 
     result.push({
       monthKey,
       monthLabel,
-      installmentsAmount,
-      recurringAmount,
-      pendingTransactionsAmount,
-      expectedIncome,
-      totalCommitment,
-      netForecast,
+      installmentsAmount: fromCents(installmentsAmountCents),
+      recurringAmount: fromCents(recurringAmountCents),
+      pendingTransactionsAmount: fromCents(pendingTransactionsAmountCents),
+      expectedIncome: fromCents(expectedIncomeCents),
+      totalCommitment: fromCents(totalCommitmentCents),
+      netForecast: fromCents(netForecastCents),
       installmentsCount,
       items,
     });
@@ -588,10 +588,10 @@ export function calculateDashboardSummary(
   creditCardBills: CreditCardBill[] = [],
   currentDateStr?: string
 ) {
-  const totalBalance = accounts.reduce((acc, a) => acc + (a.current_balance || 0), 0);
+  const totalBalanceCents = accounts.reduce((acc, a) => acc + toCents(a.current_balance || 0), 0);
 
-  let realizedIncome = 0;
-  let realizedExpense = 0;
+  let realizedIncomeCents = 0;
+  let realizedExpenseCents = 0;
 
   // 1. Visão de Caixa Realizado (via pagamentos da competência)
   // Coletamos todos os IDs de transações com pagamento na história toda para evitar fallback duplo
@@ -604,16 +604,17 @@ export function calculateDashboardSummary(
 
   for (const pay of payments) {
     if (pay.payment_date && pay.payment_date.slice(0, 7) === referenceMonth) {
+      const payAmountCents = toCents(pay.amount);
       if (pay.transaction_id) {
         const tx = transactions.find((t) => t.id === pay.transaction_id);
         if (tx && tx.type === 'income') {
-          realizedIncome += pay.amount;
+          realizedIncomeCents += payAmountCents;
         } else {
-          realizedExpense += pay.amount;
+          realizedExpenseCents += payAmountCents;
         }
       } else {
         // Pagamento de fatura de cartão ou parcela direta
-        realizedExpense += pay.amount;
+        realizedExpenseCents += payAmountCents;
       }
     }
   }
@@ -627,23 +628,25 @@ export function calculateDashboardSummary(
     const paidDate = tx.paid_at ? tx.paid_at.slice(0, 7) : tx.transaction_date.slice(0, 7);
     if (paidDate === referenceMonth) {
       if (tx.status === 'paid') {
-        if (tx.type === 'income') realizedIncome += tx.amount;
-        else realizedExpense += tx.amount;
+        const txCents = toCents(tx.amount);
+        if (tx.type === 'income') realizedIncomeCents += txCents;
+        else realizedExpenseCents += txCents;
       } else if (tx.status === 'partially_paid') {
-        if (tx.type === 'income') realizedIncome += tx.paid_amount || 0;
-        else realizedExpense += tx.paid_amount || 0;
+        const txPaidCents = toCents(tx.paid_amount || 0);
+        if (tx.type === 'income') realizedIncomeCents += txPaidCents;
+        else realizedExpenseCents += txPaidCents;
       }
     }
   }
 
   // 2. Visão Prevista e Pendências para o mês
-  let plannedIncome = 0;
-  let plannedExpense = 0;
+  let plannedIncomeCents = 0;
+  let plannedExpenseCents = 0;
 
   let overdueCount = 0;
-  let overdueAmount = 0;
+  let overdueAmountCents = 0;
   let pendingCount = 0;
-  let pendingAmount = 0;
+  let pendingAmountCents = 0;
 
   const todayStr = currentDateStr || format(new Date(), 'yyyy-MM-dd');
 
@@ -652,18 +655,18 @@ export function calculateDashboardSummary(
     if (bill.status === 'cancelled') continue;
 
     if (bill.reference_month === referenceMonth) {
-      plannedExpense += bill.total_amount;
+      plannedExpenseCents += toCents(bill.total_amount);
     }
 
     if (bill.status === 'open' || bill.status === 'partially_paid' || bill.status === 'overdue') {
-      const remaining = Math.max(0, bill.total_amount - (bill.paid_amount || 0));
-      if (remaining > 0) {
+      const remainingCents = Math.max(0, toCents(bill.total_amount) - toCents(bill.paid_amount || 0));
+      if (remainingCents > 0) {
         if (bill.due_date < todayStr) {
           overdueCount += 1;
-          overdueAmount += remaining;
+          overdueAmountCents += remainingCents;
         } else {
           pendingCount += 1;
-          pendingAmount += remaining;
+          pendingAmountCents += remainingCents;
         }
       }
     }
@@ -676,21 +679,22 @@ export function calculateDashboardSummary(
     const txDueMonth = tx.due_date ? tx.due_date.slice(0, 7) : tx.transaction_date.slice(0, 7);
 
     if (txDueMonth === referenceMonth) {
+      const txCents = toCents(tx.amount);
       if (tx.type === 'income') {
-        plannedIncome += tx.amount;
+        plannedIncomeCents += txCents;
       } else {
-        plannedExpense += tx.amount;
+        plannedExpenseCents += txCents;
       }
     }
 
     if (tx.status === 'pending' || tx.status === 'partially_paid') {
-      const remaining = Math.max(0, tx.amount - (tx.paid_amount || 0));
+      const remainingCents = Math.max(0, toCents(tx.amount) - toCents(tx.paid_amount || 0));
       if (tx.due_date && tx.due_date < todayStr) {
         overdueCount += 1;
-        overdueAmount += remaining;
+        overdueAmountCents += remainingCents;
       } else {
         pendingCount += 1;
-        pendingAmount += remaining;
+        pendingAmountCents += remainingCents;
       }
     }
   }
@@ -701,17 +705,17 @@ export function calculateDashboardSummary(
 
     const instMonth = inst.due_date ? inst.due_date.slice(0, 7) : '';
     if (instMonth === referenceMonth) {
-      plannedExpense += inst.amount;
+      plannedExpenseCents += toCents(inst.amount);
     }
 
     if (inst.status === 'pending' || inst.status === 'partially_paid') {
-      const remaining = Math.max(0, inst.amount - (inst.paid_amount || 0));
+      const remainingCents = Math.max(0, toCents(inst.amount) - toCents(inst.paid_amount || 0));
       if (inst.due_date && inst.due_date < todayStr) {
         overdueCount += 1;
-        overdueAmount += remaining;
+        overdueAmountCents += remainingCents;
       } else {
         pendingCount += 1;
-        pendingAmount += remaining;
+        pendingAmountCents += remainingCents;
       }
     }
   }
@@ -732,33 +736,38 @@ export function calculateDashboardSummary(
     const remainingOccurrences = Math.max(0, multiplier - materializedCount);
     if (remainingOccurrences <= 0) continue;
 
-    const recTotal = rec.amount * remainingOccurrences;
+    const recTotalCents = toCents(rec.amount) * remainingOccurrences;
     if (rec.type === 'income') {
-      plannedIncome += recTotal;
+      plannedIncomeCents += recTotalCents;
     } else {
-      plannedExpense += recTotal;
+      plannedExpenseCents += recTotalCents;
     }
   }
 
+  const realizedIncome = fromCents(realizedIncomeCents);
+  const realizedExpense = fromCents(realizedExpenseCents);
+  const plannedIncome = fromCents(plannedIncomeCents);
+  const plannedExpense = fromCents(plannedExpenseCents);
+
   return {
-    totalBalance,
+    totalBalance: fromCents(totalBalanceCents),
     realized: {
       income: realizedIncome,
       expense: realizedExpense,
-      net: realizedIncome - realizedExpense,
+      net: fromCents(realizedIncomeCents - realizedExpenseCents),
     },
     planned: {
       income: plannedIncome,
       expense: plannedExpense,
-      net: plannedIncome - plannedExpense,
+      net: fromCents(plannedIncomeCents - plannedExpenseCents),
     },
     overdue: {
       count: overdueCount,
-      amount: overdueAmount,
+      amount: fromCents(overdueAmountCents),
     },
     pending: {
       count: pendingCount,
-      amount: pendingAmount,
+      amount: fromCents(pendingAmountCents),
     },
   };
 }
@@ -1163,7 +1172,10 @@ export interface ResolveOrCreateBillResult {
  */
 /**
  * Converte um valor monetário (em reais/unidade principal) para centavos inteiros.
- * Adiciona Number.EPSILON antes de Math.round para evitar artefatos binários IEEE 754.
+ * Política de Decimais (V35 / P2-03): Adota arredondamento determinístico para o centavo mais próximo
+ * (half-up / round-to-nearest) através de Number.EPSILON antes de Math.round.
+ * Entradas com mais de 2 casas decimais são normalizadas deterministicamente na borda
+ * (ex: 1.005 -> 101 centavos / R$ 1,01; 1.004 -> 100 centavos / R$ 1,00).
  */
 export function toCents(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100);
@@ -1178,6 +1190,7 @@ export function fromCents(cents: number): number {
 
 /**
  * Arredonda de forma pura e determinística qualquer montante monetário para 2 casas decimais.
+ * Utiliza a política institucional de centavos inteiros (half-up via Number.EPSILON).
  */
 export function roundCurrency(amount: number): number {
   return fromCents(toCents(amount));
