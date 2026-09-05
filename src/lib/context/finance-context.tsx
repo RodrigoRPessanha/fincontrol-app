@@ -826,8 +826,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       setAllAccounts((prev) =>
         prev.map((acc) => {
           if (acc.id === newTx.account_id) {
-            const diff = newTx.type === 'expense' ? -newTx.amount : newTx.amount;
-            return { ...acc, current_balance: acc.current_balance + diff };
+            const currentCents = toCents(acc.current_balance);
+            const amountCents = toCents(newTx.amount);
+            const diffCents = newTx.type === 'expense' ? -amountCents : amountCents;
+            return { ...acc, current_balance: fromCents(currentCents + diffCents) };
           }
           return acc;
         })
@@ -915,8 +917,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         setAllAccounts((prev) =>
           prev.map((acc) => {
             if (acc.id === tx.account_id) {
-              const diff = tx.type === 'expense' ? paid : -paid;
-              return { ...acc, current_balance: acc.current_balance + diff };
+              const currentCents = toCents(acc.current_balance);
+              const paidCents = toCents(paid);
+              const diffCents = tx.type === 'expense' ? paidCents : -paidCents;
+              return { ...acc, current_balance: fromCents(currentCents + diffCents) };
             }
             return acc;
           })
@@ -1242,12 +1246,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       throw new Error('As contas informadas devem pertencer ao workspace ativo.');
     }
 
+    const transferCents = toCents(amount);
+    const finalAmount = fromCents(transferCents);
+
     const newTransfer: Transfer = {
       id: generateId('trf'),
       workspace_id: activeWorkspace.id,
       from_account_id: fromAccountId,
       to_account_id: toAccountId,
-      amount,
+      amount: finalAmount,
       transfer_date: date,
       notes: notes || undefined,
       created_by: 'usr-1',
@@ -1261,10 +1268,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setAllAccounts((prev) =>
       prev.map((acc) => {
         if (acc.id === fromAccountId) {
-          return { ...acc, current_balance: acc.current_balance - amount };
+          return { ...acc, current_balance: fromCents(toCents(acc.current_balance) - transferCents) };
         }
         if (acc.id === toAccountId) {
-          return { ...acc, current_balance: acc.current_balance + amount };
+          return { ...acc, current_balance: fromCents(toCents(acc.current_balance) + transferCents) };
         }
         return acc;
       })
@@ -1411,21 +1418,31 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     if (!acc) throw new Error('Conta bancária não encontrada no workspace ativo.');
     if (acc.active === false) throw new Error('A conta bancária informada está inativa.');
 
+    const currentCents = toCents(goal.current_amount || 0);
+    const depositCents = toCents(amount);
+    const targetCents = toCents(goal.target_amount);
+    const newCurrentCents = currentCents + depositCents;
+    const isCompleted = newCurrentCents >= targetCents;
+    const newCurrent = fromCents(newCurrentCents);
+
     setAllGoals((prev) =>
       prev.map((g) => {
         if (g.id === goalId && g.workspace_id === activeWorkspace.id) {
-          const newCurrent = g.current_amount + amount;
           return {
             ...g,
             current_amount: newCurrent,
-            status: newCurrent >= g.target_amount ? 'completed' : g.status,
+            status: isCompleted ? 'completed' : g.status,
           };
         }
         return g;
       })
     );
     setAllAccounts((prev) =>
-      prev.map((a) => (a.id === accountId && a.workspace_id === activeWorkspace.id ? { ...a, current_balance: a.current_balance - amount } : a))
+      prev.map((a) =>
+        a.id === accountId && a.workspace_id === activeWorkspace.id
+          ? { ...a, current_balance: fromCents(toCents(a.current_balance) - depositCents) }
+          : a
+      )
     );
   };
 
