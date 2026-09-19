@@ -20,6 +20,7 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { BillInspectorModal } from '@/components/accounts/BillInspectorModal';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
 import { Account, CreditCard, CreditCardBill } from '@/lib/types';
+import { toCents, fromCents } from '@/lib/financial-engine';
 
 export default function AccountsPage() {
   const {
@@ -34,8 +35,10 @@ export default function AccountsPage() {
     deleteAccount,
     addCreditCard,
     createTransfer,
+    activeWorkspace,
   } = useFinance();
 
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
   const [activeTab, setActiveTab] = useState<'accounts' | 'cards' | 'bills' | 'transfers'>('accounts');
   const [showInactiveAccounts, setShowInactiveAccounts] = useState(false);
 
@@ -74,18 +77,25 @@ export default function AccountsPage() {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferNotes, setTransferNotes] = useState('');
 
+  // Totalizador patrimonial (somatório em centavos para precisão exata)
+  const totalAccountsBalanceCents = accounts.reduce((acc, a) => acc + toCents(a.current_balance), 0);
+  const totalAccountsBalance = fromCents(totalAccountsBalanceCents);
+
   const handleCreateAccount = (e: React.FormEvent) => {
     e.preventDefault();
-    const balance = parseFloat(accBalance.replace(/\./g, '').replace(',', '.')) || 0;
+    const bal = isExpenseTracker ? 0 : (parseFloat(accBalance.replace(/\./g, '').replace(',', '.')) || 0);
+    if (!accName.trim()) return;
+
     addAccount({
-      name: accName,
+      name: accName.trim(),
       type: accType,
-      institution: accInstitution || 'Geral',
-      initial_balance: balance,
-      current_balance: balance,
+      institution: accInstitution.trim() || 'Outro',
+      initial_balance: bal,
+      current_balance: bal,
       color: accColor,
       active: true,
     });
+
     setAccName('');
     setAccInstitution('');
     setAccBalance('');
@@ -94,38 +104,44 @@ export default function AccountsPage() {
 
   const handleCreateCard = (e: React.FormEvent) => {
     e.preventDefault();
-    const limit = parseFloat(cardLimit.replace(/\./g, '').replace(',', '.')) || 0;
+    const lim = parseFloat(cardLimit.replace(/\./g, '').replace(',', '.')) || 0;
+    if (!cardName.trim() || lim <= 0) return;
+
     addCreditCard({
-      name: cardName,
-      institution: cardInstitution || 'Banco',
-      last_four_digits: cardLastDigits || '0000',
-      credit_limit: limit,
-      closing_day: cardClosingDay,
-      due_day: cardDueDay,
+      name: cardName.trim(),
+      institution: cardInstitution.trim() || 'Cartão',
+      last_four_digits: cardLastDigits.trim() || undefined,
+      credit_limit: lim,
+      closing_day: Number(cardClosingDay) || 1,
+      due_day: Number(cardDueDay) || 10,
       linked_payment_account_id: cardAccountId || undefined,
       color: '#6366f1',
       active: true,
     });
+
     setCardName('');
     setCardInstitution('');
     setCardLastDigits('');
     setCardLimit('');
+    setCardAccountId('');
     setIsNewCardOpen(false);
   };
 
   const handleTransfer = (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(transferAmount.replace(/\./g, '').replace(',', '.')) || 0;
-    if (amt <= 0 || !fromAcc || !toAcc || fromAcc === toAcc) return;
-    createTransfer(fromAcc, toAcc, amt, undefined, transferNotes);
-    setFromAcc('');
-    setToAcc('');
-    setTransferAmount('');
-    setTransferNotes('');
-    setIsTransferOpen(false);
-  };
+    if (!fromAcc || !toAcc || amt <= 0) return;
 
-  const totalAccountsBalance = accounts.reduce((acc, a) => acc + (a.current_balance || 0), 0);
+    try {
+      createTransfer(fromAcc, toAcc, amt);
+      setTransferAmount('');
+      setFromAcc('');
+      setToAcc('');
+      setIsTransferOpen(false);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao realizar transferência.');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -135,20 +151,28 @@ export default function AccountsPage() {
           <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Contas, Cartões & Faturas
           </h2>
-          <p className="text-xs text-slate-500">
-            Patrimônio total em contas: <strong className="text-slate-800 dark:text-slate-200">{formatCurrency(totalAccountsBalance)}</strong>
+          <p className="text-xs text-slate-500 mt-1">
+            {isExpenseTracker ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+                Modo Apenas Despesas & Rateio: Saldo e transferências desativados
+              </span>
+            ) : (
+              <>Patrimônio total em contas: <strong className="text-slate-800 dark:text-slate-200">{formatCurrency(totalAccountsBalance)}</strong></>
+            )}
           </p>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            onClick={() => setIsTransferOpen(true)}
-            className="flex items-center gap-1.5 rounded-2xl bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm border border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
-          >
-            <ArrowRightLeft className="h-3.5 w-3.5 text-blue-600" />
-            <span>Transferir entre Contas</span>
-          </button>
+          {!isExpenseTracker && (
+            <button
+              onClick={() => setIsTransferOpen(true)}
+              className="flex items-center gap-1.5 rounded-2xl bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm border border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5 text-blue-600" />
+              <span>Transferir entre Contas</span>
+            </button>
+          )}
 
           {activeTab === 'accounts' && (
             <button
@@ -210,22 +234,29 @@ export default function AccountsPage() {
           <span>Faturas ({creditCardBills.length})</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('transfers')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
-            activeTab === 'transfers'
-              ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
-        >
-          <ArrowRightLeft className="h-4 w-4" />
-          <span>Transferências ({transfers.length})</span>
-        </button>
+        {!isExpenseTracker && (
+          <button
+            onClick={() => setActiveTab('transfers')}
+            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+              activeTab === 'transfers'
+                ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            <span>Transferências ({transfers.length})</span>
+          </button>
+        )}
       </div>
 
       {/* Conteúdo da Tab 1: Contas Bancárias */}
       {activeTab === 'accounts' && (
         <div className="space-y-4">
+          {isExpenseTracker && (
+            <div className="rounded-2xl bg-amber-50/80 p-4 border border-amber-200 text-xs text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-300">
+              💡 <strong>Modo Apenas Despesas:</strong> As contas bancárias cadastradas funcionam apenas como identificadores opcionais para categorizar onde as despesas ocorreram. Pagamentos não alteram saldo.
+            </div>
+          )}
           {allWorkspaceAccounts.some((a) => a.active === false) && (
             <div className="flex items-center justify-end">
               <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer">
@@ -280,12 +311,21 @@ export default function AccountsPage() {
                   </div>
 
                   <div className="mt-6 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-semibold uppercase text-slate-400">Saldo Atual</span>
-                      <div className="text-xl font-black text-slate-900 dark:text-white">
-                        {formatCurrency(acc.current_balance)}
+                    {isExpenseTracker ? (
+                      <div>
+                        <span className="text-[10px] font-semibold uppercase text-slate-400">Tipo de Controle</span>
+                        <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                          Identificador opcional (Sem saldo)
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div>
+                        <span className="text-[10px] font-semibold uppercase text-slate-400">Saldo Atual</span>
+                        <div className="text-xl font-black text-slate-900 dark:text-white">
+                          {formatCurrency(acc.current_balance)}
+                        </div>
+                      </div>
+                    )}
 
                     {isInactive && (
                       <button
@@ -311,9 +351,11 @@ export default function AccountsPage() {
               (b) => b.credit_card_id === card.id && b.status === 'open'
             ) || creditCardBills.find((b) => b.credit_card_id === card.id);
 
-            const billAmount = currentBill ? currentBill.total_amount : 0;
-            const available = Math.max(0, card.credit_limit - billAmount);
-            const usedPct = Math.min(100, Math.round((billAmount / card.credit_limit) * 100));
+            const billAmountCents = currentBill ? toCents(currentBill.total_amount) : 0;
+            const billAmount = fromCents(billAmountCents);
+            const limitCents = toCents(card.credit_limit);
+            const available = fromCents(Math.max(0, limitCents - billAmountCents));
+            const usedPct = Math.min(100, Math.round((billAmountCents / (limitCents || 1)) * 100));
 
             return (
               <div
@@ -538,16 +580,18 @@ export default function AccountsPage() {
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500">Saldo Inicial</label>
-                <input
-                  type="text"
-                  placeholder="0,00"
-                  value={accBalance}
-                  onChange={(e) => setAccBalance(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs font-bold dark:border-slate-700 dark:bg-slate-800"
-                />
-              </div>
+              {!isExpenseTracker && (
+                <div>
+                  <label className="block text-xs font-semibold uppercase text-slate-500">Saldo Inicial</label>
+                  <input
+                    type="text"
+                    placeholder="0,00"
+                    value={accBalance}
+                    onChange={(e) => setAccBalance(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs font-bold dark:border-slate-700 dark:bg-slate-800"
+                  />
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"

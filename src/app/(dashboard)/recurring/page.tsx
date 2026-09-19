@@ -19,13 +19,14 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
-import { resolveCategory } from '@/lib/financial-engine';
+import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { RecurringTransaction, RecurrenceFrequency } from '@/lib/types';
 import { format } from 'date-fns';
 
 export default function RecurringPage() {
   const {
     isLoaded,
+    activeWorkspace,
     recurring,
     categories,
     paymentMethods,
@@ -40,6 +41,7 @@ export default function RecurringPage() {
     deleteRecurring,
   } = useFinance();
 
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
   const [isNewRecOpen, setIsNewRecOpen] = useState(false);
   const [desc, setDesc] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -125,34 +127,48 @@ export default function RecurringPage() {
     setIsNewRecOpen(false);
   };
 
-  // Converte o valor de cada recorrência para uma base mensal proporcional
+  // Converte o valor de cada recorrência para uma base mensal proporcional com centavos inteiros
   const getMonthlyAmount = (r: RecurringTransaction) => {
+    const amtCents = toCents(r.amount);
+    let monthlyCents = amtCents;
     switch (r.frequency) {
       case 'weekly':
-        return r.amount * (52 / 12); // ~4.33x por mês
+        monthlyCents = Math.round((amtCents * 52) / 12);
+        break;
       case 'bimonthly':
-        return r.amount / 2;
+        monthlyCents = Math.round(amtCents / 2);
+        break;
       case 'quarterly':
-        return r.amount / 3;
+        monthlyCents = Math.round(amtCents / 3);
+        break;
       case 'semiannual':
-        return r.amount / 6;
+        monthlyCents = Math.round(amtCents / 6);
+        break;
       case 'annual':
-        return r.amount / 12;
+        monthlyCents = Math.round(amtCents / 12);
+        break;
       case 'custom':
-        return r.amount * (30 / Math.max(1, r.interval_days || 30));
+        monthlyCents = Math.round((amtCents * 30) / Math.max(1, r.interval_days || 30));
+        break;
       case 'monthly':
       default:
-        return r.amount;
+        monthlyCents = amtCents;
+        break;
     }
+    return fromCents(monthlyCents);
   };
 
-  const totalMonthlyExpense = recurring
-    .filter((r) => r.active && r.type === 'expense')
-    .reduce((acc, r) => acc + getMonthlyAmount(r), 0);
+  const totalMonthlyExpense = fromCents(
+    recurring
+      .filter((r) => r.active && r.type === 'expense')
+      .reduce((acc, r) => acc + toCents(getMonthlyAmount(r)), 0)
+  );
 
-  const totalMonthlyIncome = recurring
-    .filter((r) => r.active && r.type === 'income')
-    .reduce((acc, r) => acc + getMonthlyAmount(r), 0);
+  const totalMonthlyIncome = fromCents(
+    recurring
+      .filter((r) => r.active && r.type === 'income')
+      .reduce((acc, r) => acc + toCents(getMonthlyAmount(r)), 0)
+  );
 
   if (!isLoaded) {
     return (
@@ -195,44 +211,89 @@ export default function RecurringPage() {
 
       {/* Cards de Totais Recorrentes */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Renda Fixa Mensal</span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-              <ArrowUpRight className="h-4 w-4" />
+        {isExpenseTracker ? (
+          <>
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Despesas Fixas Mensais</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                  <ArrowDownRight className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-2xl font-black text-rose-600">
+                {formatCurrency(totalMonthlyExpense)}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Aluguel, assinaturas, contas de consumo</p>
             </div>
-          </div>
-          <div className="mt-2 text-2xl font-black text-emerald-600">
-            {formatCurrency(totalMonthlyIncome)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">Salários e recebimentos fixos</p>
-        </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Gastos Fixos Mensais</span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
-              <ArrowDownRight className="h-4 w-4" />
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Recorrências Ativas</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
+                  <Repeat className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
+                {recurring.filter((r) => r.active).length}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Contratos e despesas fixas automáticas</p>
             </div>
-          </div>
-          <div className="mt-2 text-2xl font-black text-rose-600">
-            {formatCurrency(totalMonthlyExpense)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">Aluguel, condomínio, assinaturas</p>
-        </div>
 
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Saldo Fixo Livre</span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-              <Repeat className="h-4 w-4" />
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Compromisso Anual Fixo</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <ArrowUpRight className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
+                {formatCurrency(fromCents(toCents(totalMonthlyExpense) * 12))}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Gasto anual fixo contratado</p>
             </div>
-          </div>
-          <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
-            {formatCurrency(totalMonthlyIncome - totalMonthlyExpense)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">Margem antes de compras variáveis</p>
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Renda Fixa Mensal</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                  <ArrowUpRight className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-2xl font-black text-emerald-600">
+                {formatCurrency(totalMonthlyIncome)}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Salários e recebimentos fixos</p>
+            </div>
+
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Gastos Fixos Mensais</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                  <ArrowDownRight className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-2xl font-black text-rose-600">
+                {formatCurrency(totalMonthlyExpense)}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Aluguel, condomínio, assinaturas</p>
+            </div>
+
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Saldo Fixo Livre</span>
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <Repeat className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
+                {formatCurrency(fromCents(toCents(totalMonthlyIncome) - toCents(totalMonthlyExpense)))}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Margem antes de compras variáveis</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Lista de Recorrências */}

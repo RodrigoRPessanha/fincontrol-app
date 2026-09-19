@@ -23,6 +23,7 @@ export default function WorkspacesPage() {
     activeWorkspace,
     workspaceMembers,
     createWorkspace,
+    updateWorkspace,
     addWorkspaceMember,
   } = useFinance();
   const { user } = useAuth();
@@ -52,7 +53,7 @@ export default function WorkspacesPage() {
             Workspaces & Membros Compartilhados
           </h2>
           <p className="text-xs text-slate-500">
-            Controle de acesso por workspace financeiro com permissões isoladas (RLS).
+            Controle de acesso por workspace financeiro com permissões isoladas (RLS) e modo de operação.
           </p>
         </div>
 
@@ -63,6 +64,77 @@ export default function WorkspacesPage() {
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>Convidar Pessoa</span>
         </button>
+      </div>
+
+      {/* Modo de Operação do Workspace */}
+      <div className="rounded-3xl bg-white p-6 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Modo de Operação do Workspace
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Escolha como este workspace opera. A escolha fica salva permanentemente para este workspace.
+            </p>
+          </div>
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 self-start sm:self-auto">
+            {activeWorkspace.tracking_mode === 'expense_tracker' ? 'Apenas Despesas & Rateio' : 'Modo Completo'}
+          </span>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Opção 1: Completo */}
+          <div
+            onClick={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
+            className={`cursor-pointer rounded-2xl border p-4.5 transition ${
+              activeWorkspace.tracking_mode !== 'expense_tracker'
+                ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20 dark:border-emerald-600'
+                : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-slate-900 dark:text-white">
+                Modo Patrimonial Completo
+              </span>
+              <input
+                type="radio"
+                name="tracking_mode"
+                checked={activeWorkspace.tracking_mode !== 'expense_tracker'}
+                onChange={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
+                className="h-4 w-4 text-emerald-600 focus:ring-emerald-500"
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+              Controle de saldo em contas bancárias, conciliação de fluxo de caixa, transferências e metas financeiras com aportes.
+            </p>
+          </div>
+
+          {/* Opção 2: Apenas Despesas & Rateio */}
+          <div
+            onClick={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
+            className={`cursor-pointer rounded-2xl border p-4.5 transition ${
+              activeWorkspace.tracking_mode === 'expense_tracker'
+                ? 'border-teal-500 bg-teal-50/40 dark:bg-teal-950/20 dark:border-teal-600'
+                : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-slate-900 dark:text-white">
+                Apenas Controle de Despesas & Rateio
+              </span>
+              <input
+                type="radio"
+                name="tracking_mode"
+                checked={activeWorkspace.tracking_mode === 'expense_tracker'}
+                onChange={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
+                className="h-4 w-4 text-teal-600 focus:ring-teal-500"
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+              Sem contas obrigatórias e sem movimentação de saldo. Foco em quanto gastou, categorias, faturas de cartão e divisão de contas (Splitwise).
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Info do Workspace Ativo */}

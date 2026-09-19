@@ -11,7 +11,14 @@ export default defineConfig({
     environment: 'node',
     coverage: {
       provider: 'v8',
-      include: ['src/lib/financial-engine.ts', 'src/lib/utils.ts'],
+      include: [
+        'src/lib/financial-engine.ts',
+        'src/lib/utils.ts',
+        'src/lib/context/finance-context.tsx',
+        'src/components/transactions/QuickAddModal.tsx',
+        'src/components/transactions/PaymentModal.tsx',
+        'src/app/**/splits/page.tsx',
+      ],
       reporter: ['text', 'json', 'html'],
     },
   },

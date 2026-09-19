@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   Account,
   Budget,
@@ -18,6 +18,10 @@ import {
   UpdateTransactionDTO,
   Workspace,
   WorkspaceMember,
+  Settlement,
+  SplitType,
+  TransactionSplit,
+  WorkspaceTrackingMode,
 } from '../types';
 import {
   mockAccounts,
@@ -46,6 +50,7 @@ import {
   validateRecurringAmount,
   resolveTransactionAccountId,
   validateBillPaymentAccount,
+  validatePaymentAccount,
   validateRecurringMaterialization,
   stepNextOccurrence,
   calculateCatchUpOccurrence,
@@ -58,6 +63,9 @@ import {
   toCents,
   fromCents,
   roundCurrency,
+  validateSettlement,
+  calculateMemberNetBalances,
+  calculateExpenseSplits,
 } from '../financial-engine';
 import { format } from 'date-fns';
 
@@ -67,7 +75,8 @@ interface FinanceContextType {
   activeWorkspace: Workspace;
   workspaceMembers: WorkspaceMember[];
   setActiveWorkspaceId: (id: string) => void;
-  createWorkspace: (name: string) => Workspace;
+  createWorkspace: (name: string, tracking_mode?: WorkspaceTrackingMode) => Workspace;
+  updateWorkspace: (id: string, data: Partial<Workspace>) => void;
   addWorkspaceMember: (email: string, role: 'admin' | 'member' | 'viewer') => void;
 
   accounts: Account[];
@@ -81,7 +90,7 @@ interface FinanceContextType {
   creditCardBills: CreditCardBill[];
   addCreditCard: (card: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => CreditCard;
   updateCreditCard: (id: string, card: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => void;
-  payCreditCardBill: (billId: string, accountId: string, amount: number, paymentDate?: string, notes?: string) => Payment;
+  payCreditCardBill: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string) => Payment;
 
   paymentMethods: PaymentMethod[];
   allWorkspacePaymentMethods: PaymentMethod[];
@@ -110,6 +119,9 @@ interface FinanceContextType {
     account_id?: string;
     payment_method_id?: string;
     paid_installments_count?: number;
+    paid_by_member_id?: string;
+    split_type?: SplitType;
+    splits?: TransactionSplit[];
   }) => Purchase;
 
   payments: Payment[];
@@ -117,7 +129,7 @@ interface FinanceContextType {
     transaction_id?: string;
     installment_id?: string;
     credit_card_bill_id?: string;
-    account_id: string;
+    account_id?: string | null;
     payment_method_id?: string;
     amount: number;
     payment_date: string;
@@ -126,6 +138,17 @@ interface FinanceContextType {
 
   transfers: Transfer[];
   createTransfer: (fromAccountId: string, toAccountId: string, amount: number, date?: string, notes?: string) => Transfer | null;
+
+  settlements: Settlement[];
+  recordSettlement: (data: {
+    from_member_id: string;
+    to_member_id: string;
+    amount: number;
+    settlement_date?: string;
+    notes?: string;
+    payment_account_id?: string;
+  }) => Settlement;
+  deleteSettlement: (id: string) => void;
 
   recurring: RecurringTransaction[];
   addRecurring: (data: Omit<RecurringTransaction, 'id' | 'workspace_id' | 'created_at'>) => RecurringTransaction;
@@ -176,7 +199,50 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [allBudgets, setAllBudgets] = useState<Budget[]>(mockBudgets);
   const [allGoals, setAllGoals] = useState<FinancialGoal[]>(mockGoals);
 
+  const [allSettlements, setAllSettlements] = useState<Settlement[]>([]);
+
   const [viewPerspective, setViewPerspective] = useState<'realized' | 'planned'>('realized');
+
+  // Sincronização atômica síncrona para chamadas encadeadas no mesmo ciclo de renderização (V36 / P1-01)
+  const stateRef = useRef({
+    activeWorkspaceId,
+    allWorkspaces,
+    allWorkspaceMembers,
+    allTransactions,
+    allPurchases,
+    allInstallments,
+    allCreditCardBills,
+    allAccounts,
+    allPayments,
+    allGoals,
+    allTransfers,
+    allRecurring,
+    allCreditCards,
+    allPaymentMethods,
+    allCategories,
+    allSettlements,
+  });
+
+  useEffect(() => {
+    stateRef.current = {
+      activeWorkspaceId,
+      allWorkspaces,
+      allWorkspaceMembers,
+      allTransactions,
+      allPurchases,
+      allInstallments,
+      allCreditCardBills,
+      allAccounts,
+      allPayments,
+      allGoals,
+      allTransfers,
+      allRecurring,
+      allCreditCards,
+      allPaymentMethods,
+      allCategories,
+      allSettlements,
+    };
+  });
 
   // Carregamento Determinístico Seguro no Mount + Saneamento Idempotente de Dados Legados V20 (P0-01)
   useEffect(() => {
@@ -198,6 +264,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         const savedRecs = localStorage.getItem(`${STORAGE_PREFIX}recurring`);
         const savedBudgets = localStorage.getItem(`${STORAGE_PREFIX}budgets`);
         const savedGoals = localStorage.getItem(`${STORAGE_PREFIX}goals`);
+        const savedSettlements = localStorage.getItem(`${STORAGE_PREFIX}settlements`);
 
         if (savedWs) setAllWorkspaces(JSON.parse(savedWs));
         if (savedActiveWs) setActiveWorkspaceId(savedActiveWs);
@@ -213,6 +280,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         if (savedInsts) setAllInstallments(JSON.parse(savedInsts));
         if (savedPays) setAllPayments(JSON.parse(savedPays));
         if (savedTransfers) setAllTransfers(JSON.parse(savedTransfers));
+        if (savedSettlements) setAllSettlements(JSON.parse(savedSettlements));
 
         // Saneamento idempotente de dados legados V20 (P0-01)
         const rawRecs: RecurringTransaction[] = savedRecs ? JSON.parse(savedRecs) : mockRecurring;
@@ -249,6 +317,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(`${STORAGE_PREFIX}recurring`, JSON.stringify(allRecurring));
     localStorage.setItem(`${STORAGE_PREFIX}budgets`, JSON.stringify(allBudgets));
     localStorage.setItem(`${STORAGE_PREFIX}goals`, JSON.stringify(allGoals));
+    localStorage.setItem(`${STORAGE_PREFIX}settlements`, JSON.stringify(allSettlements));
   }, [
     isLoaded,
     allWorkspaces,
@@ -267,6 +336,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     allRecurring,
     allBudgets,
     allGoals,
+    allSettlements,
   ]);
 
   // Helper SÍNCRONO E DETERMINÍSTICO para obter ou criar fatura e somar montante
@@ -282,9 +352,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     ): string => {
       const targetWsId = wsId || activeWorkspaceId;
 
-      // 1. Calcula o ID da fatura de forma síncrona usando a lista atual de faturas via função pura
+      // 1. Calcula a atualização da fatura de forma síncrona a partir do estado atual em stateRef
       const preview = resolveOrCreateCreditCardBill({
-        bills: allCreditCardBills,
+        bills: stateRef.current.allCreditCardBills,
         cardId,
         referenceMonth,
         closingDate,
@@ -294,31 +364,22 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         isPaid,
       });
 
-      // 2. Enfileira a atualização de estado funcional garantindo atomicidade com prev
-      setAllCreditCardBills((prev) => {
-        return resolveOrCreateCreditCardBill({
-          bills: prev,
-          cardId,
-          referenceMonth,
-          closingDate,
-          dueDate,
-          amount,
-          workspaceId: targetWsId,
-          isPaid,
-        }).updatedBills;
-      });
+      // 2. Atualiza sincronamente a referência mutável para comandos no mesmo lote e enfileira no React
+      stateRef.current.allCreditCardBills = preview.updatedBills;
+      setAllCreditCardBills(preview.updatedBills);
 
       // 3. Retorna o ID síncrono imediatamente sem depender do timing do setter React
       return preview.billId;
     },
-    [activeWorkspaceId, allCreditCardBills]
+    [activeWorkspaceId]
   );
 
   // Helper centralizado para validar categoria/subcategoria ativa e de mesmo workspace
   const validateActiveCategory = useCallback(
     (workspaceId: string, categoryId?: string | null) => {
       if (!categoryId) return;
-      const parent = allCategories.find(
+      const categories = stateRef.current.allCategories;
+      const parent = categories.find(
         (c) =>
           (c.id === categoryId || c.subcategories?.some((s) => s.id === categoryId)) &&
           c.workspace_id === workspaceId
@@ -336,23 +397,130 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [allCategories]
+    []
   );
 
-  // Helper centralizado para inferir, validar coerência e status ativo de cartão de crédito
   // Helper centralizado para inferir, validar coerência e status ativo de cartão de crédito
   const resolveAndValidateCreditCard = useCallback(
     (workspaceId: string, pmId?: string | null, explicitCardId?: string | null): string | null => {
       return validateCreditCardResolution(
         workspaceId,
-        allPaymentMethods,
-        allCreditCards,
-        allAccounts,
+        stateRef.current.allPaymentMethods,
+        stateRef.current.allCreditCards,
+        stateRef.current.allAccounts,
         pmId,
         explicitCardId
       );
     },
-    [allPaymentMethods, allCreditCards, allAccounts]
+    []
+  );
+
+  // Helper centralizado para validação de borda monetária e estrutural de rateios (P1-01 V36)
+  const validateTransactionSplits = useCallback(
+    (
+      totalAmount: number,
+      targetWsId: string,
+      paidByMemberId?: string | null,
+      splits?: TransactionSplit[],
+      splitType?: SplitType | null
+    ) => {
+      const wsMembers = stateRef.current.allWorkspaceMembers.filter((m) => m.workspace_id === targetWsId);
+      const memberIds = new Set(wsMembers.map((m) => m.id));
+
+      if (paidByMemberId && !memberIds.has(paidByMemberId)) {
+        throw new Error('O membro pagador informado não pertence ao workspace ativo.');
+      }
+
+      const effectiveSplitType: SplitType = splitType || 'individual';
+
+      // Regra individual ou ausente: não pode ter splits
+      if (effectiveSplitType === 'individual') {
+        if (splits && splits.length > 0) {
+          throw new Error('Transações individuais não devem possuir divisão de despesas.');
+        }
+        return;
+      }
+
+      // Regras de rateio ('equal', 'full_other', 'custom'): OBRIGATÓRIO ter splits
+      if (!splits || splits.length === 0) {
+        throw new Error('A regra de divisão selecionada exige o preenchimento das frações de rateio.');
+      }
+
+      const seen = new Set<string>();
+      let sumCents = 0;
+      const totalCents = toCents(totalAmount);
+
+      for (const split of splits) {
+        if (!split.member_id || !memberIds.has(split.member_id)) {
+          throw new Error('Membro informado no rateio não pertence ao workspace ativo.');
+        }
+        if (seen.has(split.member_id)) {
+          throw new Error('Membros duplicados identificados no rateio.');
+        }
+        seen.add(split.member_id);
+
+        if (typeof split.amount !== 'number' || !Number.isFinite(split.amount) || split.amount < 0) {
+          throw new Error('O valor de rateio atribuído a cada membro não pode ser negativo ou inválido.');
+        }
+
+        // Na regra 100% de outra pessoa: o pagador não pode possuir fração atribuída a si mesmo
+        if (effectiveSplitType === 'full_other' && paidByMemberId && split.member_id === paidByMemberId && split.amount > 0) {
+          throw new Error('Na regra 100% de outra pessoa, o pagador não pode possuir fração atribuída a si mesmo.');
+        }
+
+        sumCents += toCents(split.amount);
+      }
+
+      if (sumCents !== totalCents) {
+        throw new Error(
+          `A soma das frações do rateio (R$ ${(sumCents / 100).toFixed(2)}) diverge do valor total da despesa (R$ ${(totalCents / 100).toFixed(2)}).`
+        );
+      }
+
+      // Validação canônica estrita para 'equal' e 'full_other' (P1-01 V36 Semântica)
+      if (effectiveSplitType === 'equal') {
+        const effectivePayer = paidByMemberId || wsMembers[0]?.id;
+        const canonical = calculateExpenseSplits(totalAmount, 'equal', wsMembers, effectivePayer);
+
+        if (splits.length !== canonical.length) {
+          throw new Error(
+            `A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'.`
+          );
+        }
+
+        for (const c of canonical) {
+          const received = splits.find((s) => s.member_id === c.member_id);
+          const receivedCents = received ? toCents(received.amount) : 0;
+          if (receivedCents !== toCents(c.amount)) {
+            throw new Error(
+              `A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'.`
+            );
+          }
+        }
+      } else if (effectiveSplitType === 'full_other') {
+        const effectivePayer = paidByMemberId || wsMembers[0]?.id;
+        if (effectivePayer && wsMembers.length > 0) {
+          const canonical = calculateExpenseSplits(totalAmount, 'full_other', wsMembers, effectivePayer);
+
+          if (splits.length !== canonical.length) {
+            throw new Error(
+              `A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'.`
+            );
+          }
+
+          for (const c of canonical) {
+            const received = splits.find((s) => s.member_id === c.member_id);
+            const receivedCents = received ? toCents(received.amount) : 0;
+            if (receivedCents !== toCents(c.amount)) {
+              throw new Error(
+                `A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'.`
+              );
+            }
+          }
+        }
+      }
+    },
+    []
   );
 
   // Processamento Reativo de Recorrências via função pura de transição de estado de produção
@@ -361,33 +529,29 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
 
     const result = processRecurringBatchState({
-      recurring: allRecurring,
-      transactions: allTransactions,
-      bills: allCreditCardBills,
-      accounts: allAccounts,
-      paymentMethods: allPaymentMethods,
-      creditCards: allCreditCards,
-      categories: allCategories,
+      recurring: stateRef.current.allRecurring,
+      transactions: stateRef.current.allTransactions,
+      bills: stateRef.current.allCreditCardBills,
+      accounts: stateRef.current.allAccounts,
+      paymentMethods: stateRef.current.allPaymentMethods,
+      creditCards: stateRef.current.allCreditCards,
+      categories: stateRef.current.allCategories,
       todayStr,
       generateId,
     });
 
     if (result.hasChanges) {
       if (result.newTransactions.length > 0) {
+        stateRef.current.allTransactions = [...result.newTransactions, ...stateRef.current.allTransactions];
         setAllTransactions((prev) => [...result.newTransactions, ...prev]);
       }
+      stateRef.current.allCreditCardBills = result.updatedBills;
+      stateRef.current.allRecurring = result.updatedRecurring;
       setAllRecurring(result.updatedRecurring);
       setAllCreditCardBills(result.updatedBills);
     }
   }, [
     isLoaded,
-    allRecurring,
-    allTransactions,
-    allCreditCardBills,
-    allAccounts,
-    allPaymentMethods,
-    allCreditCards,
-    allCategories,
   ]);
 
   // Executa processamento de recorrências SOMENTE após a conclusão da hidratação local (P1-02 V22/V23)
@@ -503,13 +667,28 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     [allWorkspaceMembers, activeWorkspace.id]
   );
 
+  const settlements = useMemo(
+    () => allSettlements.filter((s) => s.workspace_id === activeWorkspace.id),
+    [allSettlements, activeWorkspace.id]
+  );
+
+  const handleSetActiveWorkspaceId = useCallback((id: string) => {
+    stateRef.current.activeWorkspaceId = id;
+    setActiveWorkspaceId(id);
+  }, []);
+
+  const getActiveWsId = useCallback(() => {
+    return stateRef.current.activeWorkspaceId || activeWorkspaceId || activeWorkspace.id;
+  }, [activeWorkspaceId, activeWorkspace.id]);
+
   // Funções de Workspaces
-  const createWorkspace = (name: string) => {
+  const createWorkspace = (name: string, tracking_mode: WorkspaceTrackingMode = 'full') => {
     const newWs: Workspace = {
       id: generateId('ws'),
       name: name.trim(),
       owner_id: 'usr-1',
       currency: 'BRL',
+      tracking_mode,
       created_at: new Date().toISOString(),
     };
 
@@ -521,17 +700,31 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       created_at: new Date().toISOString(),
     };
 
+    stateRef.current.allWorkspaces = [...stateRef.current.allWorkspaces, newWs];
+    stateRef.current.allWorkspaceMembers = [...stateRef.current.allWorkspaceMembers, newMember];
+    stateRef.current.activeWorkspaceId = newWs.id;
+
     setAllWorkspaces((prev) => [...prev, newWs]);
     setAllWorkspaceMembers((prev) => [...prev, newMember]);
     setActiveWorkspaceId(newWs.id);
     return newWs;
   };
 
+  const updateWorkspace = (id: string, data: Partial<Workspace>) => {
+    stateRef.current.allWorkspaces = stateRef.current.allWorkspaces.map((w) =>
+      w.id === id ? { ...w, ...data, id: w.id, created_at: w.created_at } : w
+    );
+    setAllWorkspaces((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, ...data, id: w.id, created_at: w.created_at } : w))
+    );
+  };
+
   const addWorkspaceMember = (email: string, role: 'admin' | 'member' | 'viewer') => {
     const singleUserId = generateId('usr');
+    const targetWsId = getActiveWsId();
     const newMember: WorkspaceMember = {
       id: generateId('wsm'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       user_id: singleUserId,
       role,
       user: {
@@ -542,25 +735,36 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       },
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allWorkspaceMembers = [...stateRef.current.allWorkspaceMembers, newMember];
     setAllWorkspaceMembers((prev) => [...prev, newMember]);
   };
 
   // Funções de Contas
   const addAccount = (accountData: Omit<Account, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
     const newAcc: Account = {
       ...accountData,
       id: generateId('acc'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
+      current_balance: accountData.initial_balance || 0,
+      active: accountData.active !== undefined ? accountData.active : true,
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allAccounts = [...stateRef.current.allAccounts, newAcc];
     setAllAccounts((prev) => [...prev, newAcc]);
     return newAcc;
   };
 
   const updateAccount = (id: string, data: Omit<Partial<Account>, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
+    stateRef.current.allAccounts = stateRef.current.allAccounts.map((a) =>
+      a.id === id && a.workspace_id === targetWsId
+        ? { ...a, ...data, id: a.id, workspace_id: a.workspace_id, created_at: a.created_at }
+        : a
+    );
     setAllAccounts((prev) =>
       prev.map((a) =>
-        a.id === id && a.workspace_id === activeWorkspace.id
+        a.id === id && a.workspace_id === targetWsId
           ? { ...a, ...data, id: a.id, workspace_id: a.workspace_id, created_at: a.created_at }
           : a
       )
@@ -568,7 +772,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteAccount = (id: string): { success: boolean; action: 'deleted' | 'inactivated'; message: string } => {
-    const targetAcc = allAccounts.find((a) => a.id === id && a.workspace_id === activeWorkspace.id);
+    const targetWsId = getActiveWsId();
+    const targetAcc = stateRef.current.allAccounts.find((a) => a.id === id && a.workspace_id === targetWsId);
     if (!targetAcc) {
       return {
         success: false,
@@ -577,13 +782,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    const hasPayments = allPayments.some((p) => p.account_id === id);
-    const hasTransfers = allTransfers.some((tr) => tr.from_account_id === id || tr.to_account_id === id);
-    const hasActiveTxs = allTransactions.some((t) => t.account_id === id && (t.status === 'paid' || t.credit_card_bill_id));
-    const hasPurchases = allPurchases.some((p) => p.account_id === id);
+    const hasPayments = stateRef.current.allPayments.some((p) => p.account_id === id);
+    const hasTransfers = stateRef.current.allTransfers.some((tr) => tr.from_account_id === id || tr.to_account_id === id);
+    const hasActiveTxs = stateRef.current.allTransactions.some((t) => t.account_id === id && (t.status === 'paid' || t.credit_card_bill_id));
+    const hasPurchases = stateRef.current.allPurchases.some((p) => p.account_id === id);
 
     if (hasPayments || hasTransfers || hasActiveTxs || hasPurchases) {
       // Soft-delete / inativação segura para manter integridade de pagamentos, transferências e compras
+      stateRef.current.allAccounts = stateRef.current.allAccounts.map((acc) =>
+        acc.id === id ? { ...acc, active: false } : acc
+      );
       setAllAccounts((prev) =>
         prev.map((acc) => (acc.id === id ? { ...acc, active: false } : acc))
       );
@@ -595,6 +803,23 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Sem histórico financeiro restritivo: exclusão física com desvinculação limpa (SET NULL)
+    stateRef.current.allTransactions = stateRef.current.allTransactions.map((t) =>
+      t.account_id === id ? { ...t, account_id: undefined } : t
+    );
+    stateRef.current.allPurchases = stateRef.current.allPurchases.map((pur) =>
+      pur.account_id === id ? { ...pur, account_id: undefined } : pur
+    );
+    stateRef.current.allRecurring = stateRef.current.allRecurring.map((r) =>
+      r.account_id === id ? { ...r, account_id: undefined } : r
+    );
+    stateRef.current.allPaymentMethods = stateRef.current.allPaymentMethods.map((pm) =>
+      pm.linked_account_id === id ? { ...pm, linked_account_id: undefined } : pm
+    );
+    stateRef.current.allCreditCards = stateRef.current.allCreditCards.map((c) =>
+      c.linked_payment_account_id === id ? { ...c, linked_payment_account_id: undefined } : c
+    );
+    stateRef.current.allAccounts = stateRef.current.allAccounts.filter((a) => a.id !== id);
+
     setAllTransactions((prev) =>
       prev.map((t) => (t.account_id === id ? { ...t, account_id: undefined } : t))
     );
@@ -621,102 +846,187 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Funções de Cartões
   const addCreditCard = (cardData: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
+    if (cardData.linked_payment_account_id) {
+      const acc = stateRef.current.allAccounts.find(
+        (a) => a.id === cardData.linked_payment_account_id && a.workspace_id === targetWsId
+      );
+      if (!acc) throw new Error('Conta vinculada ao cartão não pertence ao workspace ativo.');
+      if (acc.active === false) throw new Error('A conta bancária vinculada ao cartão está inativa.');
+    }
     const newCard: CreditCard = {
       ...cardData,
       id: generateId('card'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allCreditCards = [...stateRef.current.allCreditCards, newCard];
     setAllCreditCards((prev) => [...prev, newCard]);
     return newCard;
   };
 
   const updateCreditCard = (id: string, data: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
+    if (data.linked_payment_account_id) {
+      const acc = stateRef.current.allAccounts.find(
+        (a) => a.id === data.linked_payment_account_id && a.workspace_id === targetWsId
+      );
+      if (!acc) throw new Error('Conta vinculada ao cartão não pertence ao workspace ativo.');
+      if (acc.active === false) throw new Error('A conta bancária vinculada ao cartão está inativa.');
+    }
+    stateRef.current.allCreditCards = stateRef.current.allCreditCards.map((c) =>
+      c.id === id && c.workspace_id === targetWsId
+        ? { ...c, ...data, id: c.id, workspace_id: c.workspace_id, created_at: c.created_at }
+        : c
+    );
     setAllCreditCards((prev) =>
       prev.map((c) =>
-        c.id === id && c.workspace_id === activeWorkspace.id
+        c.id === id && c.workspace_id === targetWsId
           ? { ...c, ...data, id: c.id, workspace_id: c.workspace_id, created_at: c.created_at }
           : c
       )
     );
   };
 
-  // Pagamento de Fatura (com validação estrita da conta contra o workspace)
+  // Pagamento de Fatura (com validação atômica sob batching e updaters puros V36 / P1-01 e P2-03)
   const payCreditCardBill = (
     billId: string,
-    accountId: string,
-    amount: number,
+    accountId?: string | null,
+    amount?: number,
     paymentDate: string = format(new Date(), 'yyyy-MM-dd'),
     notes?: string
   ): Payment => {
-    const bill = allCreditCardBills.find((b) => b.id === billId && b.workspace_id === activeWorkspace.id);
+    const targetWsId = getActiveWsId();
+    const currentBills = stateRef.current.allCreditCardBills;
+    const currentAccounts = stateRef.current.allAccounts;
+
+    const bill = currentBills.find((b) => b.id === billId && b.workspace_id === targetWsId);
     if (!bill) throw new Error('Fatura não encontrada no workspace ativo.');
 
-    validateCreditCardBillIntegrity(bill);
-    validateBillPaymentAccount(accountId, allAccounts, activeWorkspace.id);
+    const activeWs = stateRef.current.allWorkspaces.find((w) => w.id === targetWsId);
+    const isExpenseTracker = activeWs?.tracking_mode === 'expense_tracker';
 
-    if (amount <= 0 || !Number.isFinite(amount)) throw new Error('Valor inválido para pagamento.');
+    validateCreditCardBillIntegrity(bill);
+    validateBillPaymentAccount(accountId, currentAccounts, targetWsId, isExpenseTracker);
+
+    const payAmount = typeof amount === 'number' ? amount : (bill.total_amount - (bill.paid_amount || 0));
+    const paymentCents = toCents(payAmount);
+    if (!Number.isFinite(payAmount) || payAmount <= 0 || paymentCents <= 0 || !Number.isSafeInteger(paymentCents)) {
+      throw new Error('Valor inválido para pagamento.');
+    }
 
     const totalCents = toCents(bill.total_amount);
     const paidCents = toCents(bill.paid_amount || 0);
     const remainingCents = Math.max(0, totalCents - paidCents);
-    const paymentCents = toCents(amount);
 
     if (paymentCents > remainingCents) {
-      throw new Error(`Valor do pagamento (R$ ${amount.toFixed(2)}) excede o saldo restante da fatura (R$ ${(remainingCents / 100).toFixed(2)}).`);
+      throw new Error(
+        `Valor do pagamento (R$ ${payAmount.toFixed(2)}) excede o saldo restante da fatura (R$ ${(remainingCents / 100).toFixed(2)}).`
+      );
     }
 
     const finalAmount = fromCents(paymentCents);
-
+    const shouldMutateAccount = !!(accountId && !isExpenseTracker);
     const newPay: Payment = {
       id: generateId('pay'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       credit_card_bill_id: billId,
-      account_id: accountId,
+      account_id: accountId || null,
       amount: finalAmount,
       payment_date: paymentDate,
       notes: notes || `Pagamento de fatura ${bill.reference_month}`,
       created_by: 'usr-1',
       created_at: new Date().toISOString(),
+      affects_balance: shouldMutateAccount,
     };
+
+    const bNewPaidCents = paidCents + paymentCents;
+    const bIsPaid = bNewPaidCents >= totalCents;
+
+    // Atualização síncrona imediata para consistência atômica sob batching
+    const nextBills = currentBills.map((b) => {
+      if (b.id === billId) {
+        return {
+          ...b,
+          paid_amount: fromCents(bNewPaidCents),
+          status: bIsPaid ? ('paid' as const) : ('partially_paid' as const),
+          paid_at: bIsPaid ? paymentDate : b.paid_at,
+        };
+      }
+      return b;
+    });
+
+    const nextAccounts = (accountId && !isExpenseTracker)
+      ? currentAccounts.map((a) =>
+          a.id === accountId
+            ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+            : a
+        )
+      : currentAccounts;
+
+    let nextInstallments = stateRef.current.allInstallments;
+    let nextTransactions = stateRef.current.allTransactions;
+
+    if (bIsPaid) {
+      nextInstallments = nextInstallments.map((inst) =>
+        inst.credit_card_bill_id === billId
+          ? { ...inst, status: 'paid', paid_amount: inst.amount, paid_at: paymentDate }
+          : inst
+      );
+      nextTransactions = nextTransactions.map((t) =>
+        t.credit_card_bill_id === billId
+          ? { ...t, status: 'paid', paid_amount: t.amount, paid_at: paymentDate }
+          : t
+      );
+    }
+
+    stateRef.current.allCreditCardBills = nextBills;
+    stateRef.current.allAccounts = nextAccounts;
+    stateRef.current.allPayments = [newPay, ...stateRef.current.allPayments];
+    stateRef.current.allInstallments = nextInstallments;
+    stateRef.current.allTransactions = nextTransactions;
+
+    // Setters React puros e independentes
     setAllPayments((prev) => [newPay, ...prev]);
 
-    setAllAccounts((prev) =>
-      prev.map((a) =>
-        a.id === accountId
-          ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
-          : a
-      )
-    );
-
-    const newPaidCents = paidCents + paymentCents;
-    const isPaid = newPaidCents >= totalCents;
-    const newPaid = fromCents(newPaidCents);
+    if (accountId && !isExpenseTracker) {
+      setAllAccounts((prev) =>
+        prev.map((a) =>
+          a.id === accountId
+            ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+            : a
+        )
+      );
+    }
 
     setAllCreditCardBills((prev) =>
-      prev.map((b) =>
-        b.id === billId
-          ? {
-              ...b,
-              paid_amount: newPaid,
-              status: isPaid ? 'paid' : 'partially_paid',
-              paid_at: isPaid ? paymentDate : null,
-            }
-          : b
-      )
+      prev.map((b) => {
+        if (b.id === billId) {
+          const bPrevTotalCents = toCents(b.total_amount);
+          const bPrevPaidCents = toCents(b.paid_amount || 0);
+          const bCurrentPaidCents = bPrevPaidCents + paymentCents;
+          const isFinished = bCurrentPaidCents >= bPrevTotalCents;
+          return {
+            ...b,
+            paid_amount: fromCents(bCurrentPaidCents),
+            status: isFinished ? ('paid' as const) : ('partially_paid' as const),
+            paid_at: isFinished ? paymentDate : b.paid_at,
+          };
+        }
+        return b;
+      })
     );
 
-    if (isPaid) {
-      setAllInstallments((prev) =>
-        prev.map((inst) =>
+    if (bIsPaid) {
+      setAllInstallments((prevInst) =>
+        prevInst.map((inst) =>
           inst.credit_card_bill_id === billId
             ? { ...inst, status: 'paid', paid_amount: inst.amount, paid_at: paymentDate }
             : inst
         )
       );
-
-      setAllTransactions((prev) =>
-        prev.map((t) =>
+      setAllTransactions((prevTx) =>
+        prevTx.map((t) =>
           t.credit_card_bill_id === billId
             ? { ...t, status: 'paid', paid_amount: t.amount, paid_at: paymentDate }
             : t
@@ -729,32 +1039,49 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Funções de Métodos de Pagamento
   const addPaymentMethod = (pmData: Omit<PaymentMethod, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
+    if (pmData.linked_account_id) {
+      const acc = stateRef.current.allAccounts.find(
+        (a) => a.id === pmData.linked_account_id && a.workspace_id === targetWsId
+      );
+      if (!acc) throw new Error('Conta vinculada ao método de pagamento não pertence ao workspace ativo.');
+      if (acc.active === false) throw new Error('A conta bancária vinculada ao método de pagamento está inativa.');
+    }
     const newPm: PaymentMethod = {
       ...pmData,
       id: generateId('pm'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allPaymentMethods = [...stateRef.current.allPaymentMethods, newPm];
     setAllPaymentMethods((prev) => [...prev, newPm]);
     return newPm;
   };
 
   // Funções de Categorias
   const addCategory = (catData: Omit<Category, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
     const newCat: Category = {
       ...catData,
       id: generateId('cat'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allCategories = [...stateRef.current.allCategories, newCat];
     setAllCategories((prev) => [...prev, newCat]);
     return newCat;
   };
 
   const updateCategory = (id: string, data: Omit<Partial<Category>, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
+    stateRef.current.allCategories = stateRef.current.allCategories.map((c) =>
+      c.id === id && c.workspace_id === targetWsId
+        ? { ...c, ...data, id: c.id, workspace_id: c.workspace_id, created_at: c.created_at }
+        : c
+    );
     setAllCategories((prev) =>
       prev.map((c) =>
-        c.id === id && c.workspace_id === activeWorkspace.id
+        c.id === id && c.workspace_id === targetWsId
           ? { ...c, ...data, id: c.id, workspace_id: c.workspace_id, created_at: c.created_at }
           : c
       )
@@ -763,35 +1090,37 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Funções de Transações (com adição atômica de fatura)
   const addTransaction = (txData: Omit<Transaction, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
     const effectiveAccountId = resolveTransactionAccountId(
       txData.payment_method_id,
       txData.account_id,
-      allPaymentMethods,
-      activeWorkspace.id
+      stateRef.current.allPaymentMethods,
+      targetWsId
     );
 
     validateTransactionBusinessRules(
       { ...txData, account_id: effectiveAccountId },
-      allPaymentMethods,
-      activeWorkspace.id
+      stateRef.current.allPaymentMethods,
+      targetWsId
     );
+    validateTransactionSplits(txData.amount, targetWsId, txData.paid_by_member_id, txData.splits, txData.split_type);
 
     if (effectiveAccountId) {
-      const a = allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === activeWorkspace.id);
+      const a = stateRef.current.allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === targetWsId);
       if (!a) throw new Error('Conta bancária informada não pertence ao workspace ativo.');
       if (a.active === false) throw new Error('A conta bancária informada está inativa.');
     }
 
-    const cardId = resolveAndValidateCreditCard(activeWorkspace.id, txData.payment_method_id, txData.credit_card_id);
+    const cardId = resolveAndValidateCreditCard(targetWsId, txData.payment_method_id, txData.credit_card_id);
     if (txData.type === 'income' && cardId) {
       throw new Error('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
     }
-    validateActiveCategory(activeWorkspace.id, txData.category_id);
+    validateActiveCategory(targetWsId, txData.category_id);
 
     let billId: string | null = txData.credit_card_bill_id || null;
 
     if (cardId && !billId) {
-      const card = allCreditCards.find((c) => c.id === cardId && c.workspace_id === activeWorkspace.id);
+      const card = stateRef.current.allCreditCards.find((c) => c.id === cardId && c.workspace_id === targetWsId);
       if (card) {
         const billDates = calculateCardBillDates(
           txData.transaction_date,
@@ -804,48 +1133,74 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           billDates.closingDate,
           billDates.dueDate,
           txData.amount,
-          activeWorkspace.id
+          targetWsId
         );
       }
     }
 
+    const effectiveSplitType: SplitType = txData.split_type || 'individual';
+    const effectiveSplits = effectiveSplitType !== 'individual' ? txData.splits : undefined;
+
     const newTx: Transaction = {
       ...txData,
       id: generateId('tx'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       account_id: effectiveAccountId,
       credit_card_id: cardId,
       credit_card_bill_id: billId,
+      split_type: effectiveSplitType,
+      splits: effectiveSplits,
       paid_amount: txData.status === 'paid' ? txData.amount : (txData.paid_amount || 0),
       created_at: new Date().toISOString(),
     };
 
+    stateRef.current.allTransactions = [newTx, ...stateRef.current.allTransactions];
     setAllTransactions((prev) => [newTx, ...prev]);
 
-    if (newTx.status === 'paid' && newTx.account_id && !newTx.credit_card_id) {
-      setAllAccounts((prev) =>
-        prev.map((acc) => {
+    const activeWs = stateRef.current.allWorkspaces.find((w) => w.id === targetWsId);
+    const isExpenseTracker = activeWs?.tracking_mode === 'expense_tracker';
+
+    if (newTx.status === 'paid' && !newTx.credit_card_id) {
+      const shouldMutateAccount = !!(newTx.account_id && !isExpenseTracker);
+
+      if (shouldMutateAccount) {
+        const currentCents = toCents(
+          stateRef.current.allAccounts.find((a) => a.id === newTx.account_id)?.current_balance || 0
+        );
+        const amountCents = toCents(newTx.amount);
+        const diffCents = newTx.type === 'expense' ? -amountCents : amountCents;
+
+        stateRef.current.allAccounts = stateRef.current.allAccounts.map((acc) => {
           if (acc.id === newTx.account_id) {
-            const currentCents = toCents(acc.current_balance);
-            const amountCents = toCents(newTx.amount);
-            const diffCents = newTx.type === 'expense' ? -amountCents : amountCents;
             return { ...acc, current_balance: fromCents(currentCents + diffCents) };
           }
           return acc;
-        })
-      );
+        });
+
+        setAllAccounts((prev) =>
+          prev.map((acc) => {
+            if (acc.id === newTx.account_id) {
+              const accCents = toCents(acc.current_balance);
+              return { ...acc, current_balance: fromCents(accCents + diffCents) };
+            }
+            return acc;
+          })
+        );
+      }
 
       const newPay: Payment = {
         id: generateId('pay'),
-        workspace_id: activeWorkspace.id,
+        workspace_id: targetWsId,
         transaction_id: newTx.id,
-        account_id: newTx.account_id,
+        account_id: newTx.account_id || null,
         payment_method_id: newTx.payment_method_id || undefined,
         amount: newTx.amount,
         payment_date: format(new Date(), 'yyyy-MM-dd'),
         created_by: 'usr-1',
         created_at: new Date().toISOString(),
+        affects_balance: shouldMutateAccount,
       };
+      stateRef.current.allPayments = [newPay, ...stateRef.current.allPayments];
       setAllPayments((prev) => [newPay, ...prev]);
     }
 
@@ -857,7 +1212,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     id: string,
     data: UpdateTransactionDTO
   ) => {
-    const existing = allTransactions.find((t) => t.id === id && t.workspace_id === activeWorkspace.id);
+    const targetWsId = getActiveWsId();
+    const existing = stateRef.current.allTransactions.find((t) => t.id === id && t.workspace_id === targetWsId);
     if (!existing) return;
 
     validateBilledTransactionDateImmutability(existing, data);
@@ -874,12 +1230,67 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (data.category_id !== undefined) {
-      validateActiveCategory(activeWorkspace.id, data.category_id);
+      validateActiveCategory(targetWsId, data.category_id);
     }
+
+    const willChangeAmount = data.amount !== undefined && data.amount !== existing.amount;
+    const willChangeSplitType = data.split_type !== undefined && data.split_type !== existing.split_type;
+    const willChangePayer = data.paid_by_member_id !== undefined && data.paid_by_member_id !== existing.paid_by_member_id;
+
+    const targetAmount = data.amount !== undefined ? data.amount : existing.amount;
+    const targetSplitType = data.split_type !== undefined ? data.split_type : existing.split_type;
+    const targetPayer = data.paid_by_member_id !== undefined ? data.paid_by_member_id : existing.paid_by_member_id;
+
+    let reconciledSplits: TransactionSplit[] | undefined = undefined;
+
+    const isTargetDivided = targetSplitType && targetSplitType !== 'individual';
+
+    if (data.splits !== undefined) {
+      validateTransactionSplits(targetAmount, targetWsId, targetPayer, data.splits, targetSplitType);
+      reconciledSplits = data.splits;
+    } else if (!isTargetDivided) {
+      reconciledSplits = [];
+    } else if (targetSplitType === 'equal' || targetSplitType === 'full_other') {
+      const wsMembers = stateRef.current.allWorkspaceMembers.filter((m) => m.workspace_id === targetWsId);
+      const effectivePayer = targetPayer || wsMembers[0]?.id;
+      if (willChangeAmount || willChangeSplitType || willChangePayer || !existing.splits || existing.splits.length === 0) {
+        reconciledSplits = calculateExpenseSplits(targetAmount, targetSplitType, wsMembers, effectivePayer);
+      } else {
+        validateTransactionSplits(targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType);
+      }
+    } else if (targetSplitType === 'custom') {
+      if (willChangeAmount || willChangeSplitType || willChangePayer || !existing.splits || existing.splits.length === 0) {
+        throw new Error(
+          'Ao alterar o valor total, pagador ou regra de uma transação com divisão personalizada, é obrigatório fornecer os novos valores de rateio correspondentes.'
+        );
+      }
+      validateTransactionSplits(targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType);
+    }
+
+    const nextTxs = stateRef.current.allTransactions.map((t) => {
+      if (t.id === id && t.workspace_id === targetWsId) {
+        return {
+          ...t,
+          description: data.description !== undefined ? data.description.trim() : t.description,
+          amount: data.amount !== undefined ? data.amount : t.amount,
+          category_id: data.category_id !== undefined ? data.category_id : t.category_id,
+          due_date: data.due_date !== undefined ? data.due_date : t.due_date,
+          transaction_date: data.transaction_date !== undefined ? data.transaction_date : t.transaction_date,
+          notes: data.notes !== undefined ? data.notes : t.notes,
+          paid_by_member_id: data.paid_by_member_id !== undefined ? data.paid_by_member_id : t.paid_by_member_id,
+          split_type: targetSplitType,
+          splits: reconciledSplits !== undefined ? (reconciledSplits.length > 0 ? reconciledSplits : undefined) : t.splits,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return t;
+    });
+
+    stateRef.current.allTransactions = nextTxs;
 
     setAllTransactions((prev) =>
       prev.map((t) => {
-        if (t.id === id && t.workspace_id === activeWorkspace.id) {
+        if (t.id === id && t.workspace_id === targetWsId) {
           return {
             ...t,
             description: data.description !== undefined ? data.description.trim() : t.description,
@@ -888,6 +1299,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             due_date: data.due_date !== undefined ? data.due_date : t.due_date,
             transaction_date: data.transaction_date !== undefined ? data.transaction_date : t.transaction_date,
             notes: data.notes !== undefined ? data.notes : t.notes,
+            paid_by_member_id: data.paid_by_member_id !== undefined ? data.paid_by_member_id : t.paid_by_member_id,
+            split_type: targetSplitType,
+            splits: reconciledSplits !== undefined ? (reconciledSplits.length > 0 ? reconciledSplits : undefined) : t.splits,
             updated_at: new Date().toISOString(),
           };
         }
@@ -898,35 +1312,80 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Exclusão Transacional com Proteção Rigorosa Anti-Overpayment
   const deleteTransaction = (id: string) => {
-    const tx = allTransactions.find((t) => t.id === id && t.workspace_id === activeWorkspace.id);
+    const targetWsId = getActiveWsId();
+    const tx = stateRef.current.allTransactions.find((t) => t.id === id && t.workspace_id === targetWsId);
     if (!tx) return;
 
     if (tx.credit_card_bill_id) {
-      const bill = allCreditCardBills.find((b) => b.id === tx.credit_card_bill_id);
+      const bill = stateRef.current.allCreditCards ? stateRef.current.allCreditCardBills.find((b) => b.id === tx.credit_card_bill_id) : undefined;
       if (bill) {
         const reconciled = reconcileBillAfterItemDeletion(bill, tx.amount);
+        stateRef.current.allCreditCardBills = stateRef.current.allCreditCardBills.map((b) =>
+          b.id === tx.credit_card_bill_id ? reconciled : b
+        );
         setAllCreditCardBills((prev) =>
           prev.map((b) => (b.id === tx.credit_card_bill_id ? reconciled : b))
         );
       }
     }
 
-    if (tx.account_id && !tx.credit_card_id && (tx.status === 'paid' || tx.status === 'partially_paid')) {
-      const paid = tx.paid_amount || (tx.status === 'paid' ? tx.amount : 0);
-      if (paid > 0) {
-        setAllAccounts((prev) =>
-          prev.map((acc) => {
-            if (acc.id === tx.account_id) {
-              const currentCents = toCents(acc.current_balance);
-              const paidCents = toCents(paid);
-              const diffCents = tx.type === 'expense' ? paidCents : -paidCents;
-              return { ...acc, current_balance: fromCents(currentCents + diffCents) };
-            }
-            return acc;
-          })
-        );
+    // Reversão rigorosa de saldo por conta baseada na proveniência contábil (P0-01):
+    // Reverte cada Payment na conta bancária que recebeu o débito/crédito efetivo.
+    // Se o pagamento registrou affects_balance=true, estorna a conta mesmo se o modo atual for tracker.
+    // Se registrou affects_balance=false, nunca estorna a conta, mesmo se o modo atual for full.
+    // Para pagamentos legados sem affects_balance, infere da presença de account_id.
+    const txPayments = stateRef.current.allPayments.filter((p) => p.transaction_id === id);
+    const accountAdjustments = new Map<string, number>();
+
+    let recordedPaidCents = 0;
+    for (const p of txPayments) {
+      const didAffectBalance = p.affects_balance !== undefined ? p.affects_balance : Boolean(p.account_id);
+      if (p.account_id && didAffectBalance) {
+        const pCents = toCents(p.amount);
+        recordedPaidCents += pCents;
+        // Despesa debitou a conta do pagamento; estorno credita (+).
+        // Receita creditou a conta do pagamento; estorno debita (-).
+        const diff = tx.type === 'expense' ? pCents : -pCents;
+        accountAdjustments.set(p.account_id, (accountAdjustments.get(p.account_id) || 0) + diff);
       }
     }
+
+    // Suporte a dados legados (quando tx.status === 'paid' ou 'partially_paid' mas o valor pago não possui Payments registrados)
+    // CRÍTICO P0-02: Só pode rodar se txPayments.length === 0!
+    // Se a transação possui pagamentos registrados, eles são a fonte única da verdade contábil.
+    if (txPayments.length === 0 && tx.account_id && !tx.credit_card_id && (tx.status === 'paid' || tx.status === 'partially_paid')) {
+      const totalPaidCents = toCents(tx.paid_amount || (tx.status === 'paid' ? tx.amount : 0));
+      const unrecordedPaidCents = Math.max(0, totalPaidCents - recordedPaidCents);
+      if (unrecordedPaidCents > 0) {
+        const diff = tx.type === 'expense' ? unrecordedPaidCents : -unrecordedPaidCents;
+        accountAdjustments.set(tx.account_id, (accountAdjustments.get(tx.account_id) || 0) + diff);
+      }
+    }
+
+    if (accountAdjustments.size > 0) {
+      stateRef.current.allAccounts = stateRef.current.allAccounts.map((acc) => {
+        const diff = accountAdjustments.get(acc.id);
+        if (diff) {
+          const currentCents = toCents(acc.current_balance);
+          return { ...acc, current_balance: fromCents(currentCents + diff) };
+        }
+        return acc;
+      });
+
+      setAllAccounts((prev) =>
+        prev.map((acc) => {
+          const diff = accountAdjustments.get(acc.id);
+          if (diff) {
+            const currentCents = toCents(acc.current_balance);
+            return { ...acc, current_balance: fromCents(currentCents + diff) };
+          }
+          return acc;
+        })
+      );
+    }
+
+    stateRef.current.allPayments = stateRef.current.allPayments.filter((p) => p.transaction_id !== id);
+    stateRef.current.allTransactions = stateRef.current.allTransactions.filter((t) => t.id !== id);
 
     setAllPayments((prev) => prev.filter((p) => p.transaction_id !== id));
     setAllTransactions((prev) => prev.filter((t) => t.id !== id));
@@ -934,7 +1393,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Duplicação de Transação Atômica (passa pelas mesmas regras de negócio e validações de addTransaction)
   const duplicateTransaction = (id: string) => {
-    const tx = allTransactions.find((t) => t.id === id && t.workspace_id === activeWorkspace.id);
+    const targetWsId = getActiveWsId();
+    const tx = stateRef.current.allTransactions.find((t) => t.id === id && t.workspace_id === targetWsId);
     if (!tx) return null;
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -952,6 +1412,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       paid_amount: 0,
       paid_at: null,
       notes: tx.notes,
+      paid_by_member_id: tx.paid_by_member_id,
+      split_type: tx.split_type,
+      splits: tx.splits ? [...tx.splits] : undefined,
     });
   };
 
@@ -966,25 +1429,29 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     account_id?: string;
     payment_method_id?: string;
     paid_installments_count?: number;
+    paid_by_member_id?: string;
+    split_type?: SplitType;
+    splits?: TransactionSplit[];
   }) => {
     if (typeof data.total_amount !== 'number' || !Number.isFinite(data.total_amount) || data.total_amount <= 0) {
       throw new Error('O valor total da compra parcelada deve ser maior que zero.');
     }
 
+    const targetWsId = getActiveWsId();
     const effectiveAccountId = resolveTransactionAccountId(
       data.payment_method_id,
       data.account_id,
-      allPaymentMethods,
-      activeWorkspace.id
+      stateRef.current.allPaymentMethods,
+      targetWsId
     );
 
     if (effectiveAccountId) {
-      const a = allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === activeWorkspace.id);
+      const a = stateRef.current.allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === targetWsId);
       if (!a) throw new Error('Conta bancária informada não pertence ao workspace ativo.');
       if (a.active === false) throw new Error('A conta bancária informada está inativa.');
     }
 
-    const effectiveCardId = resolveAndValidateCreditCard(activeWorkspace.id, data.payment_method_id, data.credit_card_id);
+    const effectiveCardId = resolveAndValidateCreditCard(targetWsId, data.payment_method_id, data.credit_card_id);
     validateTransactionBusinessRules(
       {
         type: 'expense',
@@ -992,26 +1459,33 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         payment_method_id: data.payment_method_id,
         account_id: effectiveAccountId,
       },
-      allPaymentMethods,
-      activeWorkspace.id
+      stateRef.current.allPaymentMethods,
+      targetWsId
     );
-    validateActiveCategory(activeWorkspace.id, data.category_id);
+    validateActiveCategory(targetWsId, data.category_id);
+    validateTransactionSplits(data.total_amount, targetWsId, data.paid_by_member_id, data.splits, data.split_type);
 
     const paidCount = Math.max(0, Math.min(data.installment_count, data.paid_installments_count || 0));
-    const card = effectiveCardId ? allCreditCards.find((c) => c.id === effectiveCardId && c.workspace_id === activeWorkspace.id) : undefined;
+    const card = effectiveCardId ? stateRef.current.allCreditCards.find((c) => c.id === effectiveCardId && c.workspace_id === targetWsId) : undefined;
     const split = splitInstallments(data.total_amount, data.installment_count, data.purchase_date, card, paidCount);
 
     if (split.length === 0) {
       throw new Error('Parâmetros de parcelamento inválidos.');
     }
 
+    const effectiveSplitType: SplitType = data.split_type || 'individual';
+    const effectiveSplits = effectiveSplitType !== 'individual' ? data.splits : undefined;
+
     const newPurchase: Purchase = {
       ...data,
       id: generateId('pur'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       paid_installments_count: paidCount,
       credit_card_id: effectiveCardId,
       account_id: effectiveAccountId,
+      paid_by_member_id: data.paid_by_member_id,
+      split_type: effectiveSplitType,
+      splits: effectiveSplits,
       created_by: 'usr-1',
       created_at: new Date().toISOString(),
     };
@@ -1025,13 +1499,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           s.closingDate,
           s.dueDate,
           s.amount,
-          activeWorkspace.id,
+          targetWsId,
           s.isPaid
         );
       }
 
       return {
-        id: generateId(`inst-${newPurchase.id}`),
+        id: generateId('inst'),
         purchase_id: newPurchase.id,
         installment_number: s.installmentNumber,
         amount: s.amount,
@@ -1045,23 +1519,30 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     });
 
     const generatedPayments: Payment[] = [];
-    if (effectiveAccountId && paidCount > 0) {
+    if (paidCount > 0) {
       generatedInstallments.forEach((inst, idx) => {
         if (split[idx]?.isPaid) {
           generatedPayments.push({
             id: generateId('pay'),
-            workspace_id: activeWorkspace.id,
+            workspace_id: targetWsId,
             installment_id: inst.id,
-            account_id: effectiveAccountId,
+            account_id: effectiveAccountId || null,
             payment_method_id: data.payment_method_id,
             amount: inst.amount,
             payment_date: inst.paid_at || inst.due_date,
             notes: 'Quitação prévia de parcela importada',
             created_by: 'usr-1',
             created_at: new Date().toISOString(),
+            affects_balance: false,
           });
         }
       });
+    }
+
+    stateRef.current.allPurchases = [newPurchase, ...stateRef.current.allPurchases];
+    stateRef.current.allInstallments = [...stateRef.current.allInstallments, ...generatedInstallments];
+    if (generatedPayments.length > 0) {
+      stateRef.current.allPayments = [...generatedPayments, ...stateRef.current.allPayments];
     }
 
     setAllPurchases((prev) => [newPurchase, ...prev]);
@@ -1072,18 +1553,19 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     return newPurchase;
   };
 
-  // Registro de Pagamento
+  // Registro de Pagamento (com validação atômica sob batching V36 / P1-01 e P1-02)
   const recordPayment = (data: {
     transaction_id?: string;
     installment_id?: string;
     credit_card_bill_id?: string;
-    account_id: string;
+    account_id?: string | null;
     payment_method_id?: string;
     amount: number;
     payment_date: string;
     notes?: string;
   }): Payment => {
-    if (!Number.isFinite(data.amount) || data.amount <= 0) {
+    const paymentCents = toCents(data.amount);
+    if (!Number.isFinite(data.amount) || data.amount <= 0 || paymentCents <= 0 || !Number.isSafeInteger(paymentCents)) {
       throw new Error('O valor do pagamento deve ser estritamente maior que zero.');
     }
 
@@ -1096,17 +1578,21 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Informe exatamente uma obrigação de destino para o pagamento.');
     }
 
-    const acc = accounts.find((a) => a.id === data.account_id);
-    if (!acc) throw new Error('Conta informada não pertence ao workspace ativo.');
+    const targetWsId = getActiveWsId();
+    const activeWs = stateRef.current.allWorkspaces.find((w) => w.id === targetWsId);
+    const isExpenseTracker = activeWs?.tracking_mode === 'expense_tracker';
+    const currentAccounts = stateRef.current.allAccounts;
+    const acc = validatePaymentAccount(data.account_id, currentAccounts, targetWsId, isExpenseTracker);
 
     if (data.payment_method_id) {
-      const pm = paymentMethods.find((p) => p.id === data.payment_method_id);
+      const pm = stateRef.current.allPaymentMethods.find((p) => p.id === data.payment_method_id && p.workspace_id === targetWsId);
       if (!pm) throw new Error('Método de pagamento não pertence ao workspace ativo.');
     }
 
     // 1. Transação avulsa
     if (data.transaction_id) {
-      const tx = allTransactions.find((t) => t.id === data.transaction_id && t.workspace_id === activeWorkspace.id);
+      const currentTxs = stateRef.current.allTransactions;
+      const tx = currentTxs.find((t) => t.id === data.transaction_id && t.workspace_id === targetWsId);
       if (!tx) throw new Error('Transação não encontrada no workspace ativo.');
 
       if (tx.credit_card_bill_id || tx.credit_card_id) {
@@ -1116,48 +1602,97 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const totalCents = toCents(tx.amount);
       const paidCents = toCents(tx.paid_amount || 0);
       const remainingCents = Math.max(0, totalCents - paidCents);
-      const paymentCents = toCents(data.amount);
       if (paymentCents > remainingCents) {
         throw new Error(
           `Valor do pagamento (R$ ${data.amount.toFixed(2)}) excede o saldo restante da transação (R$ ${(remainingCents / 100).toFixed(2)}).`
         );
       }
 
-      const currentPaidCents = paidCents + paymentCents;
-      const isFull = currentPaidCents >= totalCents;
-      const currentPaid = fromCents(currentPaidCents);
+      const tCurrentPaidCents = paidCents + paymentCents;
+      const tIsFull = tCurrentPaidCents >= totalCents;
+
+      const finalAmount = fromCents(paymentCents);
+      const shouldMutateAccount = !!(acc && data.account_id && !isExpenseTracker);
+      const newPay: Payment = {
+        id: generateId('pay'),
+        workspace_id: targetWsId,
+        transaction_id: data.transaction_id,
+        account_id: data.account_id || null,
+        payment_method_id: data.payment_method_id,
+        amount: finalAmount,
+        payment_date: data.payment_date,
+        notes: data.notes,
+        created_by: 'usr-1',
+        created_at: new Date().toISOString(),
+        affects_balance: shouldMutateAccount,
+      };
+
+      // Atualização síncrona imediata para consistência atômica
+      const nextTxs = currentTxs.map((t) => {
+        if (t.id === data.transaction_id) {
+          return {
+            ...t,
+            paid_amount: fromCents(tCurrentPaidCents),
+            status: tIsFull ? ('paid' as const) : ('partially_paid' as const),
+            paid_at: tIsFull ? data.payment_date : t.paid_at,
+          };
+        }
+        return t;
+      });
+
+      const nextAccounts = shouldMutateAccount
+        ? currentAccounts.map((a) => {
+            if (a.id === data.account_id) {
+              const currentBalanceCents = toCents(a.current_balance);
+              const diffCents = tx.type === 'expense' ? -paymentCents : paymentCents;
+              return { ...a, current_balance: fromCents(currentBalanceCents + diffCents) };
+            }
+            return a;
+          })
+        : currentAccounts;
+
+      stateRef.current.allTransactions = nextTxs;
+      stateRef.current.allAccounts = nextAccounts;
+      stateRef.current.allPayments = [newPay, ...stateRef.current.allPayments];
 
       setAllTransactions((prev) =>
-        prev.map((t) =>
-          t.id === data.transaction_id
-            ? {
-                ...t,
-                paid_amount: currentPaid,
-                status: isFull ? 'paid' : 'partially_paid',
-                paid_at: isFull ? data.payment_date : t.paid_at,
-              }
-            : t
-        )
-      );
-
-      setAllAccounts((prev) =>
-        prev.map((a) => {
-          if (a.id === data.account_id) {
-            const currentBalanceCents = toCents(a.current_balance);
-            const diffCents = tx.type === 'expense' ? -paymentCents : paymentCents;
-            return { ...a, current_balance: fromCents(currentBalanceCents + diffCents) };
+        prev.map((t) => {
+          if (t.id === data.transaction_id) {
+            return {
+              ...t,
+              paid_amount: fromCents(tCurrentPaidCents),
+              status: tIsFull ? 'paid' : 'partially_paid',
+              paid_at: tIsFull ? data.payment_date : t.paid_at,
+            };
           }
-          return a;
+          return t;
         })
       );
+
+      if (shouldMutateAccount) {
+        setAllAccounts((prev) =>
+          prev.map((a) => {
+            if (a.id === data.account_id) {
+              const currentBalanceCents = toCents(a.current_balance);
+              const diffCents = tx.type === 'expense' ? -paymentCents : paymentCents;
+              return { ...a, current_balance: fromCents(currentBalanceCents + diffCents) };
+            }
+            return a;
+          })
+        );
+      }
+
+      setAllPayments((prev) => [newPay, ...prev]);
+      return newPay;
     }
 
     // 2. Parcela
     if (data.installment_id) {
-      const inst = allInstallments.find((i) => i.id === data.installment_id);
+      const currentInsts = stateRef.current.allInstallments;
+      const inst = currentInsts.find((i) => i.id === data.installment_id);
       if (!inst) throw new Error('Parcela não encontrada.');
 
-      const pur = purchases.find((p) => p.id === inst.purchase_id);
+      const pur = stateRef.current.allPurchases.find((p) => p.id === inst.purchase_id && p.workspace_id === targetWsId);
       if (!pur) throw new Error('Compra associada à parcela não pertence ao workspace ativo.');
 
       if (inst.credit_card_bill_id || pur.credit_card_id) {
@@ -1167,37 +1702,81 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const totalCents = toCents(inst.amount);
       const paidCents = toCents(inst.paid_amount || 0);
       const remainingCents = Math.max(0, totalCents - paidCents);
-      const paymentCents = toCents(data.amount);
       if (paymentCents > remainingCents) {
         throw new Error(
           `Valor do pagamento (R$ ${data.amount.toFixed(2)}) excede o saldo restante da parcela (R$ ${(remainingCents / 100).toFixed(2)}).`
         );
       }
 
-      const currentPaidCents = paidCents + paymentCents;
-      const isFull = currentPaidCents >= totalCents;
-      const currentPaid = fromCents(currentPaidCents);
+      const iCurrentPaidCents = paidCents + paymentCents;
+      const iIsFull = iCurrentPaidCents >= totalCents;
+
+      const finalAmount = fromCents(paymentCents);
+      const shouldMutateAccount = !!(acc && data.account_id && !isExpenseTracker);
+      const newPay: Payment = {
+        id: generateId('pay'),
+        workspace_id: targetWsId,
+        installment_id: data.installment_id,
+        account_id: data.account_id || null,
+        payment_method_id: data.payment_method_id,
+        amount: finalAmount,
+        payment_date: data.payment_date,
+        notes: data.notes,
+        created_by: 'usr-1',
+        created_at: new Date().toISOString(),
+        affects_balance: shouldMutateAccount,
+      };
+
+      const nextInsts = currentInsts.map((i) => {
+        if (i.id === data.installment_id) {
+          return {
+            ...i,
+            paid_amount: fromCents(iCurrentPaidCents),
+            status: iIsFull ? ('paid' as const) : ('partially_paid' as const),
+            paid_at: iIsFull ? data.payment_date : i.paid_at,
+          };
+        }
+        return i;
+      });
+
+      const nextAccounts = shouldMutateAccount
+        ? currentAccounts.map((a) =>
+            a.id === data.account_id
+              ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+              : a
+          )
+        : currentAccounts;
+
+      stateRef.current.allInstallments = nextInsts;
+      stateRef.current.allAccounts = nextAccounts;
+      stateRef.current.allPayments = [newPay, ...stateRef.current.allPayments];
 
       setAllInstallments((prev) =>
-        prev.map((i) =>
-          i.id === data.installment_id
-            ? {
-                ...i,
-                paid_amount: currentPaid,
-                status: isFull ? 'paid' : 'partially_paid',
-                paid_at: isFull ? data.payment_date : i.paid_at,
-              }
-            : i
-        )
+        prev.map((i) => {
+          if (i.id === data.installment_id) {
+            return {
+              ...i,
+              paid_amount: fromCents(iCurrentPaidCents),
+              status: iIsFull ? 'paid' : 'partially_paid',
+              paid_at: iIsFull ? data.payment_date : i.paid_at,
+            };
+          }
+          return i;
+        })
       );
 
-      setAllAccounts((prev) =>
-        prev.map((a) =>
-          a.id === data.account_id
-            ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
-            : a
-        )
-      );
+      if (shouldMutateAccount) {
+        setAllAccounts((prev) =>
+          prev.map((a) =>
+            a.id === data.account_id
+              ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+              : a
+          )
+        );
+      }
+
+      setAllPayments((prev) => [newPay, ...prev]);
+      return newPay;
     }
 
     // 3. Fatura de cartão
@@ -1205,24 +1784,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       return payCreditCardBill(data.credit_card_bill_id, data.account_id, data.amount, data.payment_date, data.notes);
     }
 
-    const finalAmount = fromCents(toCents(data.amount));
-    const newPay: Payment = {
-      id: generateId('pay'),
-      workspace_id: activeWorkspace.id,
-      transaction_id: data.transaction_id,
-      installment_id: data.installment_id,
-      credit_card_bill_id: data.credit_card_bill_id,
-      account_id: data.account_id,
-      payment_method_id: data.payment_method_id,
-      amount: finalAmount,
-      payment_date: data.payment_date,
-      notes: data.notes,
-      created_by: 'usr-1',
-      created_at: new Date().toISOString(),
-    };
-
-    setAllPayments((prev) => [newPay, ...prev]);
-    return newPay;
+    throw new Error('Tipo de pagamento não suportado.');
   };
 
   // Transferência Neutra
@@ -1236,22 +1798,32 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     if (fromAccountId === toAccountId) {
       throw new Error('A conta de origem e destino devem ser diferentes.');
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error('O valor da transferência deve ser maior que zero.');
+
+    const transferCents = toCents(amount);
+    if (!Number.isFinite(amount) || amount <= 0 || transferCents <= 0 || !Number.isSafeInteger(transferCents)) {
+      throw new Error('O valor da transferência deve ser de pelo menos R$ 0,01.');
     }
 
-    const fromAcc = accounts.find((a) => a.id === fromAccountId);
-    const toAcc = accounts.find((a) => a.id === toAccountId);
+    const targetWsId = getActiveWsId();
+    const activeWs = stateRef.current.allWorkspaces.find((w) => w.id === targetWsId);
+    if (activeWs?.tracking_mode === 'expense_tracker') {
+      throw new Error('Transferências entre contas não são permitidas no modo Apenas Despesas.');
+    }
+
+    const fromAcc = stateRef.current.allAccounts.find((a) => a.id === fromAccountId && a.workspace_id === targetWsId);
+    const toAcc = stateRef.current.allAccounts.find((a) => a.id === toAccountId && a.workspace_id === targetWsId);
     if (!fromAcc || !toAcc) {
       throw new Error('As contas informadas devem pertencer ao workspace ativo.');
     }
+    if (fromAcc.active === false || toAcc.active === false) {
+      throw new Error('A conta bancária informada está inativa.');
+    }
 
-    const transferCents = toCents(amount);
     const finalAmount = fromCents(transferCents);
 
     const newTransfer: Transfer = {
       id: generateId('trf'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       from_account_id: fromAccountId,
       to_account_id: toAccountId,
       amount: finalAmount,
@@ -1263,7 +1835,19 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       to_account: toAcc,
     };
 
+    stateRef.current.allTransfers = [newTransfer, ...stateRef.current.allTransfers];
     setAllTransfers((prev) => [newTransfer, ...prev]);
+
+    const nextAccounts = stateRef.current.allAccounts.map((acc) => {
+      if (acc.id === fromAccountId) {
+        return { ...acc, current_balance: fromCents(toCents(acc.current_balance) - transferCents) };
+      }
+      if (acc.id === toAccountId) {
+        return { ...acc, current_balance: fromCents(toCents(acc.current_balance) + transferCents) };
+      }
+      return acc;
+    });
+    stateRef.current.allAccounts = nextAccounts;
 
     setAllAccounts((prev) =>
       prev.map((acc) => {
@@ -1288,19 +1872,20 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Intervalo em dias inválido para recorrência personalizada (deve ser número inteiro entre 1 e 3650 dias).');
       }
     }
+    const targetWsId = getActiveWsId();
     const effectiveAccountId = resolveTransactionAccountId(
       data.payment_method_id,
       data.account_id,
-      allPaymentMethods,
-      activeWorkspace.id
+      stateRef.current.allPaymentMethods,
+      targetWsId
     );
 
     if (effectiveAccountId) {
-      const a = allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === activeWorkspace.id);
+      const a = stateRef.current.allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === targetWsId);
       if (!a) throw new Error('Conta bancária informada não pertence ao workspace ativo.');
       if (a.active === false) throw new Error('A conta bancária informada está inativa.');
     }
-    const effectiveCardId = resolveAndValidateCreditCard(activeWorkspace.id, data.payment_method_id, data.credit_card_id);
+    const effectiveCardId = resolveAndValidateCreditCard(targetWsId, data.payment_method_id, data.credit_card_id);
     validateTransactionBusinessRules(
       {
         type: data.type,
@@ -1308,21 +1893,22 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         payment_method_id: data.payment_method_id,
         account_id: effectiveAccountId,
       },
-      allPaymentMethods,
-      activeWorkspace.id
+      stateRef.current.allPaymentMethods,
+      targetWsId
     );
-    validateActiveCategory(activeWorkspace.id, data.category_id);
+    validateActiveCategory(targetWsId, data.category_id);
 
     const newRec: RecurringTransaction = {
       ...data,
       id: generateId('rec'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       account_id: effectiveAccountId,
       credit_card_id: effectiveCardId || undefined,
       active: true,
       suspended_reason: null,
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allRecurring = [...stateRef.current.allRecurring, newRec];
     setAllRecurring((prev) => [...prev, newRec]);
     setTimeout(() => processPendingRecurring(), 0);
     return newRec;
@@ -1330,29 +1916,34 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   const toggleRecurring = (id: string) => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
-    setAllRecurring((prev) =>
-      prev.map((r) => {
-        if (r.id === id && r.workspace_id === activeWorkspace.id) {
-          const willBeActive = !r.active;
-          let nextOcc = r.next_occurrence;
-          if (willBeActive && nextOcc < todayStr) {
-            nextOcc = calculateCatchUpOccurrence(nextOcc, r.start_date, r.frequency, r.interval_days, todayStr);
-          }
-          return {
-            ...r,
-            active: willBeActive,
-            next_occurrence: nextOcc,
-            suspended_reason: willBeActive ? null : r.suspended_reason,
-          };
+    const targetWsId = getActiveWsId();
+    const updateFn = (r: RecurringTransaction) => {
+      if (r.id === id && r.workspace_id === targetWsId) {
+        const willBeActive = !r.active;
+        let nextOcc = r.next_occurrence;
+        if (willBeActive && nextOcc < todayStr) {
+          nextOcc = calculateCatchUpOccurrence(nextOcc, r.start_date, r.frequency, r.interval_days, todayStr);
         }
-        return r;
-      })
-    );
+        return {
+          ...r,
+          active: willBeActive,
+          next_occurrence: nextOcc,
+          suspended_reason: willBeActive ? null : r.suspended_reason,
+        };
+      }
+      return r;
+    };
+    stateRef.current.allRecurring = stateRef.current.allRecurring.map(updateFn);
+    setAllRecurring((prev) => prev.map(updateFn));
     setTimeout(() => processPendingRecurring(), 0);
   };
 
   const deleteRecurring = (id: string) => {
-    setAllRecurring((prev) => prev.filter((r) => !(r.id === id && r.workspace_id === activeWorkspace.id)));
+    const targetWsId = getActiveWsId();
+    stateRef.current.allRecurring = stateRef.current.allRecurring.filter(
+      (r) => !(r.id === id && r.workspace_id === targetWsId)
+    );
+    setAllRecurring((prev) => prev.filter((r) => !(r.id === id && r.workspace_id === targetWsId)));
   };
 
   // Orçamentos
@@ -1362,9 +1953,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     month: number = new Date().getMonth() + 1,
     year: number = new Date().getFullYear()
   ) => {
+    const targetWsId = getActiveWsId();
     setAllBudgets((prev) => {
       const existingIndex = prev.findIndex(
-        (b) => b.category_id === categoryId && b.month === month && b.year === year && b.workspace_id === activeWorkspace.id
+        (b) => b.category_id === categoryId && b.month === month && b.year === year && b.workspace_id === targetWsId
       );
       if (existingIndex >= 0) {
         const updated = [...prev];
@@ -1375,7 +1967,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         {
           id: generateId('bud'),
-          workspace_id: activeWorkspace.id,
+          workspace_id: targetWsId,
           category_id: categoryId,
           month,
           year,
@@ -1387,20 +1979,29 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Metas
   const addGoal = (goalData: Omit<FinancialGoal, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
     const newGoal: FinancialGoal = {
       ...goalData,
       id: generateId('goal'),
-      workspace_id: activeWorkspace.id,
+      workspace_id: targetWsId,
       created_at: new Date().toISOString(),
     };
+    stateRef.current.allGoals = [...stateRef.current.allGoals, newGoal];
     setAllGoals((prev) => [...prev, newGoal]);
     return newGoal;
   };
 
   const updateGoal = (id: string, data: Omit<Partial<FinancialGoal>, 'id' | 'workspace_id' | 'created_at'>) => {
+    const targetWsId = getActiveWsId();
+    stateRef.current.allGoals = stateRef.current.allGoals.map((g) =>
+      g.id === id && g.workspace_id === targetWsId
+        ? { ...g, ...data, id: g.id, workspace_id: g.workspace_id, created_at: g.created_at }
+        : g
+    );
+
     setAllGoals((prev) =>
       prev.map((g) =>
-        g.id === id && g.workspace_id === activeWorkspace.id
+        g.id === id && g.workspace_id === targetWsId
           ? { ...g, ...data, id: g.id, workspace_id: g.workspace_id, created_at: g.created_at }
           : g
       )
@@ -1408,30 +2009,59 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   };
 
   const depositGoal = (goalId: string, amount: number, accountId: string) => {
-    if (amount <= 0 || !Number.isFinite(amount)) {
+    const depositCents = toCents(amount);
+    if (!Number.isFinite(amount) || amount <= 0 || depositCents <= 0 || !Number.isSafeInteger(depositCents)) {
       throw new Error('Valor inválido para depósito na meta.');
     }
-    const goal = allGoals.find((g) => g.id === goalId && g.workspace_id === activeWorkspace.id);
+    const targetWsId = getActiveWsId();
+    const activeWs = stateRef.current.allWorkspaces.find((w) => w.id === targetWsId);
+    if (activeWs?.tracking_mode === 'expense_tracker') {
+      throw new Error('Aportes em metas financeiras não são permitidos no modo Apenas Despesas.');
+    }
+
+    const goal = stateRef.current.allGoals.find((g) => g.id === goalId && g.workspace_id === targetWsId);
     if (!goal) throw new Error('Meta financeira não encontrada no workspace ativo.');
 
-    const acc = allAccounts.find((a) => a.id === accountId && a.workspace_id === activeWorkspace.id);
+    const acc = stateRef.current.allAccounts.find((a) => a.id === accountId && a.workspace_id === targetWsId);
     if (!acc) throw new Error('Conta bancária não encontrada no workspace ativo.');
     if (acc.active === false) throw new Error('A conta bancária informada está inativa.');
 
     const currentCents = toCents(goal.current_amount || 0);
-    const depositCents = toCents(amount);
     const targetCents = toCents(goal.target_amount);
     const newCurrentCents = currentCents + depositCents;
     const isCompleted = newCurrentCents >= targetCents;
-    const newCurrent = fromCents(newCurrentCents);
+
+    const nextGoals = stateRef.current.allGoals.map((g) => {
+      if (g.id === goalId && g.workspace_id === targetWsId) {
+        return {
+          ...g,
+          current_amount: fromCents(newCurrentCents),
+          status: isCompleted ? ('completed' as const) : g.status,
+        };
+      }
+      return g;
+    });
+
+    const nextAccounts = stateRef.current.allAccounts.map((a) =>
+      a.id === accountId && a.workspace_id === targetWsId
+        ? { ...a, current_balance: fromCents(toCents(a.current_balance) - depositCents) }
+        : a
+    );
+
+    stateRef.current.allGoals = nextGoals;
+    stateRef.current.allAccounts = nextAccounts;
 
     setAllGoals((prev) =>
       prev.map((g) => {
-        if (g.id === goalId && g.workspace_id === activeWorkspace.id) {
+        if (g.id === goalId && g.workspace_id === targetWsId) {
+          const gCurrentCents = toCents(g.current_amount || 0);
+          const gTargetCents = toCents(g.target_amount);
+          const gNewCurrentCents = gCurrentCents + depositCents;
+          const gIsCompleted = gNewCurrentCents >= gTargetCents;
           return {
             ...g,
-            current_amount: newCurrent,
-            status: isCompleted ? 'completed' : g.status,
+            current_amount: fromCents(gNewCurrentCents),
+            status: gIsCompleted ? 'completed' : g.status,
           };
         }
         return g;
@@ -1439,11 +2069,76 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     );
     setAllAccounts((prev) =>
       prev.map((a) =>
-        a.id === accountId && a.workspace_id === activeWorkspace.id
+        a.id === accountId && a.workspace_id === targetWsId
           ? { ...a, current_balance: fromCents(toCents(a.current_balance) - depositCents) }
           : a
       )
     );
+  };
+
+  // Registro de Acerto de Contas / Quitação de Rateio
+  const recordSettlement = (data: {
+    from_member_id: string;
+    to_member_id: string;
+    amount: number;
+    settlement_date?: string;
+    notes?: string;
+    payment_account_id?: string;
+  }): Settlement => {
+    const targetWsId = getActiveWsId();
+    const { pairwiseDebts } = calculateMemberNetBalances(
+      stateRef.current.allTransactions,
+      stateRef.current.allSettlements,
+      stateRef.current.allWorkspaceMembers,
+      targetWsId,
+      stateRef.current.allPurchases
+    );
+
+    if (data.payment_account_id) {
+      const acc = stateRef.current.allAccounts.find(
+        (a) => a.id === data.payment_account_id && a.workspace_id === targetWsId
+      );
+      if (!acc) {
+        throw new Error('A conta bancária informada para o acerto não pertence ao workspace ativo.');
+      }
+      if (acc.active === false) {
+        throw new Error('A conta bancária informada para o acerto está inativa.');
+      }
+    }
+
+    validateSettlement(
+      data.from_member_id,
+      data.to_member_id,
+      data.amount,
+      stateRef.current.allWorkspaceMembers,
+      targetWsId,
+      pairwiseDebts
+    );
+
+    const newSettlement: Settlement = {
+      id: generateId('set'),
+      workspace_id: targetWsId,
+      from_member_id: data.from_member_id,
+      to_member_id: data.to_member_id,
+      amount: roundCurrency(data.amount),
+      settlement_date: data.settlement_date || format(new Date(), 'yyyy-MM-dd'),
+      notes: data.notes,
+      payment_account_id: data.payment_account_id,
+      created_at: new Date().toISOString(),
+    };
+
+    stateRef.current.allSettlements = [newSettlement, ...stateRef.current.allSettlements];
+    setAllSettlements((prev) => [newSettlement, ...prev]);
+
+    return newSettlement;
+  };
+
+  const deleteSettlement = (id: string) => {
+    const targetWsId = getActiveWsId();
+    stateRef.current.allSettlements = stateRef.current.allSettlements.filter(
+      (s) => !(s.id === id && s.workspace_id === targetWsId)
+    );
+    setAllSettlements((prev) => prev.filter((s) => !(s.id === id && s.workspace_id === targetWsId)));
   };
 
   return (
@@ -1453,8 +2148,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         workspaces: allWorkspaces,
         activeWorkspace,
         workspaceMembers,
-        setActiveWorkspaceId,
+        setActiveWorkspaceId: handleSetActiveWorkspaceId,
         createWorkspace,
+        updateWorkspace,
         addWorkspaceMember,
 
         accounts,
@@ -1494,6 +2190,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
         transfers,
         createTransfer,
+
+        settlements,
+        recordSettlement,
+        deleteSettlement,
 
         recurring,
         addRecurring,

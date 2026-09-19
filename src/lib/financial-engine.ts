@@ -9,7 +9,11 @@ import {
   PaymentMethod,
   Purchase,
   RecurringTransaction,
+  Settlement,
+  SplitType,
   Transaction,
+  TransactionSplit,
+  WorkspaceMember,
 } from './types';
 import {
   format,
@@ -227,9 +231,12 @@ export function splitInstallments(
     throw new Error(`Data de compra inválida fornecida: "${purchaseDateStr}".`);
   }
 
-  const baseAmount = Math.floor((totalAmount / installmentCount) * 100) / 100;
-  const remainder = Math.round((totalAmount - baseAmount * installmentCount) * 100) / 100;
-  const firstAmount = Math.round((baseAmount + remainder) * 100) / 100;
+  const totalCents = toCents(totalAmount);
+  const baseCents = Math.floor(totalCents / installmentCount);
+  const remainderCents = totalCents - baseCents * installmentCount;
+  const firstCents = baseCents + remainderCents;
+  const baseAmount = fromCents(baseCents);
+  const firstAmount = fromCents(firstCents);
 
   const results = [];
 
@@ -937,12 +944,20 @@ export function resolveTransactionAccountId(
 
 /**
  * Validação de conta bancária para liquidação de fatura de cartão de crédito.
+ * No modo sem saldo (isExpenseTrackerMode), a conta bancária é opcional.
  */
 export function validateBillPaymentAccount(
-  accountId: string,
+  accountId: string | undefined | null,
   accounts: Account[],
-  workspaceId: string
+  workspaceId: string,
+  isExpenseTrackerMode?: boolean
 ): void {
+  if (isExpenseTrackerMode && !accountId) {
+    return;
+  }
+  if (!accountId) {
+    throw new Error('Conta bancária não encontrada no workspace ativo.');
+  }
   const acc = accounts.find((a) => a.id === accountId && a.workspace_id === workspaceId);
   if (!acc) {
     throw new Error('Conta bancária não encontrada no workspace ativo.');
@@ -950,6 +965,32 @@ export function validateBillPaymentAccount(
   if (acc.active === false) {
     throw new Error('A conta bancária selecionada para pagamento da fatura está inativa.');
   }
+}
+
+/**
+ * Validação centralizada de conta bancária para liquidação de obrigações (transações e parcelas).
+ * No modo sem saldo (isExpenseTrackerMode), a conta é opcional e não gera erro se omitida.
+ */
+export function validatePaymentAccount(
+  accountId: string | undefined | null,
+  accounts: Account[],
+  workspaceId: string,
+  isExpenseTrackerMode?: boolean
+): Account | null {
+  if (isExpenseTrackerMode && !accountId) {
+    return null;
+  }
+  if (!accountId) {
+    throw new Error('Conta bancária não encontrada no workspace ativo.');
+  }
+  const acc = accounts.find((a) => a.id === accountId && a.workspace_id === workspaceId);
+  if (!acc) {
+    throw new Error('Conta bancária não encontrada no workspace ativo.');
+  }
+  if (acc.active === false) {
+    throw new Error('A conta bancária informada está inativa.');
+  }
+  return acc;
 }
 
 export interface RecurringMaterializationValidationResult {
@@ -1172,25 +1213,50 @@ export interface ResolveOrCreateBillResult {
  */
 /**
  * Converte um valor monetário (em reais/unidade principal) para centavos inteiros.
- * Política de Decimais (V35 / P2-03): Adota arredondamento determinístico para o centavo mais próximo
- * (half-up / round-to-nearest) através de Number.EPSILON antes de Math.round.
- * Entradas com mais de 2 casas decimais são normalizadas deterministicamente na borda
- * (ex: 1.005 -> 101 centavos / R$ 1,01; 1.004 -> 100 centavos / R$ 1,00).
+ * Política de Decimais (V36 / P0-02): Adota arredondamento determinístico comercial (half-up / round-to-nearest)
+ * universal através de notação exponencial decimal (`Math.round(Number(base + 'e' + targetExp))`),
+ * imune a variações de escala de float drift IEEE 754 (ex: 10.075 -> 1008 centavos / R$ 10,08; 1.005 -> 101 centavos / R$ 1,01).
+ * Trata nativamente notações científicas existentes (ex: 1e-7, 1e21) sem gerar NaN, normaliza valores subcentavos
+ * (< 0.005) para 0 centavos, valida Number.isSafeInteger e normaliza -0 para 0.
  */
 export function toCents(amount: number): number {
-  return Math.round((amount + Number.EPSILON) * 100);
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount === 0) return 0;
+  const sign = amount < 0 ? -1 : 1;
+  const abs = Math.abs(amount);
+
+  // Valores subcentavos (< 0.005) arredondam para 0 centavos
+  if (abs < 0.005) return 0;
+
+  // Limite de segurança de representação inteira em centavos
+  if (abs * 100 > Number.MAX_SAFE_INTEGER) return 0;
+
+  // Deslocamento de escala decimal imune a números já formatados em notação científica (ex: 1e-7)
+  const parts = String(abs).split(/[eE]/);
+  const base = parts[0];
+  const exp = parts[1] ? Number(parts[1]) : 0;
+  const targetExp = exp + 2;
+  const num = Number(`${base}e${targetExp >= 0 ? '+' : ''}${targetExp}`);
+
+  if (!Number.isFinite(num)) return 0;
+  const rounded = sign * Math.round(num);
+
+  return !Number.isFinite(rounded) || !Number.isSafeInteger(rounded) || Object.is(rounded, -0) ? 0 : rounded;
 }
 
 /**
  * Converte centavos inteiros de volta para valor monetário float com até 2 casas decimais.
  */
 export function fromCents(cents: number): number {
-  return Math.round(cents) / 100;
+  if (typeof cents !== 'number' || !Number.isFinite(cents) || cents === 0) return 0;
+  const roundedCents = Math.round(cents);
+  if (!Number.isSafeInteger(roundedCents)) return 0;
+  const val = roundedCents / 100;
+  return Object.is(val, -0) ? 0 : val;
 }
 
 /**
  * Arredonda de forma pura e determinística qualquer montante monetário para 2 casas decimais.
- * Utiliza a política institucional de centavos inteiros (half-up via Number.EPSILON).
+ * Utiliza a política institucional de centavos inteiros half-up.
  */
 export function roundCurrency(amount: number): number {
   return fromCents(toCents(amount));
@@ -1522,4 +1588,303 @@ export function processRecurringBatchState(
     hasChanges,
   };
 }
+
+/**
+ * Calcula a divisão determinística de uma despesa entre membros do workspace sem perda de centavos.
+ */
+export function calculateExpenseSplits(
+  totalAmount: number,
+  splitType: SplitType,
+  members: { id: string }[],
+  payerMemberId: string,
+  customSplits?: { member_id: string; amount: number }[]
+): TransactionSplit[] {
+  if (typeof totalAmount !== 'number' || !Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw new Error('O valor total da despesa para rateio deve ser maior que zero.');
+  }
+  if (!members || members.length === 0) {
+    throw new Error('A lista de membros do workspace não pode estar vazia.');
+  }
+
+  const memberIds = new Set(members.map((m) => m.id));
+  if (!memberIds.has(payerMemberId)) {
+    throw new Error('O membro pagador deve pertencer à lista de membros do workspace.');
+  }
+
+  const totalCents = toCents(totalAmount);
+
+  if (splitType === 'individual') {
+    return [{ member_id: payerMemberId, amount: fromCents(totalCents), percentage: 100 }];
+  }
+
+  if (splitType === 'equal') {
+    const count = members.length;
+    const baseCents = Math.floor(totalCents / count);
+    const remainderCents = totalCents - baseCents * count;
+
+    return members.map((m, idx) => {
+      const cents = idx < remainderCents ? baseCents + 1 : baseCents;
+      const pct = Math.round((cents / totalCents) * 1000) / 10;
+      return {
+        member_id: m.id,
+        amount: fromCents(cents),
+        percentage: pct,
+      };
+    });
+  }
+
+  if (splitType === 'full_other') {
+    const otherMembers = members.filter((m) => m.id !== payerMemberId);
+    if (otherMembers.length === 0) {
+      return [{ member_id: payerMemberId, amount: fromCents(totalCents), percentage: 100 }];
+    }
+    const count = otherMembers.length;
+    const baseCents = Math.floor(totalCents / count);
+    const remainderCents = totalCents - baseCents * count;
+
+    return otherMembers.map((m, idx) => {
+      const cents = idx < remainderCents ? baseCents + 1 : baseCents;
+      const pct = Math.round((cents / totalCents) * 1000) / 10;
+      return {
+        member_id: m.id,
+        amount: fromCents(cents),
+        percentage: pct,
+      };
+    });
+  }
+
+  if (splitType === 'custom') {
+    if (!customSplits || customSplits.length === 0) {
+      return [{ member_id: payerMemberId, amount: fromCents(totalCents), percentage: 100 }];
+    }
+
+    const seenMembers = new Set<string>();
+    const sanitized = customSplits.map((cs) => {
+      if (!cs.member_id || !memberIds.has(cs.member_id)) {
+        throw new Error('Todos os participantes do rateio devem pertencer aos membros do workspace.');
+      }
+      if (seenMembers.has(cs.member_id)) {
+        throw new Error('Membros duplicados identificados no rateio customizado.');
+      }
+      seenMembers.add(cs.member_id);
+
+      if (typeof cs.amount !== 'number' || !Number.isFinite(cs.amount) || cs.amount < 0) {
+        throw new Error('O valor atribuído a cada membro no rateio não pode ser negativo.');
+      }
+
+      const cents = toCents(cs.amount);
+      if (cents < 0) {
+        throw new Error('O valor atribuído a cada membro no rateio não pode ser negativo.');
+      }
+
+      return {
+        member_id: cs.member_id,
+        cents,
+      };
+    });
+
+    const sumCents = sanitized.reduce((acc, c) => acc + c.cents, 0);
+    if (sumCents !== totalCents) {
+      throw new Error(
+        `A soma das divisões (R$ ${(sumCents / 100).toFixed(2)}) diverge do valor total da despesa (R$ ${(totalCents / 100).toFixed(2)}).`
+      );
+    }
+    return sanitized.map((s) => ({
+      member_id: s.member_id,
+      amount: fromCents(s.cents),
+      percentage: totalCents > 0 ? Math.round((s.cents / totalCents) * 1000) / 10 : 0,
+    }));
+  }
+
+  return [{ member_id: payerMemberId, amount: fromCents(totalCents), percentage: 100 }];
+}
+
+export interface MemberNetBalance {
+  member_id: string;
+  total_paid: number;
+  total_share: number;
+  net_balance: number; // > 0: a receber (credor); < 0: a pagar (devedor)
+}
+
+export interface PairwiseDebt {
+  from_member_id: string;
+  to_member_id: string;
+  amount: number;
+}
+
+/**
+ * Calcula o balanço líquido de cada membro e consolida dívidas recíprocas (estilo Splitwise).
+ */
+export function calculateMemberNetBalances(
+  transactions: Transaction[],
+  settlements: Settlement[],
+  members: WorkspaceMember[],
+  workspaceId: string,
+  purchases?: Purchase[]
+): {
+  balances: MemberNetBalance[];
+  pairwiseDebts: PairwiseDebt[];
+} {
+  const wsMembers = members.filter((m) => m.workspace_id === workspaceId);
+
+  const paidMap = new Map<string, number>();
+  const shareMap = new Map<string, number>();
+  const settledOutMap = new Map<string, number>();
+  const settledInMap = new Map<string, number>();
+
+  wsMembers.forEach((m) => {
+    paidMap.set(m.id, 0);
+    shareMap.set(m.id, 0);
+    settledOutMap.set(m.id, 0);
+    settledInMap.set(m.id, 0);
+  });
+
+  // 1. Despesas avulsas com rateio
+  const wsTransactions = transactions.filter(
+    (t) => t.workspace_id === workspaceId && t.status !== 'cancelled' && t.type === 'expense'
+  );
+
+  for (const tx of wsTransactions) {
+    if (!tx.splits || tx.splits.length === 0) {
+      continue;
+    }
+
+    const payerId = tx.paid_by_member_id || wsMembers[0]?.id;
+    if (!payerId) continue;
+
+    const txTotalCents = toCents(tx.amount);
+    paidMap.set(payerId, (paidMap.get(payerId) || 0) + txTotalCents);
+
+    for (const split of tx.splits) {
+      if (split.member_id) {
+        const splitCents = toCents(split.amount);
+        shareMap.set(split.member_id, (shareMap.get(split.member_id) || 0) + splitCents);
+      }
+    }
+  }
+
+  // 2. Compras parceladas com rateio (P0-02: consolidada no total da compra uma única vez, sem duplicar por parcela)
+  const wsPurchases = (purchases || []).filter(
+    (p) => p.workspace_id === workspaceId && p.splits && p.splits.length > 0
+  );
+
+  for (const pur of wsPurchases) {
+    const payerId = pur.paid_by_member_id || wsMembers[0]?.id;
+    if (!payerId) continue;
+
+    const purTotalCents = toCents(pur.total_amount);
+    paidMap.set(payerId, (paidMap.get(payerId) || 0) + purTotalCents);
+
+    for (const split of pur.splits || []) {
+      if (split.member_id) {
+        const splitCents = toCents(split.amount);
+        shareMap.set(split.member_id, (shareMap.get(split.member_id) || 0) + splitCents);
+      }
+    }
+  }
+
+  // 3. Liquidações e acertos consolidados
+  const wsSettlements = settlements.filter((s) => s.workspace_id === workspaceId);
+  for (const s of wsSettlements) {
+    const sCents = toCents(s.amount);
+    settledOutMap.set(s.from_member_id, (settledOutMap.get(s.from_member_id) || 0) + sCents);
+    settledInMap.set(s.to_member_id, (settledInMap.get(s.to_member_id) || 0) + sCents);
+  }
+
+  const balances: MemberNetBalance[] = wsMembers.map((m) => {
+    const paid = paidMap.get(m.id) || 0;
+    const share = shareMap.get(m.id) || 0;
+    const settledOut = settledOutMap.get(m.id) || 0;
+    const settledIn = settledInMap.get(m.id) || 0;
+
+    const netCents = (paid - share) + (settledOut - settledIn);
+
+    return {
+      member_id: m.id,
+      total_paid: fromCents(paid),
+      total_share: fromCents(share),
+      net_balance: fromCents(netCents),
+    };
+  });
+
+  const creditors = balances
+    .filter((b) => toCents(b.net_balance) > 0)
+    .map((b) => ({ id: b.member_id, cents: toCents(b.net_balance) }))
+    .sort((a, b) => b.cents - a.cents);
+
+  const debtors = balances
+    .filter((b) => toCents(b.net_balance) < 0)
+    .map((b) => ({ id: b.member_id, cents: Math.abs(toCents(b.net_balance)) }))
+    .sort((a, b) => b.cents - a.cents);
+
+  const pairwiseDebts: PairwiseDebt[] = [];
+  let cIdx = 0;
+  let dIdx = 0;
+
+  while (cIdx < creditors.length && dIdx < debtors.length) {
+    const creditor = creditors[cIdx];
+    const debtor = debtors[dIdx];
+
+    const settleCents = Math.min(creditor.cents, debtor.cents);
+    if (settleCents > 0) {
+      pairwiseDebts.push({
+        from_member_id: debtor.id,
+        to_member_id: creditor.id,
+        amount: fromCents(settleCents),
+      });
+      creditor.cents -= settleCents;
+      debtor.cents -= settleCents;
+    }
+
+    if (creditor.cents === 0) cIdx++;
+    if (debtor.cents === 0) dIdx++;
+  }
+
+  return { balances, pairwiseDebts };
+}
+
+/**
+ * Validação rigorosa de registro de liquidação de acerto de contas.
+ */
+export function validateSettlement(
+  fromMemberId: string,
+  toMemberId: string,
+  amount: number,
+  members: WorkspaceMember[],
+  workspaceId: string,
+  pairwiseDebts?: PairwiseDebt[]
+): void {
+  if (!fromMemberId || !toMemberId) {
+    throw new Error('Membros devedor e credor devem ser informados para o acerto.');
+  }
+  if (fromMemberId === toMemberId) {
+    throw new Error('O membro pagador e o recebedor do acerto não podem ser a mesma pessoa.');
+  }
+  const amountCents = toCents(amount);
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amountCents <= 0) {
+    throw new Error('O valor do acerto deve ser maior que zero.');
+  }
+  const wsMembers = members.filter((m) => m.workspace_id === workspaceId);
+  const m1 = wsMembers.find((m) => m.id === fromMemberId);
+  const m2 = wsMembers.find((m) => m.id === toMemberId);
+  if (!m1 || !m2) {
+    throw new Error('Os membros participantes do acerto devem pertencer ao workspace ativo.');
+  }
+
+  if (pairwiseDebts) {
+    const existingDebt = pairwiseDebts.find(
+      (d) => d.from_member_id === fromMemberId && d.to_member_id === toMemberId
+    );
+    const maxCents = existingDebt ? toCents(existingDebt.amount) : 0;
+    if (maxCents <= 0) {
+      throw new Error('Não há débito pendente registrado entre o pagador e o recebedor informados.');
+    }
+    if (amountCents > maxCents) {
+      throw new Error(
+        `O valor do acerto (R$ ${(amountCents / 100).toFixed(2)}) excede a dívida pendente de R$ ${(maxCents / 100).toFixed(2)}.`
+      );
+    }
+  }
+}
+
 

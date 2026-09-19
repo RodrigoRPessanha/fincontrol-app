@@ -12,12 +12,14 @@ import {
   Wallet,
   TrendingUp,
   DollarSign,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 import { formatCurrency, sanitizeCsvCell } from '@/lib/utils';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { format } from 'date-fns';
 import { Category } from '@/lib/types';
-import { resolveCategory, calculateIntegerPercentages } from '@/lib/financial-engine';
+import { resolveCategory, calculateIntegerPercentages, toCents, fromCents } from '@/lib/financial-engine';
 
 export default function ReportsPage() {
   const {
@@ -138,23 +140,23 @@ export default function ReportsPage() {
     }[] = allWorkspaceCategories
       .filter((c) => c.type === 'expense' && !c.parent_id)
       .map((cat) => {
-        const total = reportRows
+        const totalCents = reportRows
           .filter((r) => r.type === 'expense' && r.rootCategoryId === cat.id)
-          .reduce((acc, r) => acc + r.amount, 0);
+          .reduce((acc, r) => acc + toCents(r.amount), 0);
 
         return {
           category: cat,
-          amount: total,
+          amount: fromCents(totalCents),
         };
       })
       .filter((c) => c.amount > 0);
 
     // Reconciliação: despesas sem categoria associada
-    const uncategorizedTotal = reportRows
+    const uncategorizedTotalCents = reportRows
       .filter((r) => r.type === 'expense' && r.isUncategorized)
-      .reduce((acc, r) => acc + r.amount, 0);
+      .reduce((acc, r) => acc + toCents(r.amount), 0);
 
-    if (uncategorizedTotal > 0) {
+    if (uncategorizedTotalCents > 0) {
       list.push({
         category: {
           id: 'uncategorized',
@@ -163,7 +165,7 @@ export default function ReportsPage() {
           color: '#64748b',
           type: 'expense',
         },
-        amount: uncategorizedTotal,
+        amount: fromCents(uncategorizedTotalCents),
       });
     }
 
@@ -172,33 +174,51 @@ export default function ReportsPage() {
 
   // Total de Despesas do Período calculado diretamente do dataset unificado (100% de reconciliação)
   const totalExpensePeriod = useMemo(() => {
-    return reportRows.filter((r) => r.type === 'expense').reduce((acc, r) => acc + r.amount, 0);
+    return fromCents(reportRows.filter((r) => r.type === 'expense').reduce((acc, r) => acc + toCents(r.amount), 0));
   }, [reportRows]);
+
+  const paidExpensesCents = useMemo(() => {
+    return reportRows
+      .filter((r) => r.type === 'expense' && r.status === 'paid')
+      .reduce((acc, r) => acc + toCents(r.amount), 0);
+  }, [reportRows]);
+
+  const pendingExpensesCents = useMemo(() => {
+    return reportRows
+      .filter((r) => r.type === 'expense' && r.status !== 'paid')
+      .reduce((acc, r) => acc + toCents(r.amount), 0);
+  }, [reportRows]);
+
+  const totalExpensePeriodCents = toCents(totalExpensePeriod);
+  const paidPercent = totalExpensePeriodCents > 0 ? Math.round((paidExpensesCents / totalExpensePeriodCents) * 100) : 0;
+  const pendingPercent = totalExpensePeriodCents > 0 ? Math.max(0, 100 - paidPercent) : 0;
+  const paidExpenses = fromCents(paidExpensesCents);
+  const pendingExpenses = fromCents(pendingExpensesCents);
 
   // Gastos por Método de Pagamento derivados do dataset único (com reconciliação de métodos não associados)
   const paymentMethodSpending = useMemo(() => {
     const list = allWorkspacePaymentMethods
       .map((pm) => {
-        const total = reportRows
+        const totalCents = reportRows
           .filter((r) => r.type === 'expense' && r.paymentMethodId === pm.id)
-          .reduce((acc, r) => acc + r.amount, 0);
+          .reduce((acc, r) => acc + toCents(r.amount), 0);
 
         return {
           pm,
-          amount: total,
+          amount: fromCents(totalCents),
         };
       })
       .filter((p) => p.amount > 0);
 
-    const unmappedPmTotal = reportRows
+    const unmappedPmTotalCents = reportRows
       .filter(
         (r) =>
           r.type === 'expense' &&
           (!r.paymentMethodId || !allWorkspacePaymentMethods.some((pm) => pm.id === r.paymentMethodId))
       )
-      .reduce((acc, r) => acc + r.amount, 0);
+      .reduce((acc, r) => acc + toCents(r.amount), 0);
 
-    if (unmappedPmTotal > 0) {
+    if (unmappedPmTotalCents > 0) {
       list.push({
         pm: {
           id: 'other-pm',
@@ -208,7 +228,7 @@ export default function ReportsPage() {
           active: true,
           created_at: '',
         },
-        amount: unmappedPmTotal,
+        amount: fromCents(unmappedPmTotalCents),
       });
     }
 
@@ -334,6 +354,53 @@ export default function ReportsPage() {
             onChange={(e) => setSelectedMonth(e.target.value)}
             className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 shadow-sm focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
           />
+        </div>
+      </div>
+
+      {/* Resumo de Despesas: Pago vs Pendente */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+          <span className="text-xs font-semibold text-slate-400">Total de Despesas do Período</span>
+          <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency(totalExpensePeriod)}
+          </p>
+          <span className="text-[11px] text-slate-500 mt-1 block">Compromissos e compras consolidadas</span>
+        </div>
+
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Já Quitado</span>
+            </span>
+            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full dark:bg-emerald-950/40">
+              {paidPercent}%
+            </span>
+          </div>
+          <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency(paidExpenses)}
+          </p>
+          <div className="h-1.5 w-full bg-slate-100 rounded-full mt-2 overflow-hidden dark:bg-slate-800">
+            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${paidPercent}%` }} />
+          </div>
+        </div>
+
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5" />
+              <span>Pendente a Pagar</span>
+            </span>
+            <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full dark:bg-amber-950/40">
+              {pendingPercent}%
+            </span>
+          </div>
+          <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+            {formatCurrency(pendingExpenses)}
+          </p>
+          <div className="h-1.5 w-full bg-slate-100 rounded-full mt-2 overflow-hidden dark:bg-slate-800">
+            <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pendingPercent}%` }} />
+          </div>
         </div>
       </div>
 

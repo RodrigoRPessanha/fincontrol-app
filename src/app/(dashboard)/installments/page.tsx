@@ -13,7 +13,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { resolveCategory } from '@/lib/financial-engine';
+import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { InstallmentDetailModal } from '@/components/installments/InstallmentDetailModal';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
 import { Installment, Purchase } from '@/lib/types';
@@ -34,13 +34,17 @@ export default function InstallmentsPage() {
   } | null>(null);
 
   // Totais agregados
-  const totalPurchasesAmount = purchases.reduce((acc, p) => acc + p.total_amount, 0);
+  const totalPurchasesCents = purchases.reduce((acc, p) => acc + toCents(p.total_amount), 0);
 
-  const totalPaidAll = installments.reduce((acc, i) => {
-    return acc + (i.paid_amount || (i.status === 'paid' ? i.amount : 0));
+  const totalPaidCents = installments.reduce((acc, i) => {
+    return acc + toCents(i.paid_amount || (i.status === 'paid' ? i.amount : 0));
   }, 0);
 
-  const totalRemainingAll = Math.max(0, totalPurchasesAmount - totalPaidAll);
+  const totalRemainingCents = Math.max(0, totalPurchasesCents - totalPaidCents);
+
+  const totalPurchasesAmount = fromCents(totalPurchasesCents);
+  const totalPaidAll = fromCents(totalPaidCents);
+  const totalRemainingAll = fromCents(totalRemainingCents);
 
   return (
     <div className="space-y-6">
@@ -103,12 +107,13 @@ export default function InstallmentsPage() {
           const pInsts = installments.filter((i) => i.purchase_id === purchase.id);
 
           const paidCount = pInsts.filter((i) => i.status === 'paid').length;
-          const totalPaid = pInsts.reduce(
-            (acc, i) => acc + (i.paid_amount || (i.status === 'paid' ? i.amount : 0)),
+          const totalPaidCents = pInsts.reduce(
+            (acc, i) => acc + toCents(i.paid_amount || (i.status === 'paid' ? i.amount : 0)),
             0
           );
-          const remaining = Math.max(0, purchase.total_amount - totalPaid);
-          const progress = Math.min(100, Math.round((totalPaid / purchase.total_amount) * 100));
+          const totalPaid = fromCents(totalPaidCents);
+          const remaining = fromCents(Math.max(0, toCents(purchase.total_amount) - totalPaidCents));
+          const progress = Math.min(100, Math.round((totalPaidCents / (toCents(purchase.total_amount) || 1)) * 100));
 
           return (
             <div

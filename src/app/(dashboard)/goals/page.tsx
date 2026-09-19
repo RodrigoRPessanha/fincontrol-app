@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useFinance } from '@/lib/context/finance-context';
 import {
   Target,
@@ -14,12 +15,18 @@ import {
   Car,
   Home,
   Sparkles,
+  ArrowLeft,
+  Settings,
+  AlertCircle,
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { toCents, fromCents } from '@/lib/financial-engine';
 import { FinancialGoal } from '@/lib/types';
 
 export default function GoalsPage() {
-  const { goals, accounts, addGoal, depositGoal } = useFinance();
+  const { goals, accounts, addGoal, depositGoal, activeWorkspace } = useFinance();
+
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
   const [isNewGoalOpen, setIsNewGoalOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
@@ -70,6 +77,41 @@ export default function GoalsPage() {
     setSelectedGoal(null);
   };
 
+  if (isExpenseTracker) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-3xl bg-white p-8 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 text-center max-w-2xl mx-auto my-8">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 mb-4">
+            <Target className="h-8 w-8" />
+          </div>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+            Metas Disponíveis Apenas no Modo com Gestão de Saldo
+          </h2>
+          <p className="mt-2 text-sm text-slate-500 leading-relaxed">
+            O workspace ativo (<strong>{activeWorkspace?.name}</strong>) está configurado no modo <strong>Apenas Despesas & Rateio</strong>.
+            Neste modo, o foco é exclusivamente saber quanto foi gasto no mês, categorias, faturas e divisões entre membros, sem gestão de saldo em contas bancárias.
+          </p>
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link
+              href="/"
+              className="flex items-center gap-2 rounded-2xl bg-slate-100 px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 transition"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Voltar ao Dashboard</span>
+            </Link>
+            <Link
+              href="/workspaces"
+              className="flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-500 transition"
+            >
+              <Settings className="h-4 w-4" />
+              <span>Gerenciar Modo do Workspace</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -95,9 +137,11 @@ export default function GoalsPage() {
       {/* Grid de Metas */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {goals.map((goal) => {
-          const percent = Math.min(100, Math.round((goal.current_amount / goal.target_amount) * 100));
-          const remaining = Math.max(0, goal.target_amount - goal.current_amount);
-          const isCompleted = goal.current_amount >= goal.target_amount;
+          const currentCents = toCents(goal.current_amount || 0);
+          const targetCents = toCents(goal.target_amount);
+          const percent = Math.min(100, Math.round((currentCents / (targetCents || 1)) * 100));
+          const remaining = fromCents(Math.max(0, targetCents - currentCents));
+          const isCompleted = currentCents >= targetCents;
 
           return (
             <div

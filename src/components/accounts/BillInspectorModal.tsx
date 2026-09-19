@@ -4,6 +4,7 @@ import React from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import { X, CreditCard, Calendar, CheckCircle, AlertCircle, DollarSign } from 'lucide-react';
 import { formatCurrency, formatDate, formatMonthYear } from '@/lib/utils';
+import { toCents, fromCents } from '@/lib/financial-engine';
 import { StatusBadge } from '../shared/StatusBadge';
 import { CreditCardBill } from '@/lib/types';
 
@@ -27,7 +28,7 @@ export function BillInspectorModal({ isOpen, onClose, bill, onPayBill }: BillIns
   // Parcelas nesta fatura
   const billInstallments = installments.filter((i) => i.credit_card_bill_id === bill.id);
 
-  const remaining = Math.max(0, bill.total_amount - (bill.paid_amount || 0));
+  const remaining = fromCents(Math.max(0, toCents(bill.total_amount) - toCents(bill.paid_amount || 0)));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">

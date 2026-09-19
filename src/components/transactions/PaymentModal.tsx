@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import { X, CheckCircle2, DollarSign, Calendar, Wallet } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { toCents, fromCents } from '@/lib/financial-engine';
 import { format } from 'date-fns';
 
 interface PaymentModalProps {
@@ -19,8 +20,36 @@ interface PaymentModalProps {
   } | null;
 }
 
+export function parseCurrencyInput(val: string): number {
+  const trimmed = val.trim();
+  if (!trimmed) return NaN;
+
+  // 1. Formato brasileiro com vírgula decimal (ex: 1.234,56 ou 1234,56 ou 0,20)
+  if (/^\d{1,3}(\.\d{3})*,\d{1,2}$/.test(trimmed) || /^\d+,\d{1,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  // 2. Formato internacional com ponto decimal (ex: 1,234.56 ou 1234.56 ou 0.20)
+  if (/^\d{1,3}(,\d{3})*\.\d{1,2}$/.test(trimmed) || /^\d+\.\d{1,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/,/g, '');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  // 3. Inteiro puro (ex: 20 ou 1000)
+  if (/^\d+$/.test(trimmed)) {
+    const num = parseFloat(trimmed);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  return NaN;
+}
+
 export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
-  const { accounts, recordPayment, payCreditCardBill } = useFinance();
+  const { accounts, activeWorkspace, recordPayment, payCreditCardBill } = useFinance();
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
   const [amountStr, setAmountStr] = useState('');
   const [accountId, setAccountId] = useState('');
@@ -29,20 +58,33 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
 
   if (!isOpen || !target) return null;
 
-  const remaining = Math.max(0, target.totalAmount - target.paidAmount);
-  const currentAmount = amountStr ? parseFloat(amountStr.replace(/\./g, '').replace(',', '.')) : remaining;
+  const totalCents = toCents(target.totalAmount);
+  const paidCents = toCents(target.paidAmount || 0);
+  const remainingCents = Math.max(0, totalCents - paidCents);
+  const remaining = fromCents(remainingCents);
+
+  const trimmed = amountStr.trim();
+  const isInputEmpty = trimmed === '';
+  const rawNum = parseCurrencyInput(trimmed);
+  const isInvalid = !isInputEmpty && (!Number.isFinite(rawNum) || rawNum <= 0);
+
+  const currentAmountCents = !isInputEmpty && !isInvalid ? toCents(rawNum) : 0;
+  const currentAmount = fromCents(currentAmountCents);
+  const isOverRemaining = currentAmountCents > remainingCents;
+  const isAccountMissing = !isExpenseTracker && !accountId;
+  const canSubmit = !isAccountMissing && !isInputEmpty && !isInvalid && currentAmountCents > 0 && !isOverRemaining;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!accountId || currentAmount <= 0 || currentAmount > remaining) return;
+    if (!canSubmit) return;
 
     if (target.type === 'bill') {
-      payCreditCardBill(target.id, accountId, currentAmount, paymentDate, notes);
+      payCreditCardBill(target.id, accountId || undefined, currentAmount, paymentDate, notes || undefined);
     } else {
       recordPayment({
         transaction_id: target.type === 'transaction' ? target.id : undefined,
         installment_id: target.type === 'installment' ? target.id : undefined,
-        account_id: accountId,
+        account_id: accountId || undefined,
         amount: currentAmount,
         payment_date: paymentDate,
         notes: notes || undefined,
@@ -121,38 +163,49 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
                 value={amountStr}
                 onChange={(e) => setAmountStr(e.target.value)}
                 className={`w-full rounded-xl border py-2.5 pl-10 pr-3 text-lg font-bold text-slate-900 focus:outline-none dark:bg-slate-800 dark:text-white ${
-                  currentAmount > remaining
+                  isInvalid || isOverRemaining
                     ? 'border-rose-500 bg-rose-50/30'
                     : 'border-slate-300 bg-white focus:border-emerald-500 dark:border-slate-700'
                 }`}
               />
             </div>
-            {currentAmount > remaining && (
+            {isInvalid && (
+              <p className="mt-1 text-[11px] font-bold text-rose-600">
+                Por favor, informe um valor monetário válido maior que zero.
+              </p>
+            )}
+            {isOverRemaining && !isInvalid && (
               <p className="mt-1 text-[11px] font-bold text-rose-600">
                 O valor não pode ser superior ao saldo restante ({formatCurrency(remaining)}).
               </p>
             )}
           </div>
 
-          {/* Conta de Origem (Débito) */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Conta de Saída do Dinheiro
-            </label>
-            <select
-              required
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-            >
-              <option value="">Selecione a conta</option>
-              {accounts.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name} — Saldo: {formatCurrency(acc.current_balance)}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Conta de Origem (Débito) - Apenas quando controle de saldo ativo */}
+          {isExpenseTracker ? (
+            <div className="rounded-2xl bg-teal-50/70 p-3 text-xs text-teal-800 dark:bg-teal-950/40 dark:text-teal-300 border border-teal-200/60 dark:border-teal-900/60">
+              <span className="font-bold">Modo Apenas Despesas:</span> Esta baixa atualizará o status para pago e registrará o histórico sem alterar saldos de contas.
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Conta de Saída do Dinheiro
+              </label>
+              <select
+                required
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              >
+                <option value="">Selecione a conta</option>
+                {accounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.name} — Saldo: {formatCurrency(acc.current_balance)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Data do Pagamento */}
           <div>
@@ -192,7 +245,12 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-500"
+              disabled={!canSubmit}
+              className={`rounded-xl px-5 py-2 text-sm font-bold text-white shadow-md transition ${
+                !canSubmit
+                  ? 'bg-slate-400 cursor-not-allowed opacity-60'
+                  : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-500'
+              }`}
             >
               Confirmar Pagamento
             </button>

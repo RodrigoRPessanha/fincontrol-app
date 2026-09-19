@@ -21,7 +21,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { calculateDashboardSummary, resolveCategory } from '@/lib/financial-engine';
+import { calculateDashboardSummary, resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
@@ -111,7 +111,7 @@ export default function DashboardPage() {
     .map((t) => ({
       id: t.id,
       title: t.description,
-      amount: t.amount - (t.paid_amount || 0),
+      amount: fromCents(Math.max(0, toCents(t.amount) - toCents(t.paid_amount || 0))),
       totalAmount: t.amount,
       paidAmount: t.paid_amount || 0,
       dueDate: t.due_date,
@@ -127,7 +127,7 @@ export default function DashboardPage() {
       return {
         id: i.id,
         title: `${p?.description || 'Parcela'} (${i.installment_number}/${p?.installment_count || '?'})`,
-        amount: i.amount - (i.paid_amount || 0),
+        amount: fromCents(Math.max(0, toCents(i.amount) - toCents(i.paid_amount || 0))),
         totalAmount: i.amount,
         paidAmount: i.paid_amount || 0,
         dueDate: i.due_date,
@@ -141,14 +141,14 @@ export default function DashboardPage() {
     .filter(
       (b) =>
         (b.status === 'open' || b.status === 'partially_paid' || b.status === 'overdue') &&
-        b.total_amount - (b.paid_amount || 0) > 0
+        toCents(b.total_amount) - toCents(b.paid_amount || 0) > 0
     )
     .map((b) => {
       const card = allWorkspaceCreditCards.find((c) => c.id === b.credit_card_id);
       return {
         id: b.id,
         title: `Fatura ${card?.name || 'Cartão'} (${b.reference_month})`,
-        amount: b.total_amount - (b.paid_amount || 0),
+        amount: fromCents(Math.max(0, toCents(b.total_amount) - toCents(b.paid_amount || 0))),
         totalAmount: b.total_amount,
         paidAmount: b.paid_amount || 0,
         dueDate: b.due_date,
@@ -162,14 +162,23 @@ export default function DashboardPage() {
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, 5);
 
+  const isExpenseTracker = activeWorkspace.tracking_mode === 'expense_tracker';
+
   return (
     <div className="space-y-6">
       {/* Header do Dashboard & Alternador Previsto vs Realizado */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            Visão Geral
-          </h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+              Visão Geral
+            </h2>
+            {isExpenseTracker && (
+              <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-[11px] font-bold text-teal-700 border border-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:border-teal-800">
+                Apenas Despesas & Rateio
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Ambiente ativo: <strong className="text-slate-700 dark:text-slate-200">{activeWorkspace.name}</strong> •{' '}
             {format(new Date(), "MMMM 'de' yyyy")}
@@ -187,7 +196,7 @@ export default function DashboardPage() {
             }`}
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
-            Realizado (Caixa)
+            {isExpenseTracker ? 'Efetivado (Quitado)' : 'Realizado (Caixa)'}
           </button>
           <button
             onClick={() => setViewPerspective('planned')}
@@ -228,25 +237,46 @@ export default function DashboardPage() {
 
       {/* Cards de Métricas Principais */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Saldo Total em Contas */}
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Patrimônio em Contas
-            </span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              <Wallet className="h-4 w-4" />
+        {/* Card 1: Patrimônio em Contas (Completo) ou Pendente a Pagar (Apenas Despesas) */}
+        {isExpenseTracker ? (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Total Pendente a Pagar
+              </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+                <Clock className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <h3 className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                {formatCurrency(summary.pending.amount)}
+              </h3>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {summary.pending.count} {summary.pending.count === 1 ? 'despesa a vencer' : 'despesas a vencer'} no período
+              </p>
             </div>
           </div>
-          <div className="mt-3">
-            <h3 className="text-2xl font-black text-slate-900 dark:text-white">
-              {formatCurrency(summary.totalBalance)}
-            </h3>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Soma de {accounts.length} contas ativas
-            </p>
+        ) : (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Patrimônio em Contas
+              </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <Wallet className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white">
+                {formatCurrency(summary.totalBalance)}
+              </h3>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Soma de {accounts.length} contas ativas
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Receitas do Mês */}
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
@@ -288,35 +318,56 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Saldo Mensal Líquido */}
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Saldo do Mês
-            </span>
-            <div
-              className={`flex h-8 w-8 items-center justify-center rounded-xl ${
-                activeMetric.net >= 0
-                  ? 'bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400'
-                  : 'bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'
-              }`}
-            >
-              <DollarSign className="h-4 w-4" />
+        {/* Card 4: Saldo Líquido (Completo) ou Total Previsto no Mês (Apenas Despesas) */}
+        {isExpenseTracker ? (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Total Previsto no Mês
+              </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400">
+                <Calendar className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white">
+                {formatCurrency(summary.planned.expense)}
+              </h3>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Pagas ({formatCurrency(summary.realized.expense)}) + Pendentes ({formatCurrency(summary.pending.amount)})
+              </p>
             </div>
           </div>
-          <div className="mt-3">
-            <h3
-              className={`text-2xl font-black ${
-                activeMetric.net >= 0 ? 'text-slate-900 dark:text-white' : 'text-rose-600'
-              }`}
-            >
-              {formatCurrency(activeMetric.net)}
-            </h3>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Resultado líquido ({viewPerspective === 'realized' ? 'Realizado' : 'Previsto'})
-            </p>
+        ) : (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Saldo do Mês
+              </span>
+              <div
+                className={`flex h-8 w-8 items-center justify-center rounded-xl ${
+                  activeMetric.net >= 0
+                    ? 'bg-teal-50 text-teal-600 dark:bg-teal-950/50 dark:text-teal-400'
+                    : 'bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'
+                }`}
+              >
+                <DollarSign className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <h3
+                className={`text-2xl font-black ${
+                  activeMetric.net >= 0 ? 'text-slate-900 dark:text-white' : 'text-rose-600'
+                }`}
+              >
+                {formatCurrency(activeMetric.net)}
+              </h3>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Resultado líquido ({viewPerspective === 'realized' ? 'Realizado' : 'Previsto'})
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Seção 2: Próximos Pagamentos & Cartões de Crédito */}
@@ -424,9 +475,11 @@ export default function DashboardPage() {
                   (b) => b.credit_card_id === card.id && b.status === 'open'
                 ) || creditCardBills.find((b) => b.credit_card_id === card.id);
 
-                const billAmount = currentBill ? currentBill.total_amount : 0;
-                const availableLimit = Math.max(0, card.credit_limit - billAmount);
-                const usedPercent = Math.min(100, Math.round((billAmount / card.credit_limit) * 100));
+                const billAmountCents = currentBill ? toCents(currentBill.total_amount) : 0;
+                const billAmount = fromCents(billAmountCents);
+                const limitCents = toCents(card.credit_limit);
+                const availableLimit = fromCents(Math.max(0, limitCents - billAmountCents));
+                const usedPercent = Math.min(100, Math.round((billAmountCents / (limitCents || 1)) * 100));
 
                 return (
                   <div
@@ -507,8 +560,9 @@ export default function DashboardPage() {
             {purchases.slice(0, 3).map((purchase) => {
               const pInsts = installments.filter((i) => i.purchase_id === purchase.id);
               const paidCount = pInsts.filter((i) => i.status === 'paid').length;
-              const totalPaid = pInsts.reduce((acc, i) => acc + (i.paid_amount || (i.status === 'paid' ? i.amount : 0)), 0);
-              const progress = Math.min(100, Math.round((totalPaid / purchase.total_amount) * 100));
+              const totalPaidCents = pInsts.reduce((acc, i) => acc + toCents(i.paid_amount || (i.status === 'paid' ? i.amount : 0)), 0);
+              const totalPaid = fromCents(totalPaidCents);
+              const progress = Math.min(100, Math.round((totalPaidCents / (toCents(purchase.total_amount) || 1)) * 100));
 
               return (
                 <div
@@ -521,7 +575,11 @@ export default function DashboardPage() {
                       {purchase.description}
                     </h4>
                     <span className="text-xs font-extrabold text-slate-900 dark:text-white">
-                      {formatCurrency(purchase.total_amount / purchase.installment_count)}/mês
+                      {formatCurrency(
+                        purchase.installment_count > 0
+                          ? fromCents(Math.floor(toCents(purchase.total_amount) / purchase.installment_count))
+                          : 0
+                      )}/mês
                     </span>
                   </div>
 
@@ -565,11 +623,11 @@ export default function DashboardPage() {
           <div className="mt-4 space-y-3">
             {budgets.slice(0, 3).map((bud) => {
               const cat = categories.find((c) => c.id === bud.category_id);
-              // Cálculo simples de gasto na categoria este mês
-              const spent = transactions
+              const spentCents = transactions
                 .filter((t) => t.category_id === bud.category_id && t.type === 'expense')
-                .reduce((acc, t) => acc + t.amount, 0);
-              const percent = Math.min(100, Math.round((spent / bud.planned_amount) * 100));
+                .reduce((acc, t) => acc + toCents(t.amount), 0);
+              const spent = fromCents(spentCents);
+              const percent = Math.min(100, Math.round((spentCents / (toCents(bud.planned_amount) || 1)) * 100));
 
               return (
                 <div key={bud.id} className="space-y-1.5">
@@ -612,7 +670,9 @@ export default function DashboardPage() {
 
           <div className="mt-4 space-y-3">
             {goals.slice(0, 3).map((goal) => {
-              const percent = Math.min(100, Math.round((goal.current_amount / goal.target_amount) * 100));
+              const targetCents = toCents(goal.target_amount);
+              const currentCents = toCents(goal.current_amount);
+              const percent = targetCents > 0 ? Math.min(100, Math.round((currentCents / targetCents) * 100)) : 0;
               return (
                 <div key={goal.id} className="space-y-1.5">
                   <div className="flex justify-between text-xs font-bold">

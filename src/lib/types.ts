@@ -1,4 +1,5 @@
 export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'viewer';
+export type WorkspaceTrackingMode = 'full' | 'expense_tracker';
 
 export interface UserProfile {
   id: string;
@@ -13,6 +14,7 @@ export interface Workspace {
   name: string;
   owner_id: string;
   currency: string;
+  tracking_mode?: WorkspaceTrackingMode;
   created_at: string;
 }
 
@@ -108,6 +110,26 @@ export interface Category {
 export type TransactionStatus = 'pending' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled';
 export type TransactionType = 'income' | 'expense';
 
+export type SplitType = 'individual' | 'equal' | 'full_other' | 'custom';
+
+export interface TransactionSplit {
+  member_id: string;
+  amount: number;
+  percentage?: number;
+}
+
+export interface Settlement {
+  id: string;
+  workspace_id: string;
+  from_member_id: string;
+  to_member_id: string;
+  amount: number;
+  settlement_date: string;
+  notes?: string | null;
+  payment_account_id?: string | null;
+  created_at: string;
+}
+
 export interface Transaction {
   id: string;
   workspace_id: string;
@@ -117,6 +139,9 @@ export interface Transaction {
   credit_card_id?: string | null;
   credit_card_bill_id?: string | null;
   recurring_transaction_id?: string | null;
+  paid_by_member_id?: string | null;
+  split_type?: SplitType | null;
+  splits?: TransactionSplit[];
   description: string;
   amount: number;
   type: TransactionType;
@@ -143,6 +168,9 @@ export type UpdateTransactionDTO = {
   due_date?: string;
   transaction_date?: string;
   notes?: string | null;
+  paid_by_member_id?: string | null;
+  split_type?: SplitType | null;
+  splits?: TransactionSplit[];
 };
 
 export interface Payment {
@@ -151,13 +179,14 @@ export interface Payment {
   transaction_id?: string | null;
   installment_id?: string | null;
   credit_card_bill_id?: string | null;
-  account_id: string;
+  account_id?: string | null;
   payment_method_id?: string | null;
   amount: number;
   payment_date: string;
   notes?: string | null;
   created_by?: string;
   created_at: string;
+  affects_balance?: boolean;
 }
 
 export interface Purchase {
@@ -171,6 +200,9 @@ export interface Purchase {
   total_amount: number;
   installment_count: number;
   paid_installments_count?: number;
+  paid_by_member_id?: string | null;
+  split_type?: SplitType | null;
+  splits?: TransactionSplit[];
   purchase_date: string;
   created_by?: string;
   created_at: string;

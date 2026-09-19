@@ -18,7 +18,8 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import { calculateFutureCommitments } from '@/lib/financial-engine';
 
 export default function PlanningPage() {
-  const { installments, purchases, creditCardBills, recurring, transactions } = useFinance();
+  const { installments, purchases, creditCardBills, recurring, transactions, activeWorkspace } = useFinance();
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
   const [horizonMonths, setHorizonMonths] = useState<3 | 6 | 12>(6);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
@@ -46,7 +47,9 @@ export default function PlanningPage() {
             Planejamento & Comprometimento Futuro
           </h2>
           <p className="text-xs text-slate-500">
-            Descubra quanto da sua renda futura já está contratada em parcelas, fixos e obrigações.
+            {isExpenseTracker
+              ? 'Acompanhe todas as parcelas, despesas fixas e obrigações futuras já contratadas.'
+              : 'Descubra quanto da sua renda futura já está contratada em parcelas, fixos e obrigações.'}
           </p>
         </div>
 
@@ -106,17 +109,23 @@ export default function PlanningPage() {
                       {c.monthLabel}
                     </h3>
                   </div>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-bold border ${
-                      commitmentRate > 80
-                        ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400'
-                        : commitmentRate > 50
-                        ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400'
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400'
-                    }`}
-                  >
-                    {commitmentRate}% Comprometido
-                  </span>
+                  {isExpenseTracker && c.expectedIncome === 0 ? (
+                    <span className="rounded-full px-2 py-0.5 text-[11px] font-bold border bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300">
+                      {c.items.length} {c.items.length === 1 ? 'obrigação' : 'obrigações'}
+                    </span>
+                  ) : (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold border ${
+                        commitmentRate > 80
+                          ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400'
+                          : commitmentRate > 50
+                          ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400'
+                      }`}
+                    >
+                      {commitmentRate}% Comprometido
+                    </span>
+                  )}
                 </div>
 
                 {/* Total Comprometido */}
@@ -154,18 +163,27 @@ export default function PlanningPage() {
                   </div>
 
                   {/* Receita Prevista & Saldo Livre */}
-                  <div className="flex items-center justify-between pt-2 text-[11px] font-semibold text-slate-400">
-                    <span>Receita Esperada: {formatCurrency(c.expectedIncome)}</span>
-                    <span
-                      className={
-                        c.netForecast >= 0
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-rose-600'
-                      }
-                    >
-                      Livre: {formatCurrency(c.netForecast)}
-                    </span>
-                  </div>
+                  {isExpenseTracker && c.expectedIncome === 0 ? (
+                    <div className="flex items-center justify-between pt-2 text-[11px] font-semibold text-slate-400">
+                      <span>Total de despesas do mês</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                        {formatCurrency(c.totalCommitment)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between pt-2 text-[11px] font-semibold text-slate-400">
+                      <span>Receita Esperada: {formatCurrency(c.expectedIncome)}</span>
+                      <span
+                        className={
+                          c.netForecast >= 0
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-rose-600'
+                        }
+                      >
+                        Livre: {formatCurrency(c.netForecast)}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Dropdown de Itens Detalhados do Mês */}

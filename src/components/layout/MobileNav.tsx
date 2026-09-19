@@ -18,11 +18,14 @@ import {
   BarChart3,
   Users,
   Settings,
+  Scale,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useFinance } from '@/lib/context/finance-context';
 import { QuickAddModal } from '../transactions/QuickAddModal';
 
 const drawerLinks = [
+  { href: '/splits', label: 'Divisão de Contas', icon: Scale },
   { href: '/accounts', label: 'Contas & Cartões', icon: CreditCard },
   { href: '/installments', label: 'Parcelamentos', icon: Layers },
   { href: '/recurring', label: 'Recorrências', icon: Repeat },
@@ -35,8 +38,15 @@ const drawerLinks = [
 
 export function MobileNav() {
   const pathname = usePathname();
+  const { activeWorkspace } = useFinance();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
+  const visibleDrawerLinks = drawerLinks.filter((item) => {
+    if (isExpenseTracker && item.href === '/goals') return false;
+    return true;
+  });
 
   return (
     <>
@@ -113,7 +123,7 @@ export function MobileNav() {
               </div>
 
               <div className="mt-4 flex flex-col gap-1">
-                {drawerLinks.map((link) => {
+                {visibleDrawerLinks.map((link) => {
                   const Icon = link.icon;
                   const isActive = pathname === link.href;
                   return (

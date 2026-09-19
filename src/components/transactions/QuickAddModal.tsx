@@ -13,10 +13,12 @@ import {
   DollarSign,
   Layers,
   AlertCircle,
+  Users,
 } from 'lucide-react';
 import { CategoryIcon } from '../shared/CategoryIcon';
 import { formatCurrency } from '@/lib/utils';
-import { calculateCardBillDates, splitInstallments } from '@/lib/financial-engine';
+import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits } from '@/lib/financial-engine';
+import { SplitType, TransactionSplit } from '@/lib/types';
 import { format } from 'date-fns';
 
 interface QuickAddModalProps {
@@ -26,14 +28,18 @@ interface QuickAddModalProps {
 
 export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
   const {
+    activeWorkspace,
     categories,
     paymentMethods,
     accounts,
     creditCards,
+    workspaceMembers,
     addTransaction,
     createInstallmentPurchase,
     createTransfer,
   } = useFinance();
+
+  const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>('expense');
   const [description, setDescription] = useState('');
@@ -42,6 +48,11 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
   const [paymentMethodId, setPaymentMethodId] = useState('');
   const [installmentCount, setInstallmentCount] = useState(1);
   const [paidInstallmentsCount, setPaidInstallmentsCount] = useState(0);
+
+  // Rateio de Despesas (Splitwise)
+  const [paidByMemberId, setPaidByMemberId] = useState('');
+  const [splitType, setSplitType] = useState<SplitType>('individual');
+  const [customSplits, setCustomSplits] = useState<Record<string, number>>({});
 
   // Transferência
   const [fromAccountId, setFromAccountId] = useState('');
@@ -111,7 +122,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
       : [];
 
   const pendingBalancePreview = splitPreview.length > 0
-    ? splitPreview.filter((s) => !s.isPaid).reduce((acc, s) => acc + s.amount, 0)
+    ? fromCents(splitPreview.filter((s) => !s.isPaid).reduce((acc, s) => acc + toCents(s.amount), 0))
     : numAmount;
 
   const resetAndClose = () => {
@@ -122,6 +133,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     setSelectedCreditCardId('');
     setInstallmentCount(1);
     setPaidInstallmentsCount(0);
+    setPaidByMemberId('');
+    setSplitType('individual');
+    setCustomSplits({});
     setFromAccountId('');
     setToAccountId('');
     setTransactionDate(format(new Date(), 'yyyy-MM-dd'));
@@ -158,6 +172,16 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
         return;
       }
 
+      const effectivePayerId = paidByMemberId || workspaceMembers[0]?.id;
+      let resolvedSplits: TransactionSplit[] | undefined = undefined;
+
+      if (type === 'expense' && splitType !== 'individual' && workspaceMembers.length > 1 && effectivePayerId) {
+        const customList = splitType === 'custom'
+          ? workspaceMembers.map((m) => ({ member_id: m.id, amount: customSplits[m.id] || 0 }))
+          : undefined;
+        resolvedSplits = calculateExpenseSplits(numAmount, splitType, workspaceMembers, effectivePayerId, customList);
+      }
+
       if (isCreditCardSelected && installmentCount > 1 && selectedCard) {
         // Compra Parcelada Atômica com suporte a parcelas já pagas
         createInstallmentPurchase({
@@ -170,6 +194,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           payment_method_id: paymentMethodId || undefined,
           account_id: accountId || selectedPaymentMethod?.linked_account_id || selectedCard.linked_payment_account_id || undefined,
           paid_installments_count: paidInstallmentsCount,
+          paid_by_member_id: effectivePayerId,
+          split_type: splitType !== 'individual' ? splitType : undefined,
+          splits: resolvedSplits,
         });
       } else {
         // Transação Avulsa
@@ -186,6 +213,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           status: isAlreadyPaid ? 'paid' : 'pending',
           paid_at: isAlreadyPaid ? new Date().toISOString() : null,
           notes: notes || undefined,
+          paid_by_member_id: effectivePayerId,
+          split_type: splitType !== 'individual' ? splitType : undefined,
+          splits: resolvedSplits,
         });
       }
 
@@ -231,7 +261,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
         </div>
 
         {/* Tipo de Transação (Tabs) */}
-        <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
+        <div className={`mt-4 grid ${isExpenseTracker ? 'grid-cols-2' : 'grid-cols-3'} gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800`}>
           <button
             type="button"
             onClick={() => handleTypeSelect('expense')}
@@ -254,17 +284,19 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           >
             Receita
           </button>
-          <button
-            type="button"
-            onClick={() => handleTypeSelect('transfer')}
-            className={`rounded-xl py-2 text-xs font-bold transition ${
-              type === 'transfer'
-                ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
-                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-            }`}
-          >
-            Transferência
-          </button>
+          {!isExpenseTracker && (
+            <button
+              type="button"
+              onClick={() => handleTypeSelect('transfer')}
+              className={`rounded-xl py-2 text-xs font-bold transition ${
+                type === 'transfer'
+                  ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              }`}
+            >
+              Transferência
+            </button>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
@@ -509,8 +541,144 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
                   )}
                 </div>
               )}
-            </>
+
+          {/* Rateio de Despesas (Splitwise) */}
+          {type === 'expense' && workspaceMembers.length > 1 && (
+            <div className="rounded-2xl border border-teal-200/80 bg-teal-50/50 p-4 dark:border-teal-900/50 dark:bg-teal-950/20">
+              <div className="flex items-center justify-between pb-2 mb-3 border-b border-teal-200/60 dark:border-teal-900/60">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-teal-900 dark:text-teal-300">
+                    Divisão de Despesa (Rateio)
+                  </span>
+                </div>
+                <span className="text-[11px] text-teal-700 dark:text-teal-400 font-medium">
+                  {workspaceMembers.length} membros no workspace
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Quem pagou? */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-teal-900 dark:text-teal-300">
+                    Quem pagou?
+                  </label>
+                  <select
+                    value={paidByMemberId || (workspaceMembers[0]?.id ?? '')}
+                    onChange={(e) => setPaidByMemberId(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
+                  >
+                    {workspaceMembers.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`} {m.role === 'owner' ? '(Owner)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Como dividir? */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-teal-900 dark:text-teal-300">
+                    Regra de Divisão
+                  </label>
+                  <select
+                    value={splitType}
+                    onChange={(e) => setSplitType(e.target.value as SplitType)}
+                    className="mt-1 w-full rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="individual">Sem divisão (100% de quem pagou)</option>
+                    <option value="equal">
+                      {workspaceMembers.length === 2 ? 'Dividir igualmente (50/50)' : 'Dividir igualmente (entre todos)'}
+                    </option>
+                    <option value="full_other">100% de outra pessoa (compra em nome de outro)</option>
+                    <option value="custom">Personalizado (definir valores)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Preview dos valores calculados */}
+              {splitType !== 'individual' && numAmount > 0 && (() => {
+                const effectivePayerId = paidByMemberId || workspaceMembers[0]?.id;
+                let previewSplits: TransactionSplit[] = [];
+                let previewError: string | null = null;
+                try {
+                  const customList = splitType === 'custom'
+                    ? workspaceMembers.map((m) => ({ member_id: m.id, amount: customSplits[m.id] || 0 }))
+                    : undefined;
+                  if (effectivePayerId) {
+                    previewSplits = calculateExpenseSplits(numAmount, splitType, workspaceMembers, effectivePayerId, customList);
+                  }
+                } catch (e: any) {
+                  previewError = e.message;
+                }
+
+                return (
+                  <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-teal-900/60">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300 mb-1.5">
+                      Responsabilidade de cada membro:
+                    </div>
+                    {splitType === 'custom' ? (
+                      <div className="space-y-1.5">
+                        {workspaceMembers.map((m) => {
+                          const memberName = m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`;
+                          const isPayer = m.id === effectivePayerId;
+                          return (
+                            <div key={m.id} className="flex items-center justify-between text-xs bg-white dark:bg-slate-900 p-2 rounded-xl border border-teal-200 dark:border-teal-900">
+                              <span className="font-medium text-slate-700 dark:text-slate-300">
+                                {memberName} {isPayer && <span className="text-[10px] text-teal-600 font-bold">(Pagador)</span>}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-slate-400 text-xs">R$</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="0,00"
+                                  value={customSplits[m.id] ?? ''}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                    setCustomSplits((prev) => ({ ...prev, [m.id]: val }));
+                                  }}
+                                  className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-right text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {previewError && (
+                          <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 mt-1">
+                            {previewError}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {workspaceMembers.map((m) => {
+                          const memberName = m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`;
+                          const isPayer = m.id === effectivePayerId;
+                          const splitItem = previewSplits.find((s) => s.member_id === m.id);
+                          const shareAmount = splitItem ? splitItem.amount : 0;
+
+                          return (
+                            <div key={m.id} className="flex items-center justify-between text-xs bg-white/70 dark:bg-slate-900/70 px-2.5 py-1.5 rounded-lg">
+                              <span className="text-slate-700 dark:text-slate-300">
+                                {memberName} {isPayer && <span className="text-[10px] text-teal-600 font-bold">(Pagou)</span>}
+                              </span>
+                              <span className="font-semibold text-slate-900 dark:text-white">
+                                {formatCurrency(shareAmount)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           )}
+          </>
+        )}
 
           {/* Divulgação Progressiva: Mais Opções */}
           <div className="border-t border-slate-100 pt-2 dark:border-slate-800">
@@ -569,8 +737,8 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
                   </div>
                 )}
 
-                {/* Selecionar Conta Bancária específica */}
-                {type !== 'transfer' && (
+                {/* Selecionar Conta Bancária específica (Apenas quando modo patrimonial completo) */}
+                {type !== 'transfer' && !isExpenseTracker && (
                   <div>
                     <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                       Conta Bancária

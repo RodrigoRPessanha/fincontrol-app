@@ -17,6 +17,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Scale,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFinance } from '@/lib/context/finance-context';
@@ -24,6 +25,7 @@ import { useFinance } from '@/lib/context/finance-context';
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/transactions', label: 'Transações', icon: ArrowLeftRight },
+  { href: '/splits', label: 'Divisão de Contas', icon: Scale },
   { href: '/planning', label: 'Planejamento Futuro', icon: TrendingUp },
   { href: '/accounts', label: 'Contas & Cartões', icon: CreditCard },
   { href: '/installments', label: 'Parcelamentos', icon: Layers },
@@ -42,6 +44,12 @@ export function Sidebar() {
   const membersInActiveWs = workspaceMembers.filter(
     (m) => m.workspace_id === activeWorkspace.id
   );
+
+  const isExpenseTracker = activeWorkspace.tracking_mode === 'expense_tracker';
+  const visibleNavItems = navItems.filter((item) => {
+    if (isExpenseTracker && item.href === '/goals') return false;
+    return true;
+  });
 
   return (
     <aside className="hidden lg:flex h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 sticky top-0">
@@ -63,7 +71,7 @@ export function Sidebar() {
 
         {/* Navigation Items */}
         <nav className="flex flex-col gap-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
             return (

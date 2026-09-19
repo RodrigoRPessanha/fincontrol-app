@@ -14,6 +14,7 @@ import {
   validateRecurringAmount,
   resolveTransactionAccountId,
   validateBillPaymentAccount,
+  validatePaymentAccount,
   validateRecurringMaterialization,
   stepNextOccurrence,
   calculateCatchUpOccurrence,
@@ -915,6 +916,25 @@ describe('Context & Domain Integration - Criação e Duplicação Atômica de Fa
     expect(() => validateBillPaymentAccount('acc-active', accounts, 'ws-1')).not.toThrow();
     expect(() => validateBillPaymentAccount('acc-inactive', accounts, 'ws-1')).toThrow(
       'A conta bancária selecionada para pagamento da fatura está inativa.'
+    );
+  });
+
+  it('deve validar conta bancária para pagamento via validatePaymentAccount real (P1-02)', () => {
+    const accounts: Account[] = [
+      { id: 'acc-1', workspace_id: 'ws-1', name: 'Conta Principal', type: 'checking', institution: 'Nubank', initial_balance: 100, current_balance: 100, color: '#000', active: true, created_at: '2026-01-01' },
+      { id: 'acc-ws2', workspace_id: 'ws-2', name: 'Conta Outro WS', type: 'checking', institution: 'Nubank', initial_balance: 100, current_balance: 100, color: '#000', active: true, created_at: '2026-01-01' },
+      { id: 'acc-inativa', workspace_id: 'ws-1', name: 'Conta Inativa', type: 'checking', institution: 'Nubank', initial_balance: 100, current_balance: 100, color: '#000', active: false, created_at: '2026-01-01' },
+    ];
+
+    expect(validatePaymentAccount('acc-1', accounts, 'ws-1')?.id).toBe('acc-1');
+    expect(() => validatePaymentAccount('acc-ws2', accounts, 'ws-1')).toThrow(
+      'Conta bancária não encontrada no workspace ativo.'
+    );
+    expect(() => validatePaymentAccount('acc-inexistente', accounts, 'ws-1')).toThrow(
+      'Conta bancária não encontrada no workspace ativo.'
+    );
+    expect(() => validatePaymentAccount('acc-inativa', accounts, 'ws-1')).toThrow(
+      'A conta bancária informada está inativa.'
     );
   });
 

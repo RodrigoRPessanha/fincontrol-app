@@ -21,7 +21,7 @@ import {
   DollarSign,
 } from 'lucide-react';
 import { formatCurrency, formatDate, getStatusBadge } from '@/lib/utils';
-import { resolveCategory } from '@/lib/financial-engine';
+import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
@@ -111,15 +111,17 @@ function TransactionsContent() {
   }, [transactions, searchTerm, typeFilter, statusFilter, categoryFilter, paymentMethodFilter, monthFilter]);
 
   // Totais da listagem filtrada
-  const totalIncome = filteredTransactions
+  const totalIncomeCents = filteredTransactions
     .filter((t) => t.type === 'income')
-    .reduce((acc, t) => acc + t.amount, 0);
+    .reduce((acc, t) => acc + toCents(t.amount), 0);
 
-  const totalExpense = filteredTransactions
+  const totalExpenseCents = filteredTransactions
     .filter((t) => t.type === 'expense')
-    .reduce((acc, t) => acc + t.amount, 0);
+    .reduce((acc, t) => acc + toCents(t.amount), 0);
 
-  const netTotal = totalIncome - totalExpense;
+  const totalIncome = fromCents(totalIncomeCents);
+  const totalExpense = fromCents(totalExpenseCents);
+  const netTotal = fromCents(totalIncomeCents - totalExpenseCents);
 
   if (!isLoaded) {
     return (

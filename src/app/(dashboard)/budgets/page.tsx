@@ -12,6 +12,7 @@ import {
   Edit2,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { toCents, fromCents } from '@/lib/financial-engine';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { format } from 'date-fns';
 
@@ -36,24 +37,27 @@ export default function BudgetsPage() {
     const planned = bud ? bud.planned_amount : 0;
 
     // 1. Transações avulsas da categoria no mês (não canceladas)
-    const txSpent = transactions
+    const txSpentCents = transactions
       .filter((t) => (t.category_id === cat.id || cat.subcategories?.some(s => s.id === t.category_id)) && t.type === 'expense' && t.status !== 'cancelled' && t.transaction_date.startsWith(monthKey))
-      .reduce((acc, t) => acc + t.amount, 0);
+      .reduce((acc, t) => acc + toCents(t.amount), 0);
 
     // 2. Parcelas com vencimento no mês de compras desta categoria (não canceladas)
-    const instSpent = installments
+    const instSpentCents = installments
       .filter((i) => {
         if (i.status === 'cancelled') return false;
         const p = purchases.find((pur) => pur.id === i.purchase_id);
         const matchCat = p?.category_id === cat.id || cat.subcategories?.some(s => s.id === p?.category_id);
         return matchCat && i.due_date.startsWith(monthKey);
       })
-      .reduce((acc, i) => acc + i.amount, 0);
+      .reduce((acc, i) => acc + toCents(i.amount), 0);
 
-    const spent = txSpent + instSpent;
-    const remaining = Math.max(0, planned - spent);
-    const percent = planned > 0 ? Math.round((spent / planned) * 100) : 0;
-    const isOverbudget = spent > planned && planned > 0;
+    const spentCents = txSpentCents + instSpentCents;
+    const plannedCents = toCents(planned);
+    const remainingCents = Math.max(0, plannedCents - spentCents);
+    const spent = fromCents(spentCents);
+    const remaining = fromCents(remainingCents);
+    const percent = plannedCents > 0 ? Math.round((spentCents / plannedCents) * 100) : 0;
+    const isOverbudget = spentCents > plannedCents && plannedCents > 0;
 
     return {
       category: cat,
@@ -65,9 +69,12 @@ export default function BudgetsPage() {
     };
   });
 
-  const totalPlanned = budgetItems.reduce((acc, b) => acc + b.planned, 0);
-  const totalSpent = budgetItems.reduce((acc, b) => acc + b.spent, 0);
-  const totalRemaining = Math.max(0, totalPlanned - totalSpent);
+  const totalPlannedCents = budgetItems.reduce((acc, b) => acc + toCents(b.planned), 0);
+  const totalSpentCents = budgetItems.reduce((acc, b) => acc + toCents(b.spent), 0);
+  const totalRemainingCents = Math.max(0, totalPlannedCents - totalSpentCents);
+  const totalPlanned = fromCents(totalPlannedCents);
+  const totalSpent = fromCents(totalSpentCents);
+  const totalRemaining = fromCents(totalRemainingCents);
 
   const handleSaveBudget = (e: React.FormEvent) => {
     e.preventDefault();

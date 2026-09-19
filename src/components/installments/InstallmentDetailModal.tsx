@@ -4,7 +4,7 @@ import React from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import { X, Layers, CheckCircle2, Calendar, CreditCard, DollarSign } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { resolveCategory } from '@/lib/financial-engine';
+import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { StatusBadge } from '../shared/StatusBadge';
 import { Purchase, Installment } from '@/lib/types';
 
@@ -32,9 +32,12 @@ export function InstallmentDetailModal({
     .sort((a, b) => a.installment_number - b.installment_number);
 
   const paidCount = purchaseInstallments.filter((i) => i.status === 'paid').length;
-  const totalPaid = purchaseInstallments.reduce((acc, i) => acc + (i.paid_amount || (i.status === 'paid' ? i.amount : 0)), 0);
-  const remaining = Math.max(0, purchase.total_amount - totalPaid);
-  const progressPercent = Math.min(100, Math.round((totalPaid / purchase.total_amount) * 100));
+  const totalPaidCents = purchaseInstallments.reduce((acc, i) => acc + toCents(i.paid_amount || (i.status === 'paid' ? i.amount : 0)), 0);
+  const purchaseTotalCents = toCents(purchase.total_amount);
+  const remainingCents = Math.max(0, purchaseTotalCents - totalPaidCents);
+  const totalPaid = fromCents(totalPaidCents);
+  const remaining = fromCents(remainingCents);
+  const progressPercent = purchaseTotalCents > 0 ? Math.min(100, Math.round((totalPaidCents / purchaseTotalCents) * 100)) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
