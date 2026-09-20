@@ -260,6 +260,20 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(select).onChange({ target: { value: 'acc-1' } });
     });
 
+    // 1.1 Altera data e observação
+    const dateInput = inputs.find((i) => getReactProps(i)?.type === 'date');
+    const notesInput = inputs.find((i) => getReactProps(i)?.placeholder?.includes('1º pagamento parcial'));
+    if (dateInput) {
+      await act(async () => {
+        getReactProps(dateInput).onChange({ target: { value: '2026-09-20' } });
+      });
+    }
+    if (notesInput) {
+      await act(async () => {
+        getReactProps(notesInput).onChange({ target: { value: 'Comprovante PIX 123' } });
+      });
+    }
+
     // 2. Digita '0,20'
     await act(async () => {
       getReactProps(amountInput).onChange({ target: { value: '0,20' } });
@@ -276,6 +290,8 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
         transaction_id: 'tx-centavos',
         account_id: 'acc-1',
         amount: 0.20,
+        payment_date: '2026-09-20',
+        notes: 'Comprovante PIX 123',
       })
     );
     expect(mockOnClose).toHaveBeenCalledTimes(1);
@@ -881,6 +897,24 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       expect(mockOnClose).toHaveBeenCalledTimes(1);
 
       root.unmount();
+    });
+  });
+
+  describe('parseCurrencyInput unit tests', () => {
+    it('deve converter corretamente entradas em formato BR, US, inteiros e rejeitar inválidos', () => {
+      expect(parseCurrencyInput('')).toBeNaN();
+      expect(parseCurrencyInput('   ')).toBeNaN();
+      expect(parseCurrencyInput('not-a-number')).toBeNaN();
+      expect(parseCurrencyInput('100')).toBe(100);
+      expect(parseCurrencyInput('1.234,56')).toBe(1234.56);
+      expect(parseCurrencyInput('1,234.56')).toBe(1234.56);
+      expect(parseCurrencyInput('0,20')).toBe(0.2);
+      expect(parseCurrencyInput('0.20')).toBe(0.2);
+
+      // Valores gigantescos que ultrapassam Number.MAX_VALUE e geram Infinity (linhas 31, 38, 44)
+      expect(parseCurrencyInput('9'.repeat(400) + ',50')).toBeNaN();
+      expect(parseCurrencyInput('9'.repeat(400) + '.50')).toBeNaN();
+      expect(parseCurrencyInput('9'.repeat(400))).toBeNaN();
     });
   });
 });

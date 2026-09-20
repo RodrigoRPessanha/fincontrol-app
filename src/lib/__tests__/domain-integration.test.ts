@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Account, CreditCard, Transaction, Transfer } from '../types';
 import { calculateCardBillDates, splitInstallments } from '../financial-engine';
+import { formatDate, formatMonthYear, getStatusBadge, sanitizeCsvCell } from '../utils';
 
 describe('Domain Integration - Isolamento de Workspaces', () => {
   it('deve filtrar rigorosamente dados de múltiplos workspaces sem vazamento', () => {
@@ -190,5 +191,51 @@ describe('Domain Integration - Duplicação Segura de Transações', () => {
     expect(duplicate.paid_amount).toBe(0);
     expect(duplicate.paid_at).toBeNull();
     expect(duplicate.amount).toBe(2200);
+  });
+});
+
+describe('Domain Integration - Utilitários Gerais (utils.ts)', () => {
+  it('formatDate deve formatar datas válidas e retornar fallback quando inválido', () => {
+    expect(formatDate('2026-08-15')).toBe('15/08/2026');
+    expect(formatDate(null)).toBe('-');
+    expect(formatDate(undefined)).toBe('-');
+    expect(formatDate('')).toBe('-');
+    // Data não ISO mas parseável via Date
+    expect(formatDate('08/15/2026')).toMatch(/15\/08\/2026/);
+    // Data totalmente inválida
+    expect(formatDate('not-a-date')).toBe('not-a-date');
+  });
+
+  it('formatMonthYear deve tratar datas de 7 caracteres, ISO completas e fallbacks', () => {
+    expect(formatMonthYear('2026-08')).toBe('Agosto 2026');
+    expect(formatMonthYear('2026-08-15')).toBe('Agosto 2026');
+    expect(formatMonthYear(null)).toBe('-');
+    expect(formatMonthYear(undefined)).toBe('-');
+    expect(formatMonthYear('')).toBe('-');
+    expect(formatMonthYear('data-invalida')).toBe('data-invalida');
+  });
+
+  it('getStatusBadge deve cobrir todos os status mapeados e o default', () => {
+    expect(getStatusBadge('paid').label).toBe('Pago / Recebido');
+    expect(getStatusBadge('partially_paid').label).toBe('Parcialmente Pago');
+    expect(getStatusBadge('pending').label).toBe('Pendente');
+    expect(getStatusBadge('overdue').label).toBe('Vencido');
+    expect(getStatusBadge('cancelled').label).toBe('Cancelado');
+    expect(getStatusBadge('open').label).toBe('Fatura Aberta');
+    expect(getStatusBadge('closed').label).toBe('Fatura Fechada');
+    expect(getStatusBadge('custom_unknown').label).toBe('custom_unknown');
+  });
+
+  it('sanitizeCsvCell deve tratar números, strings normais, caracteres de injeção e quebras de linha', () => {
+    expect(sanitizeCsvCell(123.456)).toBe('123.46');
+    expect(sanitizeCsvCell(null)).toBe('""');
+    expect(sanitizeCsvCell(undefined)).toBe('""');
+    expect(sanitizeCsvCell('Normal Text')).toBe('"Normal Text"');
+    expect(sanitizeCsvCell('Texto com "aspas"')).toBe('"Texto com ""aspas"""');
+    expect(sanitizeCsvCell('Linha 1\nLinha 2\r\nLinha 3')).toBe('"Linha 1 Linha 2 Linha 3"');
+    expect(sanitizeCsvCell('=SUM(A1:B10)')).toBe('"\'=SUM(A1:B10)"');
+    expect(sanitizeCsvCell('+12345')).toBe('"\'+12345"');
+    expect(sanitizeCsvCell('-999')).toBe('"\'-999"');
+    expect(sanitizeCsvCell('@command')).toBe('"\'@command"');
   });
 });

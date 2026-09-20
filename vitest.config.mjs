@@ -12,14 +12,29 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: [
-        'src/lib/financial-engine.ts',
+        'src/lib/financial-engine/**/*.ts',
         'src/lib/utils.ts',
         'src/lib/context/finance-context.tsx',
+        'src/lib/context/finance-storage.ts',
+        'src/lib/context/actions/**/*.ts',
         'src/components/transactions/QuickAddModal.tsx',
+        'src/components/transactions/quick-add/**/*.tsx',
         'src/components/transactions/PaymentModal.tsx',
         'src/app/**/splits/page.tsx',
+        'src/components/splits/**/*.tsx',
+      ],
+      exclude: [
+        'src/lib/financial-engine/index.ts',
+        'src/lib/context/actions/index.ts',
+        'src/lib/context/actions/types.ts',
       ],
       reporter: ['text', 'json', 'html'],
+      thresholds: {
+        statements: 98.5,
+        branches: 97.0,
+        functions: 100,
+        lines: 99.0,
+      },
     },
   },
   resolve: {

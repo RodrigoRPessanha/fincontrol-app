@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QuickAddModal } from '@/components/transactions/QuickAddModal';
+import { SplitFields } from '@/components/transactions/quick-add/SplitFields';
 import * as FinanceContext from '@/lib/context/finance-context';
 import { WorkspaceMember, Workspace, CreditCard, PaymentMethod, Account, Category } from '@/lib/types';
 
@@ -880,6 +881,471 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     const updatedSelects = findNodes(container, (n) => n.tagName === 'SELECT');
     const newPmSelect = updatedSelects.find((s) => getReactProps(s)?.value === '');
     expect(newPmSelect).toBeDefined();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('deve alternar para aba Despesa e selecionar conta bancária manualmente no select', async () => {
+    const container = (globalThis as any).document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(QuickAddModal, { isOpen: true, onClose: mockOnClose }));
+    });
+
+    const buttons = findNodes(container, (n) => n.tagName === 'BUTTON');
+
+    // 1. Clicar em Receita primeiro
+    const incomeTab = buttons.find((b) => getReactProps(b)?.children === 'Receita');
+    await act(async () => {
+      getReactProps(incomeTab).onClick();
+    });
+
+    // 2. Clicar de volta em Despesa (cobrindo a linha 263: handleTypeSelect('expense'))
+    const expenseTab = buttons.find((b) => getReactProps(b)?.children === 'Despesa');
+    await act(async () => {
+      getReactProps(expenseTab).onClick();
+    });
+
+    // 3. Expandir Mais opções para exibir o campo de conta bancária
+    const allButtons = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const moreOptionsBtn = allButtons.find((b) => getReactProps(b)?.className?.includes('text-emerald-600'));
+    expect(moreOptionsBtn).toBeDefined();
+    await act(async () => {
+      getReactProps(moreOptionsBtn).onClick();
+    });
+
+    // 4. Localizar o select de Conta Bancária e alterar seu valor (cobrindo linha 452: setAccountId)
+    const selects = findNodes(container, (n) => n.tagName === 'SELECT');
+    const accountSelect = selects.find((s) => (s as any).options?.some((o: any) => o.value === 'acc-1'));
+    expect(accountSelect).toBeDefined();
+
+    await act(async () => {
+      getReactProps(accountSelect).onChange({ target: { value: 'acc-1' } });
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('QuickAddModal: renderiza em modo expense_tracker e exibe label correta na aba Receita já recebida', async () => {
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: { ...mockWorkspace, tracking_mode: 'expense_tracker' },
+      workspaceMembers: mockMembers,
+      categories: mockCategories,
+      accounts: mockAccounts,
+      paymentMethods: mockPaymentMethods,
+      creditCards: mockCreditCards,
+      addTransaction: mockAddTransaction,
+      createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createTransfer: mockCreateTransfer,
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(React.createElement(QuickAddModal, { isOpen: true, onClose: mockOnClose }));
+    });
+
+    // 1. Expande Mais opções enquanto está em Despesa (onde moreOptionsBtn é o único botão com text-emerald-600)
+    const allButtons = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const moreOptionsBtn = allButtons.find((b) => getReactProps(b)?.className?.includes('text-emerald-600'));
+    expect(moreOptionsBtn).toBeDefined();
+    await act(async () => {
+      getReactProps(moreOptionsBtn).onClick();
+    });
+
+    // 2. Em expense_tracker, o seletor de tabs deve ter 2 colunas (Despesa e Receita)
+    const incomeTab = allButtons.find((b) => getReactProps(b)?.children === 'Receita');
+    expect(incomeTab).toBeDefined();
+
+    // 3. Alterna para Receita
+    await act(async () => {
+      getReactProps(incomeTab).onClick();
+    });
+
+    // 4. Verifica o texto do checkbox "Esta receita já foi recebida hoje"
+    const alreadyReceivedLabel = findNodes(container, (n) => n.textContent === 'Esta receita já foi recebida hoje');
+    expect(alreadyReceivedLabel.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('SplitFields: trata opções para >= 3 membros, clamping de valor negativo e fallbacks de nome', async () => {
+    const container = (globalThis as any).document.createElement('div');
+    const root = createRoot(container);
+
+    const trioMembers: WorkspaceMember[] = [
+      { id: 'm1', workspace_id: 'ws-1', user_id: 'u1', role: 'owner', user: { id: 'u1', name: '', email: 'alice@teste.com', created_at: '' }, created_at: '' },
+      { id: 'm2', workspace_id: 'ws-1', user_id: 'u2', role: 'member', user: undefined as any, created_at: '' },
+      { id: 'm3', workspace_id: 'ws-1', user_id: 'u3', role: 'member', user: { id: 'u3', name: 'Carlos Silva', email: 'carlos@teste.com', created_at: '' }, created_at: '' },
+    ];
+
+    const mockSplitChange = vi.fn();
+    const mockCustomSplitChange = vi.fn();
+    const mockPayerChange = vi.fn();
+
+    // 1. Renderiza com splitType = custom e type = expense
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={trioMembers}
+          paidByMemberId="m1"
+          splitType="custom"
+          customSplits={{ m1: 50, m2: 25, m3: 25 }}
+          numAmount={100}
+          onSplitTypeChange={mockSplitChange}
+          onCustomSplitChange={mockCustomSplitChange}
+          onPaidByMemberIdChange={mockPayerChange}
+        />
+      );
+    });
+
+    // Verifica que o select de splitType exibe "Dividir igualmente (entre todos)" para 3 membros
+    const options = findNodes(container, (n) => n.tagName === 'OPTION');
+    const allEqualOpt = options.find((o) => getReactProps(o)?.children?.includes('entre todos'));
+    expect(allEqualOpt).toBeDefined();
+
+    // Digita valor negativo no input customizado (deve ser clamped para 0 via Math.max(0, val))
+    const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    expect(inputs.length).toBeGreaterThanOrEqual(3);
+
+    await act(async () => {
+      getReactProps(inputs[0]).onChange({ target: { value: '-15' } });
+    });
+    expect(mockCustomSplitChange).toHaveBeenCalledWith('m1', 0);
+
+    // 2. Renderiza com splitType = equal para exercitar a lista de preview com 3 membros
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={trioMembers}
+          paidByMemberId="m1"
+          splitType="equal"
+          customSplits={{}}
+          numAmount={100}
+          onSplitTypeChange={mockSplitChange}
+          onCustomSplitChange={mockCustomSplitChange}
+          onPaidByMemberIdChange={mockPayerChange}
+        />
+      );
+    });
+
+    // m3 não está no previewSplits, exercitando o fallback "shareAmount = splitItem ? splitItem.amount : 0"
+    const m3Preview = findNodes(container, (n) => n.textContent?.includes('Carlos Silva'));
+    expect(m3Preview.length).toBeGreaterThan(0);
+
+    // 3. Testa alteração de pagador no select (linha 73)
+    const payerSelect = findNodes(container, (n) => n.tagName === 'SELECT')[0];
+    await act(async () => {
+      getReactProps(payerSelect).onChange({ target: { value: 'm2' } });
+    });
+    expect(mockPayerChange).toHaveBeenCalledWith('m2');
+
+    // 4. Renderiza com splitType = full_other com 2 membros (linha 43-44)
+    const pairMembers = trioMembers.slice(0, 2);
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={pairMembers}
+          paidByMemberId="m1"
+          splitType="full_other"
+          customSplits={{}}
+          numAmount={80}
+          onSplitTypeChange={mockSplitChange}
+          onCustomSplitChange={mockCustomSplitChange}
+          onPaidByMemberIdChange={mockPayerChange}
+        />
+      );
+    });
+    const preview80 = findNodes(container, (n) => n.textContent?.includes('80,00'));
+    expect(preview80.length).toBeGreaterThan(0);
+
+    // 5. Renderiza com splitType = custom onde a soma diverge para disparar previewError (linha 139) e digita string vazia (linha 129)
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={pairMembers}
+          paidByMemberId="m1"
+          splitType="custom"
+          customSplits={{ m1: 30, m2: 30 }}
+          numAmount={100}
+          onSplitTypeChange={mockSplitChange}
+          onCustomSplitChange={mockCustomSplitChange}
+          onPaidByMemberIdChange={mockPayerChange}
+        />
+      );
+    });
+    const errorText = findNodes(container, (n) => n.textContent?.includes('diverge do valor total'));
+    expect(errorText.length).toBeGreaterThan(0);
+
+    const customInputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    await act(async () => {
+      getReactProps(customInputs[0]).onChange({ target: { value: '' } });
+    });
+    expect(mockCustomSplitChange).toHaveBeenCalledWith('m1', 0);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('QuickAddModal: seleciona cartão de crédito e muda para receita (reseta método), e trata erro sem mensagem no submit', async () => {
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      categories: mockCategories as any,
+      paymentMethods: mockPaymentMethods as any,
+      accounts: mockAccounts as any,
+      creditCards: mockCreditCards as any,
+      addTransaction: mockAddTransaction,
+      createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createTransfer: mockCreateTransfer,
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
+    });
+
+    // 1. Seleciona método Cartão Nubank Fixo (pm-card-fixed, type: credit_card)
+    const pmSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) =>
+      (s as any).options?.some?.((o: any) => o.value === 'pm-card-fixed')
+    );
+    if (pmSelect) {
+      await act(async () => {
+        getReactProps(pmSelect).onChange({ target: { value: 'pm-card-fixed' } });
+      });
+    }
+
+    // Clica na aba "Receita" -> deve acionar handleTypeSelect('income') e resetar o método de cartão (linhas 100-105)
+    const typeButtons = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const incomeTab = typeButtons.find((b) => getReactProps(b)?.children === 'Receita');
+    expect(incomeTab).toBeDefined();
+
+    await act(async () => {
+      getReactProps(incomeTab).onClick();
+    });
+
+    // 2. Preenche valor e descrição para submeter e simular erro sem message property (linha 220)
+    const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    const amountInput = inputs.find((i) => getReactProps(i)?.placeholder === '0,00');
+    const descInput = inputs.find((i) => getReactProps(i)?.placeholder?.includes('Salário') || getReactProps(i)?.placeholder?.includes('Supermercado'));
+
+    await act(async () => {
+      getReactProps(amountInput).onChange({ target: { value: '150,00' } });
+      getReactProps(descInput).onChange({ target: { value: 'Bônus sem mensagem' } });
+    });
+
+    mockAddTransaction.mockImplementationOnce(() => {
+      throw 'erro genérico em string';
+    });
+
+    const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
+    await act(async () => {
+      getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    const fallbackAlert = findNodes(container, (n) => n.textContent?.includes('Erro ao processar o registro financeiro.'));
+    expect(fallbackAlert.length).toBeGreaterThan(0);
+
+    // 3. Submissão de despesa com descrição vazia (cai no fallback 'Despesa' da linha 200)
+    await act(async () => {
+      getReactProps(typeButtons.find((b) => getReactProps(b)?.children === 'Despesa')).onClick();
+      getReactProps(amountInput).onChange({ target: { value: '50,00' } });
+      getReactProps(descInput).onChange({ target: { value: '   ' } });
+    });
+
+    mockAddTransaction.mockClear();
+    await act(async () => {
+      getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Despesa',
+        amount: 50,
+      })
+    );
+
+    // 4. Submissão de receita com descrição vazia e notas preenchidas (cai no fallback 'Receita' da linha 200 e notes na linha 211)
+    await act(async () => {
+      getReactProps(incomeTab).onClick();
+      getReactProps(amountInput).onChange({ target: { value: '300,00' } });
+      getReactProps(descInput).onChange({ target: { value: '' } });
+    });
+
+    const moreBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) =>
+      getReactProps(b)?.className?.includes('gap-1.5')
+    );
+    if (moreBtn) {
+      await act(async () => {
+        getReactProps(moreBtn).onClick();
+      });
+    }
+
+    const notesTextarea = findNodes(container, (n) => n.tagName === 'TEXTAREA')[0];
+    if (notesTextarea) {
+      await act(async () => {
+        getReactProps(notesTextarea).onChange({ target: { value: 'Observação da receita' } });
+      });
+    }
+
+    mockAddTransaction.mockClear();
+    await act(async () => {
+      getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Receita',
+        amount: 300,
+        notes: 'Observação da receita',
+      })
+    );
+
+    // 5. Transação avulsa com cartão selecionado (linhas 205 e 208: credit_card_id e dueDate da fatura)
+    await act(async () => {
+      getReactProps(typeButtons.find((b) => getReactProps(b)?.children === 'Despesa')).onClick();
+      getReactProps(amountInput).onChange({ target: { value: '80,00' } });
+      getReactProps(descInput).onChange({ target: { value: 'Farmácia no Cartão' } });
+    });
+
+    // Seleciona método Cartão Nubank Fixo
+    const pmCardSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) =>
+      (s as any).options?.some?.((o: any) => o.value === 'pm-card-fixed')
+    );
+    if (pmCardSelect) {
+      await act(async () => {
+        getReactProps(pmCardSelect).onChange({ target: { value: 'pm-card-fixed' } });
+      });
+    }
+
+    mockAddTransaction.mockClear();
+    await act(async () => {
+      getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Farmácia no Cartão',
+        amount: 80,
+        credit_card_id: 'card-1',
+      })
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('QuickAddModal: submete compra parcelada com descrição vazia, sem payment_method e split_type equal (linhas 75, 184, 190, 194)', async () => {
+    const customPm: PaymentMethod = {
+      id: 'pm-debit-with-card',
+      name: 'Débito Vinculado a Cartão',
+      type: 'debit_card',
+      credit_card_id: 'card-1',
+      workspace_id: 'ws-1',
+      active: true,
+      created_at: '2026-01-01',
+    };
+
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      categories: mockCategories,
+      accounts: mockAccounts,
+      paymentMethods: [...mockPaymentMethods, customPm],
+      creditCards: mockCreditCards,
+      addTransaction: mockAddTransaction,
+      createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createTransfer: mockCreateTransfer,
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
+    });
+
+    // 1. Alterna para Receita (cobre filtro da linha 75: customPm com type !== credit_card mas credit_card_id presente)
+    const buttons = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const incomeTab = buttons.find((b) => getReactProps(b)?.children === 'Receita');
+    await act(async () => {
+      getReactProps(incomeTab).onClick();
+    });
+
+    // 2. Volta para Despesa
+    const expenseTab = buttons.find((b) => getReactProps(b)?.children === 'Despesa');
+    await act(async () => {
+      getReactProps(expenseTab).onClick();
+    });
+
+    // 3. Seleciona método com cartão fixo
+    const selects = findNodes(container, (n) => n.tagName === 'SELECT');
+    const pmSelect = selects.find((s) => (s as any).options?.some?.((o: any) => o.value === 'pm-card-fixed'));
+    await act(async () => {
+      getReactProps(pmSelect).onChange({ target: { value: 'pm-card-fixed' } });
+    });
+
+    // 4. Preenche valor e deixa descrição vazia (cobre fallback linha 184: 'Compra Parcelada')
+    const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    const amountInput = inputs.find((i) => getReactProps(i)?.placeholder === '0,00');
+    const descInput = inputs.find((i) => getReactProps(i)?.placeholder?.includes('Supermercado') || getReactProps(i)?.placeholder?.includes('Ex:'));
+
+    await act(async () => {
+      getReactProps(amountInput).onChange({ target: { value: '400,00' } });
+      getReactProps(descInput).onChange({ target: { value: '   ' } });
+    });
+
+    // 5. Configura parcelamento em 4x
+    const installmentSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return p?.value === 1 && s !== pmSelect;
+    });
+    expect(installmentSelect).toBeDefined();
+    await act(async () => {
+      getReactProps(installmentSelect).onChange({ target: { value: 4 } });
+    });
+
+    // 6. Seleciona rateio igual (equal split)
+    const splitRuleSelect = findNodes(container, (n) => n.tagName === 'SELECT').find(
+      (s) => (s as any).options?.some?.((o: any) => o.value === 'equal')
+    );
+    if (splitRuleSelect) {
+      await act(async () => {
+        getReactProps(splitRuleSelect).onChange({ target: { value: 'equal' } });
+      });
+    }
+
+    // 7. Submete formulário
+    const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
+    mockCreateInstallmentPurchase.mockClear();
+    await act(async () => {
+      getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Compra Parcelada',
+        total_amount: 400,
+        installment_count: 4,
+        credit_card_id: 'card-1',
+      })
+    );
 
     await act(async () => {
       root.unmount();

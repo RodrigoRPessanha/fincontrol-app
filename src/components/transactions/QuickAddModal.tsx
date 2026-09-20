@@ -6,20 +6,16 @@ import {
   X,
   ChevronDown,
   ChevronUp,
-  CreditCard as CreditCardIcon,
-  Calendar,
-  Check,
-  ArrowRightLeft,
-  DollarSign,
-  Layers,
   AlertCircle,
-  Users,
 } from 'lucide-react';
-import { CategoryIcon } from '../shared/CategoryIcon';
 import { formatCurrency } from '@/lib/utils';
 import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits } from '@/lib/financial-engine';
 import { SplitType, TransactionSplit } from '@/lib/types';
 import { format } from 'date-fns';
+import { TransactionFields } from './quick-add/TransactionFields';
+import { PaymentMethodFields } from './quick-add/PaymentMethodFields';
+import { InstallmentFields } from './quick-add/InstallmentFields';
+import { SplitFields } from './quick-add/SplitFields';
 
 interface QuickAddModalProps {
   isOpen: boolean;
@@ -328,357 +324,65 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
             </div>
           </div>
 
-          {/* Se for transferência */}
-          {type === 'transfer' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Conta de Origem (Debitar)
-                </label>
-                <select
-                  required
-                  value={fromAccountId}
-                  onChange={(e) => setFromAccountId(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                >
-                  <option value="">Selecione a conta</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({formatCurrency(a.current_balance)})
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {/* Campos de Transação e Método */}
+          <TransactionFields
+            type={type}
+            description={description}
+            onDescriptionChange={setDescription}
+            categoryId={categoryId}
+            onCategoryChange={setCategoryId}
+            filteredCategories={filteredCategories}
+            fromAccountId={fromAccountId}
+            onFromAccountIdChange={setFromAccountId}
+            toAccountId={toAccountId}
+            onToAccountIdChange={setToAccountId}
+            accounts={accounts}
+            paymentMethodSlot={
+              <PaymentMethodFields
+                paymentMethodId={paymentMethodId}
+                onPaymentMethodChange={(val) => {
+                  setPaymentMethodId(val);
+                  setSelectedCreditCardId('');
+                }}
+                filteredPaymentMethods={filteredPaymentMethods}
+              />
+            }
+          />
 
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Conta de Destino (Creditar)
-                </label>
-                <select
-                  required
-                  value={toAccountId}
-                  onChange={(e) => setToAccountId(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                >
-                  <option value="">Selecione a conta</option>
-                  {accounts
-                    .filter((a) => a.id !== fromAccountId)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({formatCurrency(a.current_balance)})
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Descrição */}
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Descrição
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={
-                    type === 'expense'
-                      ? 'Ex: Supermercado Pão de Açúcar'
-                      : 'Ex: Salário Mensal / Freelance'
-                  }
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                />
-              </div>
-
-              {/* Categoria e Método de Pagamento */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Categoria
-                  </label>
-                  <select
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                    className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  >
-                    <option value="">Selecione a categoria</option>
-                    {filteredCategories.map((cat) => (
-                      <React.Fragment key={cat.id}>
-                        <option value={cat.id} className="font-bold">
-                          {cat.name}
-                        </option>
-                        {cat.subcategories?.map((sub) => (
-                          <option key={sub.id} value={sub.id}>
-                            &nbsp;&nbsp;↳ {sub.name}
-                          </option>
-                        ))}
-                      </React.Fragment>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Método de Pagamento
-                  </label>
-                  <select
-                    value={paymentMethodId}
-                    onChange={(e) => {
-                      setPaymentMethodId(e.target.value);
-                      setSelectedCreditCardId('');
-                    }}
-                    className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  >
-                    <option value="">Selecione o método</option>
-                    {filteredPaymentMethods.map((pm) => (
-                      <option key={pm.id} value={pm.id}>
-                        {pm.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Opção Especial: Parcelamento em Cartão de Crédito */}
-              {isCreditCardSelected && (
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-3.5 dark:border-indigo-900 dark:bg-indigo-950/40">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-indigo-900 dark:text-indigo-300">
-                      <CreditCardIcon className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                      <span>Parcelamento no Cartão</span>
-                    </div>
-                    {billPreview && (
-                      <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">
-                        1ª Fatura: {billPreview.referenceMonth} (Venc: {billPreview.dueDate})
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mt-2.5 flex flex-wrap items-center gap-3">
-                    {/* Seletor explícito de cartão quando o método não possui cartão fixo */}
-                    {!selectedPaymentMethod?.credit_card_id && creditCards.length > 0 && (
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
-                          Cartão de Crédito *
-                        </label>
-                        <select
-                          required
-                          value={selectedCreditCardId}
-                          onChange={(e) => setSelectedCreditCardId(e.target.value)}
-                          className="mt-1 rounded-xl border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-950 focus:outline-none dark:border-indigo-800 dark:bg-slate-900 dark:text-white"
-                        >
-                          <option value="">Selecione o cartão (obrigatório)</option>
-                          {creditCards.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} (Fecha dia {c.closing_day})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
-                        Total de Parcelas
-                      </label>
-                      <select
-                        value={installmentCount}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setInstallmentCount(val);
-                          if (paidInstallmentsCount >= val) setPaidInstallmentsCount(0);
-                        }}
-                        className="mt-1 rounded-xl border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-950 focus:outline-none dark:border-indigo-800 dark:bg-slate-900 dark:text-white"
-                      >
-                        <option value={1}>À vista (1x de {formatCurrency(numAmount)})</option>
-                        {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((n) => (
-                          <option key={n} value={n}>
-                            {n}x de {formatCurrency(numAmount ? numAmount / n : 0)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {installmentCount > 1 && (
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
-                          Parcelas já pagas
-                        </label>
-                        <select
-                          value={paidInstallmentsCount}
-                          onChange={(e) => setPaidInstallmentsCount(Number(e.target.value))}
-                          className="mt-1 rounded-xl border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-950 focus:outline-none dark:border-indigo-800 dark:bg-slate-900 dark:text-white"
-                        >
-                          {Array.from({ length: installmentCount }, (_, i) => (
-                            <option key={i} value={i}>
-                              {i === 0 ? 'Nenhuma (0 pagas)' : `${i} parcela${i > 1 ? 's' : ''} já paga${i > 1 ? 's' : ''}`}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  {installmentCount > 1 && numAmount > 0 && (
-                    <div className="mt-2 text-xs text-indigo-800 dark:text-indigo-200 flex items-center justify-between border-t border-indigo-200/60 dark:border-indigo-900/60 pt-2">
-                      <span>
-                        {paidInstallmentsCount > 0 ? (
-                          <>
-                            <strong>{paidInstallmentsCount} pagas</strong> • Restam <strong>{installmentCount - paidInstallmentsCount} parcelas a vencer</strong>
-                          </>
-                        ) : (
-                          <>
-                            Gera <strong>{installmentCount} parcelas</strong> vinculadas às próximas faturas.
-                          </>
-                        )}
-                      </span>
-                      <span className="font-bold text-indigo-950 dark:text-indigo-100">
-                        Saldo a pagar: {formatCurrency(pendingBalancePreview)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
+          {/* Opção Especial: Parcelamento em Cartão de Crédito */}
+          {type !== 'transfer' && (
+            <InstallmentFields
+              isCreditCardSelected={isCreditCardSelected}
+              selectedPaymentMethod={selectedPaymentMethod}
+              creditCards={creditCards}
+              selectedCreditCardId={selectedCreditCardId}
+              onSelectedCreditCardIdChange={setSelectedCreditCardId}
+              installmentCount={installmentCount}
+              onInstallmentCountChange={setInstallmentCount}
+              paidInstallmentsCount={paidInstallmentsCount}
+              onPaidInstallmentsCountChange={setPaidInstallmentsCount}
+              numAmount={numAmount}
+              billPreview={billPreview}
+              pendingBalancePreview={pendingBalancePreview}
+            />
+          )}
 
           {/* Rateio de Despesas (Splitwise) */}
-          {type === 'expense' && workspaceMembers.length > 1 && (
-            <div className="rounded-2xl border border-teal-200/80 bg-teal-50/50 p-4 dark:border-teal-900/50 dark:bg-teal-950/20">
-              <div className="flex items-center justify-between pb-2 mb-3 border-b border-teal-200/60 dark:border-teal-900/60">
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-teal-600 dark:text-teal-400" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-teal-900 dark:text-teal-300">
-                    Divisão de Despesa (Rateio)
-                  </span>
-                </div>
-                <span className="text-[11px] text-teal-700 dark:text-teal-400 font-medium">
-                  {workspaceMembers.length} membros no workspace
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Quem pagou? */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-teal-900 dark:text-teal-300">
-                    Quem pagou?
-                  </label>
-                  <select
-                    value={paidByMemberId || (workspaceMembers[0]?.id ?? '')}
-                    onChange={(e) => setPaidByMemberId(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
-                  >
-                    {workspaceMembers.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`} {m.role === 'owner' ? '(Owner)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Como dividir? */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-teal-900 dark:text-teal-300">
-                    Regra de Divisão
-                  </label>
-                  <select
-                    value={splitType}
-                    onChange={(e) => setSplitType(e.target.value as SplitType)}
-                    className="mt-1 w-full rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
-                  >
-                    <option value="individual">Sem divisão (100% de quem pagou)</option>
-                    <option value="equal">
-                      {workspaceMembers.length === 2 ? 'Dividir igualmente (50/50)' : 'Dividir igualmente (entre todos)'}
-                    </option>
-                    <option value="full_other">100% de outra pessoa (compra em nome de outro)</option>
-                    <option value="custom">Personalizado (definir valores)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Preview dos valores calculados */}
-              {splitType !== 'individual' && numAmount > 0 && (() => {
-                const effectivePayerId = paidByMemberId || workspaceMembers[0]?.id;
-                let previewSplits: TransactionSplit[] = [];
-                let previewError: string | null = null;
-                try {
-                  const customList = splitType === 'custom'
-                    ? workspaceMembers.map((m) => ({ member_id: m.id, amount: customSplits[m.id] || 0 }))
-                    : undefined;
-                  if (effectivePayerId) {
-                    previewSplits = calculateExpenseSplits(numAmount, splitType, workspaceMembers, effectivePayerId, customList);
-                  }
-                } catch (e: any) {
-                  previewError = e.message;
-                }
-
-                return (
-                  <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-teal-900/60">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300 mb-1.5">
-                      Responsabilidade de cada membro:
-                    </div>
-                    {splitType === 'custom' ? (
-                      <div className="space-y-1.5">
-                        {workspaceMembers.map((m) => {
-                          const memberName = m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`;
-                          const isPayer = m.id === effectivePayerId;
-                          return (
-                            <div key={m.id} className="flex items-center justify-between text-xs bg-white dark:bg-slate-900 p-2 rounded-xl border border-teal-200 dark:border-teal-900">
-                              <span className="font-medium text-slate-700 dark:text-slate-300">
-                                {memberName} {isPayer && <span className="text-[10px] text-teal-600 font-bold">(Pagador)</span>}
-                              </span>
-                              <div className="flex items-center gap-1">
-                                <span className="text-slate-400 text-xs">R$</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  placeholder="0,00"
-                                  value={customSplits[m.id] ?? ''}
-                                  onChange={(e) => {
-                                    const val = Math.max(0, parseFloat(e.target.value) || 0);
-                                    setCustomSplits((prev) => ({ ...prev, [m.id]: val }));
-                                  }}
-                                  className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-right text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {previewError && (
-                          <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 mt-1">
-                            {previewError}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {workspaceMembers.map((m) => {
-                          const memberName = m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`;
-                          const isPayer = m.id === effectivePayerId;
-                          const splitItem = previewSplits.find((s) => s.member_id === m.id);
-                          const shareAmount = splitItem ? splitItem.amount : 0;
-
-                          return (
-                            <div key={m.id} className="flex items-center justify-between text-xs bg-white/70 dark:bg-slate-900/70 px-2.5 py-1.5 rounded-lg">
-                              <span className="text-slate-700 dark:text-slate-300">
-                                {memberName} {isPayer && <span className="text-[10px] text-teal-600 font-bold">(Pagou)</span>}
-                              </span>
-                              <span className="font-semibold text-slate-900 dark:text-white">
-                                {formatCurrency(shareAmount)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
+          {type !== 'transfer' && (
+            <SplitFields
+              type={type}
+              workspaceMembers={workspaceMembers}
+              paidByMemberId={paidByMemberId}
+              onPaidByMemberIdChange={setPaidByMemberId}
+              splitType={splitType}
+              onSplitTypeChange={setSplitType}
+              customSplits={customSplits}
+              onCustomSplitChange={(mId, val) =>
+                setCustomSplits((prev) => ({ ...prev, [mId]: val }))
+              }
+              numAmount={numAmount}
+            />
           )}
-          </>
-        )}
 
           {/* Divulgação Progressiva: Mais Opções */}
           <div className="border-t border-slate-100 pt-2 dark:border-slate-800">
