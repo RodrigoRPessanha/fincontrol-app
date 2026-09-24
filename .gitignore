@@ -34,3 +34,9 @@ yarn-error.log*
 next-env.d.ts
 
 *.pdf
+
+# supabase
+.supabase
+supabase/.branches
+supabase/.temp
+supabase/seed.sql
