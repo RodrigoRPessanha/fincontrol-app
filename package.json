@@ -11,6 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:db:cloud": "node scripts/test-db-cloud.mjs",
+    "test:auth:cloud": "node scripts/test-auth-cloud.mjs",
     "audit": "npm audit"
   },
   "dependencies": {
@@ -29,6 +31,7 @@
     "@eslint/eslintrc": "^3.3.6",
     "@next/eslint-plugin-next": "^16.3.4",
     "@types/node": "^20.17.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@typescript-eslint/parser": "^8.67.0",
@@ -38,7 +41,9 @@
     "eslint": "^9.20.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "pg": "^8.23.0",
     "postcss": "^8.4.47",
+    "supabase": "^2.117.0",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
     "vitest": "^4.1.11"
