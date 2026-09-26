@@ -2,7 +2,7 @@
 -- TESTE 04: INTEGRIDADE FINANCEIRA, CONSERVAÇÃO EXATA DE RATEIOS E PROTEÇÃO DIRETA
 -- ==============================================================================
 BEGIN;
-SELECT plan(12);
+SELECT plan(24);
 
 -- 1. Setup: Workspace com 2 membros e transação/compra com IDs determinísticos
 INSERT INTO auth.users (id, aud, role, email)
@@ -61,6 +61,64 @@ SELECT throws_ok(
     NULL,
     'INSERT direto em purchase_splits é bloqueado no nível de permissão'
 );
+
+-- 2.3. Bloqueio de INSERT direto em credit_card_bills (Migration 019)
+SELECT throws_ok(
+    'INSERT INTO public.credit_card_bills (workspace_id, credit_card_id, reference_month, closing_date, due_date, total_amount)
+     SELECT ws_id, ''20000000-0000-0000-0000-000000000030''::UUID, ''2026-05'', ''2026-05-01''::DATE, ''2026-05-10''::DATE, 100.00 FROM split_vars',
+    '42501',
+    NULL,
+    'INSERT direto em credit_card_bills é bloqueado no nível de permissão'
+);
+
+-- 2.4. Bloqueio de INSERT direto em installments (Migration 019)
+SELECT throws_ok(
+    'INSERT INTO public.installments (purchase_id, installment_number, amount, due_date)
+     SELECT pur_id, 4, 100.00, ''2026-06-01''::DATE FROM split_vars',
+    '42501',
+    NULL,
+    'INSERT direto em installments é bloqueado no nível de permissão'
+);
+
+-- 2.5. Bloqueio de UPDATE direto em credit_card_bills (Migration 019)
+SELECT throws_ok(
+    'UPDATE public.credit_card_bills SET total_amount = 999.00 WHERE workspace_id = (SELECT ws_id FROM split_vars)',
+    '42501',
+    NULL,
+    'UPDATE direto em credit_card_bills é bloqueado no nível de permissão'
+);
+
+-- 2.6. Bloqueio de UPDATE direto em installments (Migration 019)
+SELECT throws_ok(
+    'UPDATE public.installments SET amount = 999.00 WHERE purchase_id = (SELECT pur_id FROM split_vars)',
+    '42501',
+    NULL,
+    'UPDATE direto em installments é bloqueado no nível de permissão'
+);
+
+-- 2.7. Bloqueio de TRUNCATE direto em credit_card_bills (Migration 020)
+SELECT throws_ok(
+    'TRUNCATE public.credit_card_bills',
+    '42501',
+    NULL,
+    'TRUNCATE direto em credit_card_bills é bloqueado no nível de permissão'
+);
+
+-- 2.8. Bloqueio de TRUNCATE direto em installments (Migration 020)
+SELECT throws_ok(
+    'TRUNCATE public.installments',
+    '42501',
+    NULL,
+    'TRUNCATE direto em installments é bloqueado no nível de permissão'
+);
+
+-- 2.9. Confirmação explícita de ausência de privilégios de TRUNCATE, TRIGGER e REFERENCES (Migration 020)
+SELECT ok(NOT has_table_privilege('authenticated', 'public.credit_card_bills', 'truncate'), 'authenticated não possui privilégio TRUNCATE em credit_card_bills');
+SELECT ok(NOT has_table_privilege('authenticated', 'public.installments', 'truncate'), 'authenticated não possui privilégio TRUNCATE em installments');
+SELECT ok(NOT has_table_privilege('authenticated', 'public.credit_card_bills', 'trigger'), 'authenticated não possui privilégio TRIGGER em credit_card_bills');
+SELECT ok(NOT has_table_privilege('authenticated', 'public.installments', 'trigger'), 'authenticated não possui privilégio TRIGGER em installments');
+SELECT ok(NOT has_table_privilege('authenticated', 'public.credit_card_bills', 'references'), 'authenticated não possui privilégio REFERENCES em credit_card_bills');
+SELECT ok(NOT has_table_privilege('authenticated', 'public.installments', 'references'), 'authenticated não possui privilégio REFERENCES em installments');
 
 -- ==============================================================================
 -- 3. TESTES DE CONSERVAÇÃO EXATA DE RATEIOS VIA RPC (TOLERÂNCIA ZERO R$ 0,00)

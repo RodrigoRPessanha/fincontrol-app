@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "test:db:cloud": "node scripts/test-db-cloud.mjs",
     "test:auth:cloud": "node scripts/test-auth-cloud.mjs",
+    "test:repo:cloud": "node scripts/test-repository-cloud.mjs",
     "audit": "npm audit"
   },
   "dependencies": {

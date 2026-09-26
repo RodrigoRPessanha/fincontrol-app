@@ -22,11 +22,15 @@ export default defineConfig({
         'src/components/transactions/PaymentModal.tsx',
         'src/app/**/splits/page.tsx',
         'src/components/splits/**/*.tsx',
+        'src/lib/repositories/**/*.ts',
       ],
       exclude: [
         'src/lib/financial-engine/index.ts',
         'src/lib/context/actions/index.ts',
         'src/lib/context/actions/types.ts',
+        'src/lib/repositories/index.ts',
+        'src/lib/repositories/mappers/index.ts',
+        'src/lib/repositories/finance-repository.ts',
       ],
       reporter: ['text', 'json', 'html'],
       thresholds: {

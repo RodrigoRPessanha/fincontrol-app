@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -1250,6 +1250,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      fn_check_table_privilege: {
+        Args: { p_privilege: string; p_table: string }
+        Returns: boolean
+      }
       fn_create_credit_card_transaction: {
         Args: {
           p_amount: number
@@ -1281,6 +1285,45 @@ export type Database = {
         }
         Returns: string
       }
+      fn_create_purchase_with_splits: {
+        Args: {
+          p_account_id?: string
+          p_category_id?: string
+          p_credit_card_id?: string
+          p_description: string
+          p_installment_count: number
+          p_paid_by_member_id?: string
+          p_paid_installments_count?: number
+          p_payment_method_id?: string
+          p_purchase_date?: string
+          p_split_type?: string
+          p_splits?: Json
+          p_total_amount: number
+          p_workspace_id: string
+        }
+        Returns: string
+      }
+      fn_create_transaction_with_splits: {
+        Args: {
+          p_account_id?: string
+          p_amount: number
+          p_category_id?: string
+          p_credit_card_bill_id?: string
+          p_credit_card_id?: string
+          p_description: string
+          p_due_date?: string
+          p_notes?: string
+          p_paid_by_member_id?: string
+          p_payment_method_id?: string
+          p_split_type?: string
+          p_splits?: Json
+          p_status?: string
+          p_transaction_date?: string
+          p_type?: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       fn_create_transfer: {
         Args: {
           p_amount: number
@@ -1303,6 +1346,22 @@ export type Database = {
             }
             Returns: string
           }
+      fn_delete_payment: {
+        Args: { p_payment_id: string; p_workspace_id: string }
+        Returns: boolean
+      }
+      fn_delete_purchase: {
+        Args: { p_purchase_id: string; p_workspace_id: string }
+        Returns: boolean
+      }
+      fn_delete_transaction: {
+        Args: { p_transaction_id: string; p_workspace_id: string }
+        Returns: boolean
+      }
+      fn_delete_transfer: {
+        Args: { p_transfer_id: string; p_workspace_id: string }
+        Returns: boolean
+      }
       fn_get_or_create_credit_card_bill:
         | { Args: { p_card_id: string; p_date: string }; Returns: string }
         | {
@@ -1355,6 +1414,69 @@ export type Database = {
       fn_transfer_workspace_ownership: {
         Args: { p_new_owner_id: string; p_workspace_id: string }
         Returns: undefined
+      }
+      fn_update_payment: {
+        Args: {
+          p_account_id?: string
+          p_affects_balance?: boolean
+          p_amount?: number
+          p_notes?: string
+          p_payment_date?: string
+          p_payment_id: string
+          p_payment_method_id?: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
+      fn_update_purchase_with_splits: {
+        Args: {
+          p_account_id?: string
+          p_category_id?: string
+          p_credit_card_id?: string
+          p_description?: string
+          p_paid_by_member_id?: string
+          p_payment_method_id?: string
+          p_purchase_date?: string
+          p_purchase_id: string
+          p_split_type?: string
+          p_splits?: Json
+          p_total_amount?: number
+          p_workspace_id: string
+        }
+        Returns: string
+      }
+      fn_update_transaction_with_splits: {
+        Args: {
+          p_account_id?: string
+          p_amount?: number
+          p_category_id?: string
+          p_credit_card_bill_id?: string
+          p_credit_card_id?: string
+          p_description?: string
+          p_due_date?: string
+          p_notes?: string
+          p_paid_by_member_id?: string
+          p_payment_method_id?: string
+          p_split_type?: string
+          p_splits?: Json
+          p_transaction_date?: string
+          p_transaction_id: string
+          p_type?: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
+      fn_update_transfer: {
+        Args: {
+          p_amount?: number
+          p_from_account_id?: string
+          p_notes?: string
+          p_to_account_id?: string
+          p_transfer_date?: string
+          p_transfer_id: string
+          p_workspace_id: string
+        }
+        Returns: string
       }
       has_workspace_role: {
         Args: { p_roles: string[]; p_workspace_id: string }
