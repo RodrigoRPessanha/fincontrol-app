@@ -36,6 +36,8 @@ Aplicativo completo e moderno de **controle financeiro pessoal e compartilhado**
 
 ## 🛠️ Como Executar Localmente
 
+Requer Node.js 22.4 ou superior; Node.js 24 é usado no CI.
+
 ### 1. Instalar Dependências
 ```bash
 npm install
