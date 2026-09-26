@@ -1250,6 +1250,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      fn_add_workspace_member: {
+        Args: {
+          p_email_or_user_id: string
+          p_role?: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       fn_check_table_privilege: {
         Args: { p_privilege: string; p_table: string }
         Returns: boolean

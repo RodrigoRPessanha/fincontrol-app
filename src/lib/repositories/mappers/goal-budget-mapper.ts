@@ -27,7 +27,7 @@ export function mapDomainToBudgetInsert(
     category_id: domain.category_id,
     month: domain.month,
     year: domain.year,
-    planned_amount: roundCurrency(domain.planned_amount),
+    planned_amount: domain.planned_amount !== undefined ? roundCurrency(domain.planned_amount) : (undefined as any),
   };
 }
 
@@ -53,8 +53,8 @@ export function mapDomainToFinancialGoalInsert(
     id: domain.id,
     workspace_id: domain.workspace_id,
     name: domain.name,
-    target_amount: roundCurrency(domain.target_amount),
-    current_amount: roundCurrency(domain.current_amount),
+    target_amount: domain.target_amount !== undefined ? roundCurrency(domain.target_amount) : (undefined as any),
+    current_amount: domain.current_amount !== undefined ? roundCurrency(domain.current_amount) : (undefined as any),
     target_date: domain.target_date ?? null,
     status: domain.status,
     color: domain.color,

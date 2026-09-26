@@ -104,14 +104,9 @@ export function calculateExpenseSplits(
         throw new Error('O valor atribuído a cada membro no rateio não pode ser negativo.');
       }
 
-      const cents = toCents(cs.amount);
-      if (cents < 0) {
-        throw new Error('O valor atribuído a cada membro no rateio não pode ser negativo.');
-      }
-
       return {
         member_id: cs.member_id,
-        cents,
+        cents: toCents(cs.amount),
       };
     });
 
@@ -124,7 +119,7 @@ export function calculateExpenseSplits(
     return sanitized.map((s) => ({
       member_id: s.member_id,
       amount: fromCents(s.cents),
-      percentage: totalCents > 0 ? Math.round((s.cents / totalCents) * 1000) / 10 : 0,
+      percentage: Math.round((s.cents / totalCents) * 1000) / 10,
     }));
   }
 

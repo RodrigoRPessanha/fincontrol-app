@@ -368,6 +368,25 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(inst.installment_number).toBe(1);
     const instInsert = mapDomainToInstallmentInsert(inst);
     expect(instInsert.amount).toBe(300);
+
+    const instInsertNulls = mapDomainToInstallmentInsert({
+      purchase_id: 'pur-1',
+      installment_number: 2,
+      amount: 300,
+      due_date: '2026-03-01',
+      status: 'pending',
+      paid_amount: 0,
+    });
+    expect(instInsertNulls.credit_card_bill_id).toBeNull();
+    expect(instInsertNulls.paid_at).toBeNull();
+
+    const splitsWithNullAmount = mapPurchaseSplitsToDomain([
+      { id: 'ps-1', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', amount: null as any, percentage: null, created_at: '2026-01-01' },
+      { id: 'ps-2', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-2', amount: 50, percentage: 50, created_at: '2026-01-01' },
+    ]);
+    expect(splitsWithNullAmount[0].amount).toBe(0);
+    expect(splitsWithNullAmount[0].percentage).toBeUndefined();
+    expect(splitsWithNullAmount[1].percentage).toBe(50);
   });
 
   it('maps settlement, payment, transfer, recurring, budget, and goal', () => {
@@ -1074,5 +1093,21 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(txInsert.notes).toBeNull();
     expect(txInsert.created_by).toBeNull();
     expect(txInsert.paid_at).toBeNull();
+  });
+
+  it('preserves undefined in insert mappers when optional monetary fields are omitted', () => {
+    const acc = mapDomainToAccountInsert({ name: 'A', workspace_id: 'ws-1' } as any);
+    expect(acc.initial_balance).toBeUndefined();
+    expect(acc.current_balance).toBeUndefined();
+
+    const card = mapDomainToCreditCardInsert({ name: 'C', workspace_id: 'ws-1' } as any);
+    expect(card.credit_limit).toBeUndefined();
+
+    const budget = mapDomainToBudgetInsert({ category_id: 'cat-1', workspace_id: 'ws-1', month: 1, year: 2026 } as any);
+    expect(budget.planned_amount).toBeUndefined();
+
+    const goal = mapDomainToFinancialGoalInsert({ name: 'G', workspace_id: 'ws-1' } as any);
+    expect(goal.target_amount).toBeUndefined();
+    expect(goal.current_amount).toBeUndefined();
   });
 });

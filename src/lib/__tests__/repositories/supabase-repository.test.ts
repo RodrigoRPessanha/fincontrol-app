@@ -8,9 +8,11 @@ function createMockSupabaseClient() {
     select: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    upsert: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
     single: vi.fn().mockResolvedValue({ data: null, error: null }),
   };
 
@@ -651,6 +653,7 @@ describe('SupabaseFinanceRepository', () => {
 
     (client.from as any).mockReturnValueOnce({
       insert: vi.fn().mockReturnThis(),
+      upsert: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: { id: 'b-1', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 500, month: 4, year: 2026 }, error: null }),
     });
@@ -660,9 +663,24 @@ describe('SupabaseFinanceRepository', () => {
       update: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'b-1', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 600, month: 4, year: 2026 }, error: null }),
       single: vi.fn().mockResolvedValue({ data: { id: 'b-1', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 600, month: 4, year: 2026 }, error: null }),
     });
     await repo.saveBudget({ id: 'b-1', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 600, month: 4, year: 2026 });
+
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    });
+    (client.from as any).mockReturnValueOnce({
+      upsert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'b-fallback', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 700, month: 4, year: 2026 }, error: null }),
+    });
+    const fallbackBudget = await repo.saveBudget({ id: 'b-fallback', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 700, month: 4, year: 2026 });
+    expect(fallbackBudget.id).toBe('b-fallback');
 
     (client.from as any).mockReturnValueOnce({
       delete: vi.fn().mockReturnThis(),
@@ -1330,6 +1348,7 @@ describe('SupabaseFinanceRepository', () => {
       update: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: err }),
       single: vi.fn().mockResolvedValue({ data: null, error: err }),
     });
     await expect(repo.saveBudget({ id: 'b-1', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 100, month: 4, year: 2026 })).rejects.toThrow(RepositoryError);
@@ -1422,6 +1441,7 @@ describe('SupabaseFinanceRepository', () => {
     // saveBudget insert error
     (client.from as any).mockReturnValueOnce({
       insert: vi.fn().mockReturnThis(),
+      upsert: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: null, error: err }),
     });
@@ -1567,6 +1587,51 @@ describe('SupabaseFinanceRepository', () => {
     });
     const memberWithArr = await repo.addWorkspaceMember({ workspace_id: 'ws-1', user_id: 'u-1', role: 'member' });
     expect(memberWithArr.user?.name).toBe('Array Profile');
+
+    // addWorkspaceMember via email (fn_add_workspace_member RPC)
+    (client.rpc as any).mockResolvedValueOnce({ data: 'm-rpc-id', error: null });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'm-rpc-id', workspace_id: 'ws-1', user_id: 'u-resolved', role: 'member', created_at: '2026-01-01', profiles: { id: 'u-resolved', name: 'User Resolved', email: 'email@test.com' } },
+        error: null,
+      }),
+    });
+    const memberViaEmail = await repo.addWorkspaceMember({ workspace_id: 'ws-1', user_id: 'email@test.com', role: 'member' });
+    expect(memberViaEmail.user_id).toBe('u-resolved');
+    expect(memberViaEmail.user?.email).toBe('email@test.com');
+
+    // addWorkspaceMember via email with profile as array
+    (client.rpc as any).mockResolvedValueOnce({ data: 'm-rpc-arr', error: null });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'm-rpc-arr', workspace_id: 'ws-1', user_id: 'u-resolved', role: 'member', created_at: '2026-01-01', profiles: [{ id: 'u-resolved', name: 'User Arr', email: 'arr@test.com' }] },
+        error: null,
+      }),
+    });
+    const memberViaEmailArr = await repo.addWorkspaceMember({ workspace_id: 'ws-1', user_id: 'arr@test.com', role: 'member' });
+    expect(memberViaEmailArr.user?.name).toBe('User Arr');
+
+    // addWorkspaceMember via email error branches
+    (client.rpc as any).mockResolvedValueOnce({ data: null, error: { message: 'Erro RPC email' } });
+    await expect(repo.addWorkspaceMember({ workspace_id: 'ws-1', user_id: 'err@test.com', role: 'member' })).rejects.toThrow(RepositoryError);
+
+    (client.rpc as any).mockResolvedValueOnce({ data: null, error: null });
+    await expect(repo.addWorkspaceMember({ workspace_id: 'ws-1', user_id: 'nullid@test.com', role: 'member' })).rejects.toThrow(RepositoryError);
+
+    (client.rpc as any).mockResolvedValueOnce({ data: 'm-err-fetch', error: null });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: 'Falha ao buscar membro gravado' },
+      }),
+    });
+    await expect(repo.addWorkspaceMember({ workspace_id: 'ws-1', user_id: 'fetcherr@test.com', role: 'member' })).rejects.toThrow(RepositoryError);
 
     (client.from as any).mockReturnValueOnce({
       update: vi.fn().mockReturnThis(),
@@ -1925,5 +1990,62 @@ describe('SupabaseFinanceRepository', () => {
     });
     const objMembers = await repo.getWorkspaceMembers('ws-1');
     expect(objMembers[0].user?.name).toBe('Obj User');
+  });
+
+  it('updates account, credit card, category and goal with only provided fields when partial data is passed', async () => {
+    const { client } = createMockSupabaseClient();
+    const repo = new SupabaseFinanceRepository(client);
+
+    // saveAccount with only id (all other fields undefined)
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'acc-1', workspace_id: 'ws-1', name: 'Conta A', type: 'checking', initial_balance: 100, current_balance: 100, active: true },
+        error: null,
+      }),
+    });
+    const acc = await repo.saveAccount({ id: 'acc-1' } as any);
+    expect(acc.id).toBe('acc-1');
+
+    // saveCreditCard with only id (all other fields undefined)
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'card-1', workspace_id: 'ws-1', name: 'Cartao A', credit_limit: 500, closing_day: 1, due_day: 10, active: true },
+        error: null,
+      }),
+    });
+    const card = await repo.saveCreditCard({ id: 'card-1' } as any);
+    expect(card.id).toBe('card-1');
+
+    // saveCategory with only id (all other fields undefined)
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'cat-1', workspace_id: 'ws-1', name: 'Categoria A', type: 'expense', active: true },
+        error: null,
+      }),
+    });
+    const cat = await repo.saveCategory({ id: 'cat-1' } as any);
+    expect(cat.id).toBe('cat-1');
+
+    // saveGoal with only id (all other fields undefined)
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'goal-1', workspace_id: 'ws-1', name: 'Meta A', target_amount: 1000, current_amount: 200, status: 'in_progress' },
+        error: null,
+      }),
+    });
+    const goal = await repo.saveGoal({ id: 'goal-1' } as any);
+    expect(goal.id).toBe('goal-1');
   });
 });

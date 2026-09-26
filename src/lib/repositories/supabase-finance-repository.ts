@@ -22,6 +22,7 @@ import {
 import { FinanceState } from '../context/finance-state';
 import { FinanceRepository } from './finance-repository';
 import { RepositoryError } from './repository-errors';
+import { roundCurrency } from '../financial-engine';
 import {
   mapAccountRowToDomain,
   mapDomainToAccountInsert,
@@ -248,6 +249,31 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async addWorkspaceMember(member: Omit<WorkspaceMember, 'id' | 'created_at'>): Promise<WorkspaceMember> {
+    const isEmail = member.user_id.includes('@');
+    if (isEmail && typeof this.client.rpc === 'function') {
+      const { data: memberId, error: rpcErr } = await this.client.rpc('fn_add_workspace_member', {
+        p_workspace_id: member.workspace_id,
+        p_email_or_user_id: member.user_id,
+        p_role: member.role,
+      } as any);
+
+      if (rpcErr || !memberId) {
+        throw RepositoryError.fromPostgrestError(
+          rpcErr ?? { message: 'Falha ao adicionar membro ao workspace' },
+          'workspace_members'
+        );
+      }
+
+      const { data, error: fetchErr } = await this.client
+        .from('workspace_members')
+        .select('*, profiles(*)')
+        .eq('id', memberId)
+        .single();
+      if (fetchErr) throw RepositoryError.fromPostgrestError(fetchErr, 'workspace_members');
+      const profile = Array.isArray((data as any).profiles) ? (data as any).profiles[0] : (data as any).profiles;
+      return mapWorkspaceMemberRowToDomain(data, profile);
+    }
+
     const insertPayload = mapDomainToWorkspaceMemberInsert(member);
     const { data, error } = await this.client
       .from('workspace_members')
@@ -289,17 +315,26 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async saveAccount(account: Omit<Account, 'id' | 'created_at'> & { id?: string }): Promise<Account> {
-    const payload = mapDomainToAccountInsert(account);
     if (account.id) {
+      const updateData: DbTables['accounts']['Update'] = {};
+      if (account.name !== undefined) updateData.name = account.name;
+      if (account.institution !== undefined) updateData.institution = account.institution;
+      if (account.type !== undefined) updateData.type = account.type;
+      if (account.color !== undefined) updateData.color = account.color;
+      if (account.initial_balance !== undefined) updateData.initial_balance = roundCurrency(account.initial_balance);
+      if (account.current_balance !== undefined) updateData.current_balance = roundCurrency(account.current_balance);
+      if (account.active !== undefined) updateData.active = account.active;
+
       const { data, error } = await this.client
         .from('accounts')
-        .update(payload)
+        .update(updateData)
         .eq('id', account.id)
         .select()
         .single();
       if (error) throw RepositoryError.fromPostgrestError(error, 'accounts');
       return mapAccountRowToDomain(data);
     }
+    const payload = mapDomainToAccountInsert(account);
     const { data, error } = await this.client
       .from('accounts')
       .insert(payload)
@@ -365,17 +400,28 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async saveCreditCard(card: Omit<CreditCard, 'id' | 'created_at'> & { id?: string }): Promise<CreditCard> {
-    const payload = mapDomainToCreditCardInsert(card);
     if (card.id) {
+      const updateData: DbTables['credit_cards']['Update'] = {};
+      if (card.name !== undefined) updateData.name = card.name;
+      if (card.institution !== undefined) updateData.institution = card.institution;
+      if (card.last_four_digits !== undefined) updateData.last_four_digits = card.last_four_digits;
+      if (card.credit_limit !== undefined) updateData.credit_limit = roundCurrency(card.credit_limit);
+      if (card.closing_day !== undefined) updateData.closing_day = card.closing_day;
+      if (card.due_day !== undefined) updateData.due_day = card.due_day;
+      if (card.linked_payment_account_id !== undefined) updateData.linked_payment_account_id = card.linked_payment_account_id;
+      if (card.color !== undefined) updateData.color = card.color;
+      if (card.active !== undefined) updateData.active = card.active;
+
       const { data, error } = await this.client
         .from('credit_cards')
-        .update(payload)
+        .update(updateData)
         .eq('id', card.id)
         .select()
         .single();
       if (error) throw RepositoryError.fromPostgrestError(error, 'credit_cards');
       return mapCreditCardRowToDomain(data);
     }
+    const payload = mapDomainToCreditCardInsert(card);
     const { data, error } = await this.client
       .from('credit_cards')
       .insert(payload)
@@ -412,17 +458,25 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async saveCategory(category: Omit<Category, 'id' | 'created_at'> & { id?: string }): Promise<Category> {
-    const payload = mapDomainToCategoryInsert(category);
     if (category.id) {
+      const updateData: DbTables['categories']['Update'] = {};
+      if (category.name !== undefined) updateData.name = category.name;
+      if (category.parent_id !== undefined) updateData.parent_id = category.parent_id;
+      if (category.icon !== undefined) updateData.icon = category.icon;
+      if (category.color !== undefined) updateData.color = category.color;
+      if (category.type !== undefined) updateData.type = category.type;
+      if (category.active !== undefined) updateData.active = category.active;
+
       const { data, error } = await this.client
         .from('categories')
-        .update(payload)
+        .update(updateData)
         .eq('id', category.id)
         .select()
         .single();
       if (error) throw RepositoryError.fromPostgrestError(error, 'categories');
       return mapCategoryRowToDomain(data);
     }
+    const payload = mapDomainToCategoryInsert(category);
     const { data, error } = await this.client
       .from('categories')
       .insert(payload)
@@ -472,16 +526,16 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_transaction_date: transaction.transaction_date,
         p_due_date: transaction.due_date,
         p_type: transaction.type,
-        p_category_id: (transaction.category_id ?? undefined) as string | undefined,
-        p_account_id: (transaction.account_id ?? undefined) as string | undefined,
-        p_payment_method_id: (transaction.payment_method_id ?? undefined) as string | undefined,
-        p_credit_card_id: (transaction.credit_card_id ?? undefined) as string | undefined,
-        p_credit_card_bill_id: (transaction.credit_card_bill_id ?? undefined) as string | undefined,
-        p_notes: (transaction.notes ?? undefined) as string | undefined,
-        p_paid_by_member_id: (transaction.paid_by_member_id ?? undefined) as string | undefined,
-        p_split_type: (transaction.split_type ?? undefined) as string | undefined,
+        p_category_id: (transaction.category_id ?? null) as string | null,
+        p_account_id: (transaction.account_id ?? null) as string | null,
+        p_payment_method_id: (transaction.payment_method_id ?? null) as string | null,
+        p_credit_card_id: (transaction.credit_card_id ?? null) as string | null,
+        p_credit_card_bill_id: (transaction.credit_card_bill_id ?? null) as string | null,
+        p_notes: (transaction.notes ?? null) as string | null,
+        p_paid_by_member_id: (transaction.paid_by_member_id ?? null) as string | null,
+        p_split_type: (transaction.split_type ?? null) as string | null,
         p_splits: transaction.splits !== undefined ? (transaction.splits as unknown as Json) : undefined,
-      });
+      } as any);
 
       if (rpcErr || !updatedId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao atualizar transação atômica com rateios' }, 'transactions');
@@ -506,16 +560,16 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_due_date: transaction.due_date,
         p_type: transaction.type,
         p_status: transaction.status,
-        p_category_id: (transaction.category_id ?? undefined) as string | undefined,
-        p_account_id: (transaction.account_id ?? undefined) as string | undefined,
-        p_payment_method_id: (transaction.payment_method_id ?? undefined) as string | undefined,
-        p_credit_card_id: (transaction.credit_card_id ?? undefined) as string | undefined,
-        p_credit_card_bill_id: (transaction.credit_card_bill_id ?? undefined) as string | undefined,
-        p_notes: (transaction.notes ?? undefined) as string | undefined,
-        p_paid_by_member_id: (transaction.paid_by_member_id ?? undefined) as string | undefined,
-        p_split_type: (transaction.split_type ?? undefined) as string | undefined,
+        p_category_id: (transaction.category_id ?? null) as string | null,
+        p_account_id: (transaction.account_id ?? null) as string | null,
+        p_payment_method_id: (transaction.payment_method_id ?? null) as string | null,
+        p_credit_card_id: (transaction.credit_card_id ?? null) as string | null,
+        p_credit_card_bill_id: (transaction.credit_card_bill_id ?? null) as string | null,
+        p_notes: (transaction.notes ?? null) as string | null,
+        p_paid_by_member_id: (transaction.paid_by_member_id ?? null) as string | null,
+        p_split_type: (transaction.split_type ?? null) as string | null,
         p_splits: (transaction.splits ?? []) as unknown as Json,
-      });
+      } as any);
 
       if (rpcErr || !txId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao criar transação atômica com rateios' }, 'transactions');
@@ -586,14 +640,14 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_description: purchase.description,
         p_total_amount: purchase.total_amount,
         p_purchase_date: purchase.purchase_date,
-        p_category_id: (purchase.category_id ?? undefined) as string | undefined,
-        p_account_id: (purchase.account_id ?? undefined) as string | undefined,
-        p_payment_method_id: (purchase.payment_method_id ?? undefined) as string | undefined,
-        p_credit_card_id: (purchase.credit_card_id ?? undefined) as string | undefined,
-        p_paid_by_member_id: (purchase.paid_by_member_id ?? undefined) as string | undefined,
-        p_split_type: (purchase.split_type ?? undefined) as string | undefined,
+        p_category_id: (purchase.category_id ?? null) as string | null,
+        p_account_id: (purchase.account_id ?? null) as string | null,
+        p_payment_method_id: (purchase.payment_method_id ?? null) as string | null,
+        p_credit_card_id: (purchase.credit_card_id ?? null) as string | null,
+        p_paid_by_member_id: (purchase.paid_by_member_id ?? null) as string | null,
+        p_split_type: (purchase.split_type ?? null) as string | null,
         p_splits: purchase.splits !== undefined ? (purchase.splits as unknown as Json) : undefined,
-      });
+      } as any);
 
       if (rpcErr || !updatedId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao atualizar compra atômica com rateios' }, 'purchases');
@@ -616,15 +670,15 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_total_amount: purchase.total_amount,
         p_installment_count: purchase.installment_count,
         p_purchase_date: purchase.purchase_date,
-        p_credit_card_id: (purchase.credit_card_id ?? undefined) as string | undefined,
-        p_category_id: (purchase.category_id ?? undefined) as string | undefined,
-        p_account_id: (purchase.account_id ?? undefined) as string | undefined,
-        p_payment_method_id: (purchase.payment_method_id ?? undefined) as string | undefined,
-        p_paid_installments_count: purchase.paid_installments_count,
-        p_paid_by_member_id: (purchase.paid_by_member_id ?? undefined) as string | undefined,
-        p_split_type: (purchase.split_type ?? undefined) as string | undefined,
+        p_credit_card_id: (purchase.credit_card_id ?? null) as string | null,
+        p_category_id: (purchase.category_id ?? null) as string | null,
+        p_account_id: (purchase.account_id ?? null) as string | null,
+        p_payment_method_id: (purchase.payment_method_id ?? null) as string | null,
+        p_paid_installments_count: purchase.paid_installments_count ?? 0,
+        p_paid_by_member_id: (purchase.paid_by_member_id ?? null) as string | null,
+        p_split_type: (purchase.split_type ?? null) as string | null,
         p_splits: (purchase.splits ?? []) as unknown as Json,
-      });
+      } as any);
 
       if (rpcErr || !purchaseId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao criar compra atômica com rateios' }, 'purchases');
@@ -688,13 +742,13 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       const { data: updatedId, error: rpcErr } = await this.client.rpc('fn_update_payment', {
         p_workspace_id: payment.workspace_id,
         p_payment_id: payment.id,
-        p_account_id: (payment.account_id ?? undefined) as any,
+        p_account_id: (payment.account_id ?? null) as any,
         p_amount: payment.amount,
         p_payment_date: payment.payment_date,
-        p_payment_method_id: (payment.payment_method_id ?? undefined) as any,
-        p_notes: (payment.notes ?? undefined) as string | undefined,
+        p_payment_method_id: (payment.payment_method_id ?? null) as any,
+        p_notes: (payment.notes ?? null) as string | null,
         p_affects_balance: payment.affects_balance,
-      });
+      } as any);
 
       if (rpcErr || !updatedId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao atualizar pagamento atômico' }, 'payments');
@@ -716,16 +770,16 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     if (hasObligation) {
       const { data: paymentId, error: rpcErr } = await this.client.rpc('fn_record_payment', {
         p_workspace_id: payment.workspace_id,
-        p_account_id: (payment.account_id ?? undefined) as any,
+        p_account_id: (payment.account_id ?? null) as any,
         p_amount: payment.amount,
         p_payment_date: payment.payment_date,
-        p_transaction_id: (payment.transaction_id ?? undefined) as string | undefined,
-        p_installment_id: (payment.installment_id ?? undefined) as string | undefined,
-        p_credit_card_bill_id: (payment.credit_card_bill_id ?? undefined) as string | undefined,
-        p_payment_method_id: (payment.payment_method_id ?? undefined) as string | undefined,
-        p_notes: (payment.notes ?? undefined) as string | undefined,
+        p_transaction_id: (payment.transaction_id ?? null) as string | null,
+        p_installment_id: (payment.installment_id ?? null) as string | null,
+        p_credit_card_bill_id: (payment.credit_card_bill_id ?? null) as string | null,
+        p_payment_method_id: (payment.payment_method_id ?? null) as string | null,
+        p_notes: (payment.notes ?? null) as string | null,
         p_affects_balance: payment.affects_balance,
-      });
+      } as any);
 
       if (rpcErr || !paymentId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao registrar pagamento atômico' }, 'payments');
@@ -791,7 +845,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_to_account_id: transfer.to_account_id,
         p_amount: transfer.amount,
         p_transfer_date: transfer.transfer_date,
-        p_notes: (transfer.notes ?? undefined) as any,
+        p_notes: (transfer.notes ?? null) as any,
       });
 
       if (rpcErr || !updatedId) {
@@ -815,9 +869,9 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       p_to_account_id: transfer.to_account_id,
       p_amount: transfer.amount,
       p_transfer_date: transfer.transfer_date,
-      p_notes: (transfer.notes ?? undefined) as string | undefined,
+      p_notes: (transfer.notes ?? null) as string | null,
       p_idempotency_key: (transfer as any).idempotency_key,
-    });
+    } as any);
 
     if (rpcErr || !transferId) {
       throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao criar transferência atômica' }, 'transfers');
@@ -902,20 +956,21 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async saveBudget(budget: Omit<Budget, 'id'> & { id?: string }): Promise<Budget> {
-    const payload = mapDomainToBudgetInsert(budget);
     if (budget.id) {
+      const payload = mapDomainToBudgetInsert(budget);
       const { data, error } = await this.client
         .from('budgets')
         .update(payload)
         .eq('id', budget.id)
         .select()
-        .single();
+        .maybeSingle();
       if (error) throw RepositoryError.fromPostgrestError(error, 'budgets');
-      return mapBudgetRowToDomain(data);
+      if (data) return mapBudgetRowToDomain(data);
     }
+    const { id: _ignoredId, ...payloadWithoutId } = mapDomainToBudgetInsert(budget);
     const { data, error } = await this.client
       .from('budgets')
-      .insert(payload)
+      .upsert(payloadWithoutId, { onConflict: 'workspace_id,category_id,month,year' })
       .select()
       .single();
     if (error) throw RepositoryError.fromPostgrestError(error, 'budgets');
@@ -937,17 +992,26 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async saveGoal(goal: Omit<FinancialGoal, 'id' | 'created_at'> & { id?: string }): Promise<FinancialGoal> {
-    const payload = mapDomainToFinancialGoalInsert(goal);
     if (goal.id) {
+      const updateData: DbTables['financial_goals']['Update'] = {};
+      if (goal.name !== undefined) updateData.name = goal.name;
+      if (goal.target_amount !== undefined) updateData.target_amount = roundCurrency(goal.target_amount);
+      if (goal.current_amount !== undefined) updateData.current_amount = roundCurrency(goal.current_amount);
+      if (goal.target_date !== undefined) updateData.target_date = goal.target_date;
+      if (goal.status !== undefined) updateData.status = goal.status;
+      if (goal.color !== undefined) updateData.color = goal.color;
+      if (goal.icon !== undefined) updateData.icon = goal.icon;
+
       const { data, error } = await this.client
         .from('financial_goals')
-        .update(payload)
+        .update(updateData)
         .eq('id', goal.id)
         .select()
         .single();
       if (error) throw RepositoryError.fromPostgrestError(error, 'financial_goals');
       return mapFinancialGoalRowToDomain(data);
     }
+    const payload = mapDomainToFinancialGoalInsert(goal);
     const { data, error } = await this.client
       .from('financial_goals')
       .insert(payload)

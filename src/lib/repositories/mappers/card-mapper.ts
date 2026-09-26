@@ -33,7 +33,7 @@ export function mapDomainToCreditCardInsert(
     name: domain.name,
     institution: domain.institution,
     last_four_digits: domain.last_four_digits ?? null,
-    credit_limit: roundCurrency(domain.credit_limit),
+    credit_limit: domain.credit_limit !== undefined ? roundCurrency(domain.credit_limit) : (undefined as any),
     closing_day: domain.closing_day,
     due_day: domain.due_day,
     linked_payment_account_id: domain.linked_payment_account_id ?? null,

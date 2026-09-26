@@ -2,13 +2,14 @@
 -- TESTE 02: ISOLAMENTO TOTAL ENTRE WORKSPACES E MEMBROS (MULTI-TENANCY)
 -- ==============================================================================
 BEGIN;
-SELECT plan(12);
+SELECT plan(17);
 
 -- 1. Setup de fixtures temporárias: dois usuários distintos
 INSERT INTO auth.users (id, aud, role, email)
 VALUES 
     ('11111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'alice@test.com'),
-    ('22222222-2222-2222-2222-222222222222', 'authenticated', 'authenticated', 'bob@test.com');
+    ('22222222-2222-2222-2222-222222222222', 'authenticated', 'authenticated', 'bob@test.com'),
+    ('44444444-4444-4444-4444-444444444444', 'authenticated', 'authenticated', 'charlie@test.com');
 
 -- Obter os workspaces criados automaticamente pelo trigger handle_new_user
 CREATE TEMPORARY TABLE test_vars AS
@@ -71,6 +72,33 @@ SELECT throws_ok(
     'Alice é impedida de invocar RPC no workspace de Bob'
 );
 
+-- 2.7. Alice adiciona Charlie ao seu workspace informando o e-mail (resolução automática de UUID)
+SELECT ok(
+    fn_add_workspace_member((SELECT ws_alice FROM test_vars), 'charlie@test.com', 'member') IS NOT NULL,
+    'Alice adiciona Charlie ao seu workspace via e-mail com sucesso'
+);
+
+-- 2.8. Charlie agora tem linha em workspace_members com seu UUID canônico
+SELECT is(
+    (SELECT user_id FROM public.workspace_members WHERE workspace_id = (SELECT ws_alice FROM test_vars) AND user_id = '44444444-4444-4444-4444-444444444444'::UUID),
+    '44444444-4444-4444-4444-444444444444'::UUID,
+    'Membro gravado possui o UUID canônico exato de Charlie'
+);
+
+-- 2.9. Tentativa de adicionar o mesmo usuário novamente é rejeitada
+SELECT throws_ok(
+    'SELECT fn_add_workspace_member((SELECT ws_alice FROM test_vars), ''charlie@test.com'', ''member'')',
+    'O usuário informado já é membro deste workspace.',
+    'Adição duplicada do mesmo membro é rejeitada'
+);
+
+-- 2.10. Tentativa de adicionar e-mail inexistente é rejeitada com mensagem clara
+SELECT throws_ok(
+    'SELECT fn_add_workspace_member((SELECT ws_alice FROM test_vars), ''inexistente@test.com'', ''member'')',
+    'Nenhum usuário cadastrado foi encontrado com o e-mail: inexistente@test.com',
+    'E-mail não cadastrado em profiles é rejeitado'
+);
+
 -- 3. Autenticar como BOB (request.jwt.claim.sub = Bob)
 SET LOCAL "request.jwt.claim.sub" = '22222222-2222-2222-2222-222222222222';
 SET LOCAL role = 'authenticated';
@@ -117,6 +145,13 @@ SELECT throws_ok(
     '42501',
     NULL,
     'Usuário anônimo não tem permissão para consultar contas bancárias'
+);
+
+SELECT throws_ok(
+    'SELECT public.fn_add_workspace_member(''00000000-0000-0000-0000-000000000001''::UUID, ''test@test.com'', ''member'')',
+    '42501',
+    NULL,
+    'Usuário anônimo não tem permissão para executar fn_add_workspace_member'
 );
 
 SELECT * FROM finish();

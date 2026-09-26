@@ -29,8 +29,8 @@ export function mapDomainToAccountInsert(
     name: domain.name,
     type: domain.type,
     institution: domain.institution,
-    initial_balance: roundCurrency(domain.initial_balance),
-    current_balance: roundCurrency(domain.current_balance),
+    initial_balance: domain.initial_balance !== undefined ? roundCurrency(domain.initial_balance) : (undefined as any),
+    current_balance: domain.current_balance !== undefined ? roundCurrency(domain.current_balance) : (undefined as any),
     color: domain.color,
     active: domain.active,
   };

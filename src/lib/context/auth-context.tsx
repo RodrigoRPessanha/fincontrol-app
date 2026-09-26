@@ -18,7 +18,7 @@ export interface AuthContextType {
   dataMode: 'local' | 'supabase';
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function mapSupabaseUser(sbUser: User): UserProfile {
   return {
@@ -305,4 +305,8 @@ export function useAuth() {
     throw new Error('useAuth deve ser usado dentro de um AuthProvider');
   }
   return context;
+}
+
+export function useOptionalAuth() {
+  return useContext(AuthContext);
 }

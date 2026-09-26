@@ -9,15 +9,15 @@ console.log('================================================================\n'
 try {
   const env = { ...process.env, TEST_CLOUD: 'true' };
   execSync(
-    'cmd /c npx vitest run src/lib/__tests__/repositories/cloud-repository.integration.test.ts',
+    'cmd /c npx vitest run src/lib/__tests__/repositories/cloud-repository.integration.test.ts src/lib/__tests__/finance-provider/cloud-provider.integration.test.tsx',
     {
       stdio: 'inherit',
       cwd: process.cwd(),
       env,
     }
   );
-  console.log('\n[PASS] Todos os testes de integração do repositório no Supabase Cloud passaram com sucesso!');
+  console.log('\n[PASS] Todos os testes de integração do repositório e Provider no Supabase Cloud passaram com sucesso!');
 } catch (err) {
-  console.error('\n[FAIL] Falha na execução dos testes de integração do repositório no Supabase Cloud.');
+  console.error('\n[FAIL] Falha na execução dos testes de integração no Supabase Cloud.');
   process.exit(1);
 }
