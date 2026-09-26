@@ -55,18 +55,24 @@ npm run start
 
 ---
 
-## 🗄️ Configuração do Banco de Dados Supabase
+## 🗄️ Configuração do Banco de Dados Supabase (V38)
 
-1. Crie um projeto no [Supabase](https://supabase.com).
-2. Abra o **SQL Editor** no painel do Supabase.
-3. Execute as migrations em ordem sequencial:
-   - Execute [`supabase/migrations/001_initial_schema.sql`](./supabase/migrations/001_initial_schema.sql) (Schema base, RLS e RPCs).
-   - Execute [`supabase/migrations/002_v5_hardening.sql`](./supabase/migrations/002_v5_hardening.sql) (Hardening cross-workspace e lock de ownership).
-   - Execute [`supabase/migrations/003_v7_hardening.sql`](./supabase/migrations/003_v7_hardening.sql) (Coluna paid_installments_count e triggers).
-   - Execute [`supabase/migrations/004_v9_rpc_and_schema_alignment.sql`](./supabase/migrations/004_v9_rpc_and_schema_alignment.sql) (Alinhamento de RPCs de compra parcelada e compra 1x atômica).
-   - Execute [`supabase/migrations/005_v10_hardening.sql`](./supabase/migrations/005_v10_hardening.sql) (Fechamento de SECURITY DEFINER, triggers estruturais e check de intervalo).
-4. Crie um arquivo `.env.local` na raiz do projeto:
+1. Crie ou vincule seu projeto no [Supabase](https://supabase.com):
+```bash
+npx supabase link --project-ref seu-project-ref
+```
+
+2. Aplique as migrações (001 a 028) de forma atômica via Supabase CLI:
+```bash
+npx supabase db push --linked
+```
+
+3. Crie um arquivo `.env.local` na raiz do projeto (consulte `.env.example`):
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-chave-anon-aqui
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sua-chave-publica-aqui
+NEXT_PUBLIC_DATA_MODE=supabase
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
+
+4. Para instruções detalhadas de CI/CD (GitHub Actions), ambientes Staging/Produção e deploy na Vercel, consulte o [DEPLOYMENT.md](./DEPLOYMENT.md).

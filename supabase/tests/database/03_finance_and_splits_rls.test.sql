@@ -6,14 +6,14 @@ SELECT plan(13);
 
 -- 1. Setup: 4 usuários com papéis distintos no mesmo workspace
 INSERT INTO auth.users (id, aud, role, email)
-VALUES 
+VALUES
     ('10000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'owner@test.com'),
     ('10000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'admin@test.com'),
     ('10000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'member@test.com'),
     ('10000000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'viewer@test.com');
 
 CREATE TEMPORARY TABLE rbac_vars AS
-SELECT 
+SELECT
     (SELECT id FROM public.workspaces WHERE owner_id = '10000000-0000-0000-0000-000000000001' LIMIT 1) AS ws_id;
 GRANT ALL ON rbac_vars TO authenticated, anon;
 
@@ -74,9 +74,9 @@ SELECT lives_ok(
 
 -- 3.2. Member pode registrar acerto de contas via RPC
 SELECT lives_ok(
-    'SELECT fn_record_settlement((SELECT ws_id FROM rbac_vars), 
-        (SELECT id FROM public.workspace_members WHERE user_id = ''10000000-0000-0000-0000-000000000003'' AND workspace_id = (SELECT ws_id FROM rbac_vars)), 
-        (SELECT id FROM public.workspace_members WHERE user_id = ''10000000-0000-0000-0000-000000000002'' AND workspace_id = (SELECT ws_id FROM rbac_vars)), 
+    'SELECT fn_record_settlement((SELECT ws_id FROM rbac_vars),
+        (SELECT id FROM public.workspace_members WHERE user_id = ''10000000-0000-0000-0000-000000000003'' AND workspace_id = (SELECT ws_id FROM rbac_vars)),
+        (SELECT id FROM public.workspace_members WHERE user_id = ''10000000-0000-0000-0000-000000000002'' AND workspace_id = (SELECT ws_id FROM rbac_vars)),
         50.00)',
     'Member pode registrar acertos de contas via fn_record_settlement'
 );
@@ -111,7 +111,7 @@ SELECT lives_ok(
 
 -- 4.2. Admin pode gerenciar membros não-owners
 SELECT lives_ok(
-    'UPDATE public.workspace_members SET role = ''member'' 
+    'UPDATE public.workspace_members SET role = ''member''
      WHERE user_id = ''10000000-0000-0000-0000-000000000004'' AND workspace_id = (SELECT ws_id FROM rbac_vars)',
     'Admin pode atualizar papel de membros comuns'
 );

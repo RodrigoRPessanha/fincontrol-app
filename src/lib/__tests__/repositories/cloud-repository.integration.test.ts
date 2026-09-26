@@ -31,11 +31,15 @@ function getEnvConfig() {
 }
 
 function getServiceRoleKey(): string | null {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
   try {
-    const out = execSync(
-      'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json',
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    );
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows
+      ? 'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json'
+      : 'npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json';
+    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     const keys = JSON.parse(out);
     const sr = keys.find((k: any) => k.name === 'service_role' || k.tags?.includes('service_role'));
     return sr?.api_key ?? null;
@@ -1347,6 +1351,3 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     await repo.deleteCategory(category.id);
   });
 });
-
-
-

@@ -158,7 +158,7 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1 FROM public.workspace_members 
+            SELECT 1 FROM public.workspace_members
             WHERE id = v_member_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'O participante do rateio (%) não pertence ao workspace.', v_member_id;
@@ -245,7 +245,7 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1 FROM public.workspace_members 
+            SELECT 1 FROM public.workspace_members
             WHERE id = v_member_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'O participante do rateio (%) não pertence ao workspace.', v_member_id;

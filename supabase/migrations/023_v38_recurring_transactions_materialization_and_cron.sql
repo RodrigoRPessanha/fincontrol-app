@@ -88,7 +88,7 @@ DECLARE
     v_should_deactivate BOOLEAN;
     v_is_suspended BOOLEAN;
     v_suspended_reason TEXT;
-    
+
     -- Validações de entidades vinculadas
     v_acc_active BOOLEAN;
     v_cat_active BOOLEAN;
@@ -96,7 +96,7 @@ DECLARE
     v_pm_type TEXT;
     v_pm_card_id UUID;
     v_pm_acc_id UUID;
-    
+
     -- Cartão e fatura
     v_effective_card_id UUID;
     v_effective_account_id UUID;
@@ -141,7 +141,7 @@ BEGIN
           AND r.next_occurrence <= p_target_date
           AND (p_workspace_id IS NULL OR r.workspace_id = p_workspace_id)
           AND (
-              auth.uid() IS NULL 
+              auth.uid() IS NULL
               OR EXISTS (
                   SELECT 1 FROM public.workspace_members wm
                   WHERE wm.workspace_id = r.workspace_id

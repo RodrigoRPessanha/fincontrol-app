@@ -20,15 +20,15 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'transfers' AND column_name = 'idempotency_key'
     ) THEN
         ALTER TABLE public.transfers ADD COLUMN idempotency_key TEXT;
     END IF;
 END $$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_transfers_workspace_idempotency 
-    ON public.transfers(workspace_id, idempotency_key) 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transfers_workspace_idempotency
+    ON public.transfers(workspace_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
 -- Atualização da RPC fn_create_transfer com suporte a chave de idempotência
@@ -218,7 +218,7 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1 FROM public.workspace_members 
+            SELECT 1 FROM public.workspace_members
             WHERE id = v_member_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'O participante do rateio (%) não pertence ao workspace.', v_member_id;
@@ -312,7 +312,7 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1 FROM public.workspace_members 
+            SELECT 1 FROM public.workspace_members
             WHERE id = v_member_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'O participante do rateio (%) não pertence ao workspace.', v_member_id;
@@ -390,7 +390,7 @@ BEGIN
     END IF;
 
     IF p_paid_by_member_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM public.workspace_members 
+        SELECT 1 FROM public.workspace_members
         WHERE id = p_paid_by_member_id AND workspace_id = p_workspace_id
     ) THEN
         RAISE EXCEPTION 'Membro pagador informado não pertence ao workspace.';
@@ -530,7 +530,7 @@ BEGIN
     END IF;
 
     IF p_paid_by_member_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM public.workspace_members 
+        SELECT 1 FROM public.workspace_members
         WHERE id = p_paid_by_member_id AND workspace_id = p_workspace_id
     ) THEN
         RAISE EXCEPTION 'Membro pagador informado não pertence ao workspace.';

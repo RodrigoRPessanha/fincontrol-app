@@ -2239,6 +2239,3 @@ describe('LocalFinanceRepository', () => {
     expect(typeof defaultDateRes.created_transactions).toBe('number');
   });
 });
-
-
-

@@ -23,9 +23,9 @@ DECLARE
     v_splits_count INT;
 BEGIN
     IF NEW.amount <> OLD.amount THEN
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.transaction_splits 
+        FROM public.transaction_splits
         WHERE transaction_id = NEW.id;
 
         IF v_splits_count > 0 AND v_splits_total <> NEW.amount THEN
@@ -52,9 +52,9 @@ DECLARE
     v_splits_count INT;
 BEGIN
     IF NEW.total_amount <> OLD.total_amount THEN
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.purchase_splits 
+        FROM public.purchase_splits
         WHERE purchase_id = NEW.id;
 
         IF v_splits_count > 0 AND v_splits_total <> NEW.total_amount THEN
@@ -168,7 +168,7 @@ BEGIN
                 END IF;
 
                 IF NOT EXISTS (
-                    SELECT 1 FROM public.workspace_members 
+                    SELECT 1 FROM public.workspace_members
                     WHERE id = v_split.member_id AND workspace_id = p_workspace_id
                 ) THEN
                     RAISE EXCEPTION 'Membro do rateio não pertence ao workspace.';
@@ -294,7 +294,7 @@ BEGIN
                 END IF;
 
                 IF NOT EXISTS (
-                    SELECT 1 FROM public.workspace_members 
+                    SELECT 1 FROM public.workspace_members
                     WHERE id = v_split.member_id AND workspace_id = p_workspace_id
                 ) THEN
                     RAISE EXCEPTION 'Membro do rateio não pertence ao workspace.';
@@ -325,7 +325,7 @@ BEGIN
     -- 2. Reconciliação das parcelas (installments) e faturas vinculadas caso o total_amount tenha mudado
     IF v_new_amount <> v_old_purchase.total_amount THEN
         -- Soma dos valores das parcelas totalmente quitadas
-        SELECT 
+        SELECT
             COALESCE(SUM(amount), 0),
             COUNT(*)
         INTO v_fully_paid_amount, v_paid_count
@@ -351,11 +351,11 @@ BEGIN
         v_rem_inst := v_remaining_amount - (v_base_inst * v_unpaid_count);
         v_first_inst := v_base_inst + v_rem_inst;
 
-        FOR v_inst IN 
-            SELECT id, amount, paid_amount, due_date, credit_card_bill_id 
-            FROM public.installments 
+        FOR v_inst IN
+            SELECT id, amount, paid_amount, due_date, credit_card_bill_id
+            FROM public.installments
             WHERE purchase_id = p_purchase_id AND status <> 'paid' AND paid_amount < amount
-            ORDER BY installment_number ASC 
+            ORDER BY installment_number ASC
             FOR UPDATE
         LOOP
             v_inst_idx := v_inst_idx + 1;
@@ -375,10 +375,10 @@ BEGIN
             IF v_diff <> 0 AND v_inst.credit_card_bill_id IS NOT NULL THEN
                 UPDATE public.credit_card_bills
                 SET total_amount = total_amount + v_diff,
-                    status = CASE 
-                        WHEN paid_amount >= total_amount + v_diff AND total_amount + v_diff > 0 THEN 'paid' 
-                        WHEN paid_amount > 0 THEN 'partially_paid' 
-                        ELSE 'open' 
+                    status = CASE
+                        WHEN paid_amount >= total_amount + v_diff AND total_amount + v_diff > 0 THEN 'paid'
+                        WHEN paid_amount > 0 THEN 'partially_paid'
+                        ELSE 'open'
                     END
                 WHERE id = v_inst.credit_card_bill_id;
             END IF;

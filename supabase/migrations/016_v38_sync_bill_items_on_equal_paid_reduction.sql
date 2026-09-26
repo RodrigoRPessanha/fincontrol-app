@@ -73,7 +73,7 @@ BEGIN
                 END IF;
 
                 IF NOT EXISTS (
-                    SELECT 1 FROM public.workspace_members 
+                    SELECT 1 FROM public.workspace_members
                     WHERE id = v_split.member_id AND workspace_id = p_workspace_id
                 ) THEN
                     RAISE EXCEPTION 'Membro do rateio não pertence ao workspace.';
@@ -104,7 +104,7 @@ BEGIN
     -- 2. Reconciliação das parcelas (installments) e faturas vinculadas caso o total_amount tenha mudado
     IF v_new_amount <> v_old_purchase.total_amount THEN
         -- Soma dos valores das parcelas totalmente quitadas
-        SELECT 
+        SELECT
             COALESCE(SUM(amount), 0),
             COUNT(*)
         INTO v_fully_paid_amount, v_paid_count
@@ -130,11 +130,11 @@ BEGIN
         v_rem_inst := v_remaining_amount - (v_base_inst * v_unpaid_count);
         v_first_inst := v_base_inst + v_rem_inst;
 
-        FOR v_inst IN 
-            SELECT id, amount, paid_amount, due_date, credit_card_bill_id 
-            FROM public.installments 
+        FOR v_inst IN
+            SELECT id, amount, paid_amount, due_date, credit_card_bill_id
+            FROM public.installments
             WHERE purchase_id = p_purchase_id AND status <> 'paid' AND paid_amount < amount
-            ORDER BY installment_number ASC 
+            ORDER BY installment_number ASC
             FOR UPDATE
         LOOP
             v_inst_idx := v_inst_idx + 1;
@@ -170,10 +170,10 @@ BEGIN
 
                     UPDATE public.credit_card_bills
                     SET total_amount = total_amount + v_diff,
-                        status = CASE 
-                            WHEN v_bill_fully_paid THEN 'paid' 
-                            WHEN paid_amount > 0 THEN 'partially_paid' 
-                            ELSE 'open' 
+                        status = CASE
+                            WHEN v_bill_fully_paid THEN 'paid'
+                            WHEN paid_amount > 0 THEN 'partially_paid'
+                            ELSE 'open'
                         END,
                         paid_at = CASE
                             WHEN v_bill_fully_paid THEN COALESCE(paid_at, NOW())

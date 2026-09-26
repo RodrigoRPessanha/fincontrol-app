@@ -1,7 +1,7 @@
 # FinControl V38 - Matriz Exaustiva de Mapeamento do FinanceContext
 
-**Data da Homologação**: 20/09/2026  
-**Interface Mapeada**: `FinanceContextType` (`src/lib/context/finance-state.ts`)  
+**Data da Homologação**: 20/09/2026
+**Interface Mapeada**: `FinanceContextType` (`src/lib/context/finance-state.ts`)
 **Total de Entradas**: 54 propriedades e métodos públicos
 
 ---

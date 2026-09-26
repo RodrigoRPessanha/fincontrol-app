@@ -16,11 +16,11 @@
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'workspaces' AND column_name = 'tracking_mode'
     ) THEN
-        ALTER TABLE public.workspaces 
-            ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'full' 
+        ALTER TABLE public.workspaces
+            ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'full'
             CHECK (tracking_mode IN ('full', 'expense_tracker'));
     END IF;
 END $$;
@@ -36,10 +36,10 @@ ALTER TABLE public.payments ALTER COLUMN account_id DROP NOT NULL;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'payments' AND column_name = 'affects_balance'
     ) THEN
-        ALTER TABLE public.payments 
+        ALTER TABLE public.payments
             ADD COLUMN affects_balance BOOLEAN NOT NULL DEFAULT true;
     END IF;
 END $$;
@@ -70,7 +70,7 @@ BEGIN
     -- Valida Conta (apenas se informada)
     IF NEW.account_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.accounts 
+            SELECT 1 FROM public.accounts
             WHERE id = NEW.account_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A conta bancária do pagamento não pertence ao workspace informado.';
@@ -80,7 +80,7 @@ BEGIN
     -- Valida Transação vinculada
     IF NEW.transaction_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.transactions 
+            SELECT 1 FROM public.transactions
             WHERE id = NEW.transaction_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A transação do pagamento não pertence ao mesmo workspace.';
@@ -90,7 +90,7 @@ BEGIN
     -- Valida Fatura vinculada
     IF NEW.credit_card_bill_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.credit_card_bills 
+            SELECT 1 FROM public.credit_card_bills
             WHERE id = NEW.credit_card_bill_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A fatura do pagamento não pertence ao mesmo workspace.';
@@ -118,19 +118,19 @@ $$;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'transactions' AND column_name = 'paid_by_member_id'
     ) THEN
-        ALTER TABLE public.transactions 
+        ALTER TABLE public.transactions
             ADD COLUMN paid_by_member_id UUID REFERENCES public.workspace_members(id) ON DELETE SET NULL;
     END IF;
 
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'transactions' AND column_name = 'split_type'
     ) THEN
-        ALTER TABLE public.transactions 
-            ADD COLUMN split_type TEXT NOT NULL DEFAULT 'individual' 
+        ALTER TABLE public.transactions
+            ADD COLUMN split_type TEXT NOT NULL DEFAULT 'individual'
             CHECK (split_type IN ('individual', 'equal', 'full_other', 'custom'));
     END IF;
 END $$;
@@ -144,19 +144,19 @@ CREATE INDEX IF NOT EXISTS idx_transactions_split_type ON public.transactions(sp
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'purchases' AND column_name = 'paid_by_member_id'
     ) THEN
-        ALTER TABLE public.purchases 
+        ALTER TABLE public.purchases
             ADD COLUMN paid_by_member_id UUID REFERENCES public.workspace_members(id) ON DELETE SET NULL;
     END IF;
 
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'purchases' AND column_name = 'split_type'
     ) THEN
-        ALTER TABLE public.purchases 
-            ADD COLUMN split_type TEXT NOT NULL DEFAULT 'individual' 
+        ALTER TABLE public.purchases
+            ADD COLUMN split_type TEXT NOT NULL DEFAULT 'individual'
             CHECK (split_type IN ('individual', 'equal', 'full_other', 'custom'));
     END IF;
 END $$;

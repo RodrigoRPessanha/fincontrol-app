@@ -19,9 +19,9 @@ DECLARE
     v_splits_count INT;
 BEGIN
     IF NEW.amount <> OLD.amount THEN
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.transaction_splits 
+        FROM public.transaction_splits
         WHERE transaction_id = NEW.id;
 
         IF v_splits_count > 0 AND v_splits_total <> NEW.amount THEN
@@ -49,9 +49,9 @@ DECLARE
     v_splits_count INT;
 BEGIN
     IF NEW.total_amount <> OLD.total_amount THEN
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.purchase_splits 
+        FROM public.purchase_splits
         WHERE purchase_id = NEW.id;
 
         IF v_splits_count > 0 AND v_splits_total <> NEW.total_amount THEN

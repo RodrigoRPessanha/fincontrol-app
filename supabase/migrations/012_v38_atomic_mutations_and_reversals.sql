@@ -179,7 +179,7 @@ BEGIN
     IF v_payment.installment_id IS NOT NULL THEN
         UPDATE public.installments
         SET paid_amount = GREATEST(0, paid_amount - v_payment.amount),
-            status = CASE 
+            status = CASE
                 WHEN GREATEST(0, paid_amount - v_payment.amount) = 0 THEN 'pending'
                 ELSE 'partially_paid'
             END,

@@ -652,7 +652,7 @@ BEGIN
 
     FOR i IN 1..p_installment_count LOOP
         v_inst_date := p_purchase_date + ((i - 1) * INTERVAL '1 month');
-        
+
         IF i = 1 THEN
             v_current_inst_amount := v_first_installment_amount;
         ELSE
@@ -664,7 +664,7 @@ BEGIN
 
         IF p_credit_card_id IS NOT NULL THEN
             v_bill_id := fn_get_or_create_credit_card_bill(p_credit_card_id, v_inst_date);
-            
+
             SELECT due_date INTO v_bill_due_date FROM credit_card_bills WHERE id = v_bill_id;
 
             UPDATE credit_card_bills

@@ -6,14 +6,14 @@ SELECT plan(17);
 
 -- 1. Setup de fixtures temporárias: dois usuários distintos
 INSERT INTO auth.users (id, aud, role, email)
-VALUES 
+VALUES
     ('11111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'alice@test.com'),
     ('22222222-2222-2222-2222-222222222222', 'authenticated', 'authenticated', 'bob@test.com'),
     ('44444444-4444-4444-4444-444444444444', 'authenticated', 'authenticated', 'charlie@test.com');
 
 -- Obter os workspaces criados automaticamente pelo trigger handle_new_user
 CREATE TEMPORARY TABLE test_vars AS
-SELECT 
+SELECT
     (SELECT id FROM public.workspaces WHERE owner_id = '11111111-1111-1111-1111-111111111111' LIMIT 1) AS ws_alice,
     (SELECT id FROM public.workspaces WHERE owner_id = '22222222-2222-2222-2222-222222222222' LIMIT 1) AS ws_bob;
 GRANT SELECT ON test_vars TO authenticated;

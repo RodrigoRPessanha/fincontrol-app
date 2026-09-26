@@ -33,10 +33,11 @@ if (!supabaseUrl || !anonKey) {
 // Obtém a service_role key em memória diretamente da CLI autenticada (sem gravar em arquivo nem expor em logs)
 function getServiceRoleKey() {
   try {
-    const out = execSync(
-      'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json',
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    );
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows
+      ? 'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json'
+      : 'npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json';
+    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     const keys = JSON.parse(out);
     const sr = keys.find((k) => k.name === 'service_role' || k.tags?.includes('service_role'));
     if (!sr?.api_key) {
@@ -61,7 +62,10 @@ function runReadOnlySql(sql) {
   );
   fs.writeFileSync(tmpFile, sql, 'utf8');
   try {
-    const cmd = `cmd /c npx supabase db query --linked --file "${tmpFile}"`;
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows
+      ? `cmd /c npx supabase db query --linked --file "${tmpFile}"`
+      : `npx supabase db query --linked --file "${tmpFile}"`;
     const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     const jsonMatch = out.match(/\{[\s\S]*"rows"[\s\S]*\}/);
     if (jsonMatch) {

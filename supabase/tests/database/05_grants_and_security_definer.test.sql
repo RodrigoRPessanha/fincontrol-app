@@ -9,7 +9,7 @@ INSERT INTO auth.users (id, aud, role, email)
 VALUES ('30000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'transfer_owner@test.com');
 
 CREATE TEMPORARY TABLE transfer_vars AS
-SELECT 
+SELECT
     (SELECT id FROM public.workspaces WHERE owner_id = '30000000-0000-0000-0000-000000000001' LIMIT 1) AS ws_id,
     '30000000-0000-0000-0000-000000000010'::UUID AS acc1_id,
     '30000000-0000-0000-0000-000000000020'::UUID AS acc2_id;

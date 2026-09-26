@@ -1,7 +1,7 @@
 # FinControl V38 - Inventário Detalhado do Banco de Dados PostgreSQL
 
-**Data da Catalogação**: 20/09/2026  
-**Migrations Cobertas**: `001_initial_schema.sql` até `006_v38_schema_alignment.sql`  
+**Data da Catalogação**: 20/09/2026
+**Migrations Cobertas**: `001_initial_schema.sql` até `006_v38_schema_alignment.sql`
 **Escopo**: Schema `public`
 
 ---

@@ -65,7 +65,7 @@ INSERT INTO auth.users (id, aud, role, email)
 VALUES ('70000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'rec_owner@test.com');
 
 CREATE TEMPORARY TABLE rec_vars AS
-SELECT 
+SELECT
     (SELECT id FROM public.workspaces WHERE owner_id = '70000000-0000-0000-0000-000000000001' LIMIT 1) AS ws_id,
     '70000000-0000-0000-0000-000000000010'::UUID AS acc_id,
     '70000000-0000-0000-0000-000000000011'::UUID AS inactive_acc_id,

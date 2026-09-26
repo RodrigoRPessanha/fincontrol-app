@@ -57,7 +57,7 @@ BEGIN
 
             UPDATE public.credit_card_bills
             SET total_amount = v_new_bill_total,
-                status = CASE 
+                status = CASE
                     WHEN v_bill_fully_paid THEN 'paid'
                     WHEN paid_amount > 0 THEN 'partially_paid'
                     ELSE 'open'
@@ -177,7 +177,7 @@ BEGIN
 
         UPDATE public.credit_card_bills
         SET total_amount = v_new_bill_total,
-            status = CASE 
+            status = CASE
                 WHEN v_bill_fully_paid THEN 'paid'
                 WHEN paid_amount > 0 THEN 'partially_paid'
                 ELSE 'open'

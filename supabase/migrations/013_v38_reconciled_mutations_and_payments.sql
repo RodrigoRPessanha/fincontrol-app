@@ -110,7 +110,7 @@ BEGIN
 
             UPDATE public.installments
             SET paid_amount = v_remaining_paid,
-                status = CASE 
+                status = CASE
                     WHEN v_remaining_paid >= v_inst.amount THEN 'paid'
                     WHEN v_remaining_paid > 0 THEN 'partially_paid'
                     ELSE 'pending'
@@ -481,9 +481,9 @@ BEGIN
     END IF;
 
     IF NEW.amount <> OLD.amount THEN
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.transaction_splits 
+        FROM public.transaction_splits
         WHERE transaction_id = NEW.id;
 
         IF v_splits_count > 0 AND v_splits_total <> NEW.amount THEN
@@ -514,9 +514,9 @@ BEGIN
     END IF;
 
     IF NEW.total_amount <> OLD.total_amount THEN
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.purchase_splits 
+        FROM public.purchase_splits
         WHERE purchase_id = NEW.id;
 
         IF v_splits_count > 0 AND v_splits_total <> NEW.total_amount THEN
@@ -627,9 +627,9 @@ BEGIN
         PERFORM public.fn_set_transaction_splits(p_workspace_id, p_transaction_id, p_splits);
     ELSE
         -- Se não foram fornecidos splits mas já existiam splits e o amount mudou, valida conservação
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.transaction_splits 
+        FROM public.transaction_splits
         WHERE transaction_id = p_transaction_id;
 
         IF v_splits_count > 0 AND v_splits_total <> v_new_amount THEN
@@ -713,9 +713,9 @@ BEGIN
     IF p_splits IS NOT NULL THEN
         PERFORM public.fn_set_purchase_splits(p_workspace_id, p_purchase_id, p_splits);
     ELSE
-        SELECT COALESCE(SUM(amount), 0), COUNT(*) 
+        SELECT COALESCE(SUM(amount), 0), COUNT(*)
         INTO v_splits_total, v_splits_count
-        FROM public.purchase_splits 
+        FROM public.purchase_splits
         WHERE purchase_id = p_purchase_id;
 
         IF v_splits_count > 0 AND v_splits_total <> v_new_amount THEN

@@ -6,7 +6,7 @@ SELECT plan(24);
 
 -- 1. Setup: Workspace com 2 membros e transação/compra com IDs determinísticos
 INSERT INTO auth.users (id, aud, role, email)
-VALUES 
+VALUES
     ('20000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'split_owner@test.com'),
     ('20000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'split_member@test.com');
 
@@ -18,7 +18,7 @@ VALUES (
 );
 
 CREATE TEMPORARY TABLE split_vars AS
-SELECT 
+SELECT
     ws.id AS ws_id,
     (SELECT id FROM public.workspace_members WHERE user_id = '20000000-0000-0000-0000-000000000001' AND workspace_id = ws.id) AS m1_id,
     (SELECT id FROM public.workspace_members WHERE user_id = '20000000-0000-0000-0000-000000000002' AND workspace_id = ws.id) AS m2_id,
@@ -46,7 +46,7 @@ SET LOCAL role = 'authenticated';
 
 -- 2.1. Bloqueio de INSERT direto em transaction_splits
 SELECT throws_ok(
-    'INSERT INTO public.transaction_splits (workspace_id, transaction_id, member_id, amount) 
+    'INSERT INTO public.transaction_splits (workspace_id, transaction_id, member_id, amount)
      SELECT ws_id, tx_id, m1_id, 999.00 FROM split_vars',
     '42501',
     NULL,
@@ -55,7 +55,7 @@ SELECT throws_ok(
 
 -- 2.2. Bloqueio de INSERT direto em purchase_splits
 SELECT throws_ok(
-    'INSERT INTO public.purchase_splits (workspace_id, purchase_id, member_id, amount) 
+    'INSERT INTO public.purchase_splits (workspace_id, purchase_id, member_id, amount)
      SELECT ws_id, pur_id, m1_id, 999.00 FROM split_vars',
     '42501',
     NULL,
@@ -234,4 +234,3 @@ SELECT throws_ok(
 SELECT * FROM finish();
 SELECT extensions._get('curr_test')::int AS ran, extensions._get('plan')::int AS planned, extensions.num_failed()::int AS failed, ARRAY(SELECT * FROM extensions.finish()) AS finish_diagnostics;
 ROLLBACK;
-

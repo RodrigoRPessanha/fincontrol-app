@@ -159,14 +159,14 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (
-        SELECT 1 FROM public.workspace_members 
+        SELECT 1 FROM public.workspace_members
         WHERE id = p_from_member_id AND workspace_id = p_workspace_id
     ) THEN
         RAISE EXCEPTION 'Membro pagador (from_member_id) não pertence ao workspace informado.';
     END IF;
 
     IF NOT EXISTS (
-        SELECT 1 FROM public.workspace_members 
+        SELECT 1 FROM public.workspace_members
         WHERE id = p_to_member_id AND workspace_id = p_workspace_id
     ) THEN
         RAISE EXCEPTION 'Membro recebedor (to_member_id) não pertence ao workspace informado.';
@@ -174,7 +174,7 @@ BEGIN
 
     IF p_payment_account_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.accounts 
+            SELECT 1 FROM public.accounts
             WHERE id = p_payment_account_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'Conta bancária informada não pertence ao workspace.';
@@ -265,7 +265,7 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1 FROM public.workspace_members 
+            SELECT 1 FROM public.workspace_members
             WHERE id = v_member_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'O participante do rateio (%) não pertence ao workspace.', v_member_id;
@@ -352,7 +352,7 @@ BEGIN
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1 FROM public.workspace_members 
+            SELECT 1 FROM public.workspace_members
             WHERE id = v_member_id AND workspace_id = p_workspace_id
         ) THEN
             RAISE EXCEPTION 'O participante do rateio (%) não pertence ao workspace.', v_member_id;
@@ -429,7 +429,7 @@ BEGIN
     END IF;
 
     IF p_paid_by_member_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM public.workspace_members 
+        SELECT 1 FROM public.workspace_members
         WHERE id = p_paid_by_member_id AND workspace_id = p_workspace_id
     ) THEN
         RAISE EXCEPTION 'Membro pagador informado não pertence ao workspace.';
@@ -574,7 +574,7 @@ BEGIN
     END IF;
 
     IF p_paid_by_member_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM public.workspace_members 
+        SELECT 1 FROM public.workspace_members
         WHERE id = p_paid_by_member_id AND workspace_id = p_workspace_id
     ) THEN
         RAISE EXCEPTION 'Membro pagador informado não pertence ao workspace.';
