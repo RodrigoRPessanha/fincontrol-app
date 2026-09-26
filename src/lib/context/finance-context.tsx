@@ -221,6 +221,72 @@ function applyConfirmedEntities(
   return next;
 }
 
+function mergeSnapshotWithPendingState(
+  snapshot: FinanceState,
+  currentState: FinanceState,
+  pendingIds: Map<string, number>
+): FinanceState {
+  if (pendingIds.size === 0) return snapshot;
+
+  const merged: FinanceState = { ...snapshot };
+  const keys: (keyof FinanceState)[] = [
+    'allAccounts',
+    'allCreditCards',
+    'allCreditCardBills',
+    'allPaymentMethods',
+    'allCategories',
+    'allTransactions',
+    'allPurchases',
+    'allInstallments',
+    'allPayments',
+    'allTransfers',
+    'allRecurring',
+    'allBudgets',
+    'allGoals',
+    'allSettlements',
+    'allWorkspaceMembers',
+  ];
+
+  for (let k = 0; k < keys.length; k++) {
+    const key = keys[k];
+    const remoteList = snapshot[key] as { id: string }[];
+    const currentList = currentState[key] as { id: string }[];
+    const currentMap = new Map<string, { id: string }>();
+    for (let i = 0; i < currentList.length; i++) {
+      currentMap.set(currentList[i].id, currentList[i]);
+    }
+
+    const resultList: { id: string }[] = [];
+    const includedIds = new Set<string>();
+
+    for (let i = 0; i < remoteList.length; i++) {
+      const item = remoteList[i];
+      if (pendingIds.has(item.id)) {
+        const currentItem = currentMap.get(item.id);
+        if (currentItem) {
+          resultList.push(currentItem);
+          includedIds.add(item.id);
+        }
+      } else {
+        resultList.push(item);
+        includedIds.add(item.id);
+      }
+    }
+
+    for (let i = 0; i < currentList.length; i++) {
+      const item = currentList[i];
+      if (pendingIds.has(item.id) && !includedIds.has(item.id)) {
+        resultList.push(item);
+        includedIds.add(item.id);
+      }
+    }
+
+    (merged as any)[key] = resultList;
+  }
+
+  return merged;
+}
+
 export function FinanceProvider({ children, repository, initialDataMode, initialWorkspaceId }: FinanceProviderProps) {
   const auth = useOptionalAuth();
 
@@ -250,6 +316,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const [error, setError] = useState<Error | null>(null);
   const savingCountRef = useRef(0);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingEntityIdsRef = useRef<Map<string, number>>(new Map());
 
   const clearError = useCallback(() => {
     setError(null);
@@ -384,6 +451,9 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
       setError(null);
       try {
         const userId = auth?.user?.id;
+        if (!userId) {
+          throw new Error('Sessão não encontrada: usuário não autenticado no modo Supabase.');
+        }
         let workspaces = await effectiveRepository.getWorkspaces(userId);
 
         if (!isMounted) return;
@@ -391,7 +461,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         if (!workspaces || workspaces.length === 0) {
           const created = await effectiveRepository.createWorkspace({
             name: 'Meu Workspace',
-            owner_id: userId || 'usr-1',
+            owner_id: userId,
             currency: 'BRL',
             tracking_mode: 'full',
           });
@@ -463,7 +533,8 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
       if (dataMode === 'supabase') {
         const targetId = stateRef.current.activeWorkspaceId;
         const snapshot = await effectiveRepository.loadSnapshot(targetId);
-        commitState(snapshot);
+        const reconciled = mergeSnapshotWithPendingState(snapshot, stateRef.current, pendingEntityIdsRef.current);
+        commitState(reconciled);
       } else {
         const { snapshot } = loadFinanceSnapshot(localStorage);
         commitState(snapshot);
@@ -478,6 +549,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   }, [dataMode, effectiveRepository, commitState]);
 
   // Contrato desacoplado de dependências para actions de domínio
+  const currentUserId = auth?.user?.id;
   const deps: FinanceActionDeps = useMemo(
     () => ({
       getState: () => stateRef.current,
@@ -489,14 +561,28 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
       },
       generateId: (prefix: string) => generateId(prefix, dataMode),
       now: () => new Date(),
+      getUserId: () => {
+        if (dataMode === 'supabase') {
+          return currentUserId as string;
+        }
+        return currentUserId || 'usr-1';
+      },
     }),
-    [commitState, dataMode]
+    [commitState, dataMode, currentUserId]
   );
 
   const idMapRef = useRef<Map<string, string>>(new Map());
   const resolveCanonicalId = useCallback(<T extends string | null | undefined>(id: T): T => {
     if (!id) return id;
     return (idMapRef.current.get(id) ?? id) as T;
+  }, []);
+
+  const registerCanonicalId = useCallback((tempId: string, canonicalId: string) => {
+    idMapRef.current.set(tempId, canonicalId);
+    const count = pendingEntityIdsRef.current.get(tempId);
+    if (count) {
+      pendingEntityIdsRef.current.set(canonicalId, count);
+    }
   }, []);
 
   const pendingMutationsCountRef = useRef(0);
@@ -509,10 +595,14 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const runMutation = useCallback(
     <T,>(
       localAction: () => T,
-      remotePersist?: (result: T) => Promise<unknown>,
+      remotePersist?: (result: T, confirmPending?: () => void) => Promise<unknown>,
       targetWorkspaceId?: string,
       entityId?: string
     ): T => {
+      if (dataMode === 'supabase' && !currentUserId) {
+        throw new Error('Operação não permitida: usuário não autenticado no modo Supabase.');
+      }
+
       if (dataMode === 'local' || !remotePersist) {
         return localAction();
       }
@@ -534,6 +624,28 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         changedIds.add((result as any).id);
       }
 
+      for (const id of changedIds) {
+        pendingEntityIdsRef.current.set(id, (pendingEntityIdsRef.current.get(id) || 0) + 1);
+      }
+
+      let isPendingConfirmed = false;
+      const confirmPending = () => {
+        if (isPendingConfirmed) return;
+        isPendingConfirmed = true;
+        for (const id of changedIds) {
+          const canonical = idMapRef.current.get(id);
+          const idsToClean = canonical && canonical !== id ? [id, canonical] : [id];
+          for (const targetId of idsToClean) {
+            const currentCount = pendingEntityIdsRef.current.get(targetId) || 1;
+            if (currentCount <= 1) {
+              pendingEntityIdsRef.current.delete(targetId);
+            } else {
+              pendingEntityIdsRef.current.set(targetId, currentCount - 1);
+            }
+          }
+        }
+      };
+
       savingCountRef.current += 1;
       pendingMutationsCountRef.current += 1;
       setIsSaving(true);
@@ -542,7 +654,8 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
       mutationQueueRef.current = mutationQueueRef.current
         .then(async () => {
           try {
-            await remotePersist(result);
+            await remotePersist(result, confirmPending);
+            confirmPending();
             hasSuccessfulMutationsRef.current = true;
             if (rollbackBaseStateRef.current) {
               rollbackBaseStateRef.current = applyConfirmedEntities(
@@ -563,6 +676,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
               failedEntityIdsRef.current.add(id);
             }
           } finally {
+            confirmPending();
             pendingMutationsCountRef.current = Math.max(0, pendingMutationsCountRef.current - 1);
             // Se todas as mutações da fila terminaram e houve alguma falha, reconcilia o workspace ativo
             if (pendingMutationsCountRef.current === 0) {
@@ -623,7 +737,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
 
       return result;
     },
-    [dataMode, effectiveRepository, commitState]
+    [dataMode, effectiveRepository, commitState, currentUserId]
   );
 
   const activeWorkspace = useMemo(() => {
@@ -741,15 +855,23 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     [allSettlements, activeWorkspace.id]
   );
 
-  // Executa processamento de recorrências SOMENTE em modo local após a conclusão da hidratação local e se canPersist = true
+  // Executa processamento de recorrências
   const processPendingRecurring = useCallback(() => {
     if (!isLoaded) return;
-    if (dataMode === 'supabase') return;
+    if (dataMode === 'supabase') {
+      effectiveRepository
+        .materializeRecurring(stateRef.current.activeWorkspaceId)
+        .then(() => refreshData())
+        .catch((err) => {
+          console.error('Falha ao materializar recorrências no Supabase:', err);
+        });
+      return;
+    }
     if (!canPersistRef.current) {
       throw new Error('Operação bloqueada: o aplicativo está em modo somente leitura para proteger dados de uma versão futura.');
     }
     actions.processPendingRecurring(deps);
-  }, [deps, isLoaded, dataMode]);
+  }, [deps, isLoaded, dataMode, effectiveRepository, refreshData]);
 
   useEffect(() => {
     if (!isLoaded || !canPersistRef.current || dataMode === 'supabase') return;
@@ -1336,9 +1458,12 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const handleAddRecurring = useCallback(
     (data: Omit<RecurringTransaction, 'id' | 'workspace_id' | 'created_at'>) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
+      // No modo Supabase, não dispara processPendingRecurring de forma prematura durante a ação otimista
+      // para evitar corrida entre a recarga do snapshot e a persistência remota
+      const onProcessed = dataMode === 'supabase' ? () => {} : processPendingRecurring;
       return runMutation(
-        () => actions.addRecurring(deps, data, processPendingRecurring),
-        async (res) => {
+        () => actions.addRecurring(deps, data, onProcessed),
+        async (res, confirmPending) => {
           const saved = await effectiveRepository.saveRecurring({
             ...data,
             account_id: resolveCanonicalId(data.account_id),
@@ -1347,45 +1472,65 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
             credit_card_id: resolveCanonicalId(data.credit_card_id),
             workspace_id: targetWorkspaceId,
           });
-          idMapRef.current.set(res.id, saved.id);
+          registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
           if (current.activeWorkspaceId === targetWorkspaceId) {
             commitState({
               ...current,
-              allRecurring: current.allRecurring.map((r) => (r.id === res.id ? saved : r)),
+              allRecurring: current.allRecurring.map((r) => (r.id === res.id ? { ...r, id: saved.id } : r)),
             });
           }
+          await effectiveRepository.materializeRecurring(targetWorkspaceId);
+          confirmPending?.();
+          await refreshData();
         },
         targetWorkspaceId
       );
     },
-    [deps, processPendingRecurring, effectiveRepository, runMutation, commitState, resolveCanonicalId]
+    [deps, processPendingRecurring, effectiveRepository, runMutation, commitState, resolveCanonicalId, registerCanonicalId, dataMode, refreshData]
   );
 
   const handleToggleRecurring = useCallback(
     (id: string) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      const canonicalId = resolveCanonicalId(id);
+      const onProcessed = dataMode === 'supabase' ? () => {} : processPendingRecurring;
       return runMutation(
-        () => actions.toggleRecurring(deps, id, processPendingRecurring),
-        () => {
-          const item = stateRef.current.allRecurring.find((r) => r.id === id)!;
-          return effectiveRepository.saveRecurring({ ...item, id: canonicalId, workspace_id: targetWorkspaceId });
+        () => actions.toggleRecurring(deps, id, onProcessed),
+        async (toggledItem, confirmPending) => {
+          if (!toggledItem) return;
+          const canonicalId = resolveCanonicalId(id);
+          const currentItem = stateRef.current.allRecurring.find(
+            (r) => r.id === canonicalId || r.id === id
+          ) ?? toggledItem;
+          await effectiveRepository.saveRecurring({
+            ...currentItem,
+            id: canonicalId,
+            account_id: resolveCanonicalId(currentItem.account_id),
+            category_id: resolveCanonicalId(currentItem.category_id),
+            payment_method_id: resolveCanonicalId(currentItem.payment_method_id),
+            credit_card_id: resolveCanonicalId(currentItem.credit_card_id),
+            workspace_id: targetWorkspaceId,
+          });
+          await effectiveRepository.materializeRecurring(targetWorkspaceId);
+          confirmPending?.();
+          await refreshData();
         },
         targetWorkspaceId,
         id
       );
     },
-    [deps, processPendingRecurring, effectiveRepository, runMutation, resolveCanonicalId]
+    [deps, processPendingRecurring, effectiveRepository, runMutation, resolveCanonicalId, dataMode, refreshData]
   );
 
   const handleDeleteRecurring = useCallback(
     (id: string) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      const canonicalId = resolveCanonicalId(id);
       return runMutation(
         () => actions.deleteRecurring(deps, id),
-        () => effectiveRepository.deleteRecurring(canonicalId),
+        async () => {
+          const canonicalId = resolveCanonicalId(id);
+          await effectiveRepository.deleteRecurring(canonicalId);
+        },
         targetWorkspaceId,
         id
       );

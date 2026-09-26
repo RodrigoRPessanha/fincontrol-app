@@ -1243,6 +1243,109 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     const instsAfterDel = await repo.getInstallments(purchase.id);
     expect(instsAfterDel.length).toBe(0);
   });
+
+  it('24. materializa recorrências agendadas via RPC idempotente com skipping de concorrência e vinculação a cartão/fatura no staging', async () => {
+    // 1. Cria cartão de crédito e categoria para os testes de recorrência
+    const card = await repo.saveCreditCard({
+      workspace_id: testWorkspaceId,
+      name: 'Cartão Recorrência Cloud',
+      institution: 'StagingBank',
+      credit_limit: 3000,
+      closing_day: 10,
+      due_day: 20,
+      color: '#10b981',
+      active: true,
+    });
+
+    const category = await repo.saveCategory({
+      workspace_id: testWorkspaceId,
+      name: 'Assinaturas Cloud',
+      type: 'expense',
+      color: '#3b82f6',
+      icon: 'sparkles',
+      active: true,
+    });
+
+    // 2. Cria regra 1: Despesa bancária mensal
+    const recBank = await repo.saveRecurring({
+      workspace_id: testWorkspaceId,
+      description: 'Internet Fibra Rec Cloud',
+      amount: 120,
+      type: 'expense',
+      frequency: 'monthly',
+      start_date: '2026-02-01',
+      next_occurrence: '2026-02-01',
+      account_id: testAccountId,
+      category_id: category.id,
+      auto_create: true,
+      active: true,
+    });
+
+    // 3. Cria regra 2: Despesa em cartão mensal
+    const recCard = await repo.saveRecurring({
+      workspace_id: testWorkspaceId,
+      description: 'Streaming 4K Rec Cloud',
+      amount: 55,
+      type: 'expense',
+      frequency: 'monthly',
+      start_date: '2026-02-01',
+      next_occurrence: '2026-02-01',
+      credit_card_id: card.id,
+      category_id: category.id,
+      auto_create: true,
+      active: true,
+    });
+
+    // 4. Executa materialização remota via RPC para a data 2026-02-01
+    const res = await repo.materializeRecurring(testWorkspaceId, '2026-02-01');
+    expect(res.created_transactions).toBeGreaterThanOrEqual(2);
+
+    // 5. Valida que a transação bancária foi materializada com vínculo à recorrência
+    const allTxs = await repo.getTransactions(testWorkspaceId);
+    const bankTx = allTxs.find((t) => t.recurring_transaction_id === recBank.id);
+    expect(bankTx).toBeDefined();
+    expect(bankTx?.amount).toBe(120);
+    expect(bankTx?.account_id).toBe(testAccountId);
+    expect(bankTx?.category_id).toBe(category.id);
+    expect(bankTx?.status).toBe('pending');
+
+    // 6. Valida que a transação do cartão foi vinculada à fatura e a fatura foi incrementada
+    const cardTx = allTxs.find((t) => t.recurring_transaction_id === recCard.id);
+    expect(cardTx).toBeDefined();
+    expect(cardTx?.amount).toBe(55);
+    expect(cardTx?.credit_card_id).toBe(card.id);
+    expect(cardTx?.credit_card_bill_id).toBeDefined();
+
+    const bills = await repo.getCreditCardBills(card.id);
+    const bill = bills.find((b) => b.id === cardTx?.credit_card_bill_id);
+    expect(bill).toBeDefined();
+    expect(bill?.total_amount).toBeGreaterThanOrEqual(55);
+
+    // 7. Valida avanço de next_occurrence nas regras de recorrência
+    const recurrings = await repo.getRecurring(testWorkspaceId);
+    const updatedRecBank = recurrings.find((r) => r.id === recBank.id);
+    expect(updatedRecBank?.next_occurrence).toBe('2026-03-01');
+
+    // 8. Idempotência estrita: reexecução na mesma data não gera transações duplicadas
+    const reRes = await repo.materializeRecurring(testWorkspaceId, '2026-02-01');
+    expect(reRes.created_transactions).toBe(0);
+
+    const txsAfterRe = await repo.getTransactions(testWorkspaceId);
+    const bankTxsCount = txsAfterRe.filter((t) => t.recurring_transaction_id === recBank.id).length;
+    expect(bankTxsCount).toBe(1);
+
+    // 8.1. Rejeição de target_date arbitrariamente no futuro (> 30 dias) para usuário autenticado
+    await expect(
+      repo.materializeRecurring(testWorkspaceId, '2030-01-01')
+    ).rejects.toThrow(/não pode exceder 30 dias/i);
+
+    // 9. Limpeza das transações e regras criadas
+    if (bankTx) await repo.deleteTransaction(bankTx.id);
+    if (cardTx) await repo.deleteTransaction(cardTx.id);
+    await repo.deleteRecurring(recBank.id);
+    await repo.deleteRecurring(recCard.id);
+    await repo.deleteCategory(category.id);
+  });
 });
 
 

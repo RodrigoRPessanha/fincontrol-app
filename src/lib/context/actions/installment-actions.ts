@@ -78,6 +78,7 @@ export function createInstallmentPurchase(
 
   const effectiveSplitType: SplitType = data.split_type || 'individual';
   const effectiveSplits = effectiveSplitType !== 'individual' ? data.splits : undefined;
+  const userId = deps.getUserId();
 
   const newPurchase: Purchase = {
     ...data,
@@ -89,7 +90,7 @@ export function createInstallmentPurchase(
     paid_by_member_id: data.paid_by_member_id,
     split_type: effectiveSplitType,
     splits: effectiveSplits,
-    created_by: 'usr-1',
+    created_by: userId,
     created_at: deps.now().toISOString(),
   };
 
@@ -135,7 +136,7 @@ export function createInstallmentPurchase(
           amount: inst.amount,
           payment_date: inst.paid_at || inst.due_date,
           notes: 'Quitação prévia de parcela importada',
-          created_by: 'usr-1',
+          created_by: userId,
           created_at: deps.now().toISOString(),
           affects_balance: false,
         });

@@ -727,4 +727,253 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
     expect(b1NewAcc!.name).toBe('Conta Concorrente Renomeada Cloud');
     expect(b1NewAcc!.current_balance).toBe(2000);
   });
+
+  it('10. executa ciclo criação (insert sem id) -> alternância -> exclusão de recorrência no Cloud Staging reconciliando UUID canônico', async () => {
+    const browser = await mountCloudProvider(repo1, testUser1Id, testUser1Email);
+    const getCtx = browser.getCtx;
+
+    // 1. Criação com addRecurring (sem ID no payload) e toggleRecurring imediato na mesma regra
+    let created: any;
+    await act(async () => {
+      created = getCtx().addRecurring({
+        description: 'Assinatura Nuvem Staging V38',
+        amount: 49.90,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-01-01',
+        account_id: testAccountId,
+        auto_create: true,
+        active: true,
+      });
+
+      // Dispara imediatamente o toggle usando created.id temporário antes da conclusão da criação remota
+      getCtx().toggleRecurring(created.id);
+    });
+
+    // Aguarda o término da criação + alternância no Cloud Staging
+    for (let i = 0; i < 50; i++) {
+      if (!getCtx().isSaving && getCtx().recurring.some((r) => r.description === 'Assinatura Nuvem Staging V38')) break;
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 100));
+      });
+    }
+
+    expect(getCtx().isSaving).toBe(false);
+    expect(getCtx().error).toBeNull();
+
+    // 2. Valida no PostgreSQL real do Supabase Cloud que a regra foi inserida sem ID prévio e atualizada para active: false
+    const { data: dbRec, error: dbErr } = await adminClient
+      .from('recurring_transactions')
+      .select('*')
+      .eq('description', 'Assinatura Nuvem Staging V38')
+      .single();
+
+    expect(dbErr).toBeNull();
+    expect(dbRec).toBeDefined();
+    expect(dbRec!.id).toBeDefined();
+    expect(dbRec!.active).toBe(false);
+
+    // 3. Exclui a recorrência usando o ID retornado/temporário (reconciliando com o UUID canônico)
+    await act(async () => {
+      getCtx().deleteRecurring(created.id);
+    });
+
+    for (let i = 0; i < 50; i++) {
+      if (!getCtx().isSaving && !getCtx().recurring.some((r) => r.description === 'Assinatura Nuvem Staging V38')) break;
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 100));
+      });
+    }
+
+    expect(getCtx().isSaving).toBe(false);
+    expect(getCtx().error).toBeNull();
+
+    // 4. Confirma exclusão definitiva no PostgreSQL do Supabase Cloud Staging
+    const { data: dbAfter, error: dbAfterErr } = await adminClient
+      .from('recurring_transactions')
+      .select('*')
+      .eq('id', dbRec!.id);
+
+    expect(dbAfterErr).toBeNull();
+    expect(dbAfter?.length).toBe(0);
+  });
+
+  it('11. executa bootstrap controlado para novo usuário, cria workspace inicial via RPC com UUID real e comprova isolamento multilocatário sob RLS', async () => {
+    const timestamp = Date.now();
+    const rand = Math.random().toString(36).slice(2, 7);
+    const testUser3Email = `test.bootstrap.${timestamp}.${rand}@fincontrol.app`;
+    const testPassword3 = `TestPass!${timestamp}#Prov3`;
+
+    // 1. Cria Usuário 3 (usuário novo sem workspaces)
+    const { data: user3Res, error: err3 } = await adminClient.auth.admin.createUser({
+      email: testUser3Email,
+      password: testPassword3,
+      email_confirm: true,
+      user_metadata: { name: 'Bootstrap New User' },
+    });
+    expect(err3).toBeNull();
+    const testUser3Id = user3Res.user!.id;
+
+    try {
+      const env = getEnvConfig();
+      const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
+      const anonKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      const userClient3 = createClient<Database>(supabaseUrl, anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { error: login3Err } = await userClient3.auth.signInWithPassword({
+        email: testUser3Email,
+        password: testPassword3,
+      });
+      expect(login3Err).toBeNull();
+
+      const repo3 = new SupabaseFinanceRepository(userClient3);
+
+      // Confirma que o trigger handle_new_user do Supabase criou automaticamente o workspace inicial determinístico
+      const initialWs = await repo3.getWorkspaces(testUser3Id);
+      expect(initialWs.length).toBe(1);
+      expect(initialWs[0].name).toBe('Minhas Finanças');
+      expect(initialWs[0].owner_id).toBe(testUser3Id);
+      expect(initialWs[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+      // 2. Monta o FinanceProvider para Usuário 3 no modo Supabase
+      const browser3 = await mountCloudProvider(repo3, testUser3Id, testUser3Email, initialWs[0].id);
+      const getCtx3 = browser3.getCtx;
+
+      // Aguarda o carregamento do snapshot e das entidades criadas pelo trigger
+      for (let i = 0; i < 50; i++) {
+        if (getCtx3().isLoaded && getCtx3().workspaces.length > 0 && !getCtx3().isLoading) break;
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 100));
+        });
+      }
+
+      expect(getCtx3().isLoaded).toBe(true);
+      expect(getCtx3().workspaces.length).toBe(1);
+      const bootstrappedWs = getCtx3().workspaces[0];
+      expect(bootstrappedWs.name).toBe('Minhas Finanças');
+      expect(bootstrappedWs.owner_id).toBe(testUser3Id);
+      expect(getCtx3().activeWorkspace.id).toBe(bootstrappedWs.id);
+
+      // Confirma que o trigger populou categorias e conta padrão sem poluição de mock
+      expect(getCtx3().categories.length).toBeGreaterThanOrEqual(9);
+      expect(getCtx3().accounts.length).toBe(1);
+      expect(getCtx3().accounts[0].name).toBe('Conta Corrente Principal');
+
+      // 3. Usuário 3 cria nova categoria e transação dentro do seu workspace
+      let cat3: any;
+      await act(async () => {
+        cat3 = getCtx3().addCategory({
+          name: 'Alimentação Bootstrap',
+          icon: 'utensils',
+          color: '#f59e0b',
+          type: 'expense',
+          active: true,
+        });
+      });
+
+      for (let i = 0; i < 50; i++) {
+        if (!getCtx3().isSaving && getCtx3().categories.some((c) => c.name === 'Alimentação Bootstrap')) break;
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 100));
+        });
+      }
+      expect(getCtx3().isSaving).toBe(false);
+      expect(getCtx3().error).toBeNull();
+
+      let acc3: any;
+      await act(async () => {
+        acc3 = getCtx3().addAccount({
+          name: 'Conta do Usuário 3',
+          type: 'checking',
+          institution: 'Banco 3',
+          color: '#3b82f6',
+          initial_balance: 1000,
+          current_balance: 1000,
+          active: true,
+        });
+      });
+
+      for (let i = 0; i < 50; i++) {
+        if (!getCtx3().isSaving && getCtx3().accounts.some((a) => a.name === 'Conta do Usuário 3')) break;
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 100));
+        });
+      }
+      expect(getCtx3().isSaving).toBe(false);
+      const savedAcc3 = getCtx3().accounts.find((a) => a.name === 'Conta do Usuário 3')!;
+      const savedCat3 = getCtx3().categories.find((c) => c.name === 'Alimentação Bootstrap')!;
+
+      let tx3: any;
+      await act(async () => {
+        tx3 = getCtx3().addTransaction({
+          description: 'Despesa Privada Usuário 3',
+          amount: 150,
+          type: 'expense',
+          category_id: savedCat3.id,
+          account_id: savedAcc3.id,
+          transaction_date: '2026-09-26',
+          due_date: '2026-09-26',
+          status: 'paid',
+        });
+      });
+
+      for (let i = 0; i < 50; i++) {
+        if (!getCtx3().isSaving && getCtx3().transactions.some((t) => t.description === 'Despesa Privada Usuário 3')) break;
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 100));
+        });
+      }
+      expect(getCtx3().isSaving).toBe(false);
+      expect(getCtx3().error).toBeNull();
+
+      // Confirma no banco que o registro foi criado com o UUID real do Usuário 3
+      const { data: dbTx } = await adminClient
+        .from('transactions')
+        .select('*')
+        .eq('description', 'Despesa Privada Usuário 3')
+        .single();
+      expect(dbTx).toBeDefined();
+      expect(dbTx!.created_by).toBe(testUser3Id);
+
+      // 4. Verificação de Isolamento Multilocatário sob RLS
+      // (a) Usuário 1 (Browser 1) NÃO PODE ver o workspace nem as entidades do Usuário 3
+      const { data: u1ViewU3Ws } = await userClient1
+        .from('workspaces')
+        .select('*')
+        .eq('id', bootstrappedWs.id);
+      expect(u1ViewU3Ws?.length ?? 0).toBe(0);
+
+      const { data: u1ViewU3Acc } = await userClient1
+        .from('accounts')
+        .select('*')
+        .eq('workspace_id', bootstrappedWs.id);
+      expect(u1ViewU3Acc?.length ?? 0).toBe(0);
+
+      const { data: u1ViewU3Tx } = await userClient1
+        .from('transactions')
+        .select('*')
+        .eq('workspace_id', bootstrappedWs.id);
+      expect(u1ViewU3Tx?.length ?? 0).toBe(0);
+
+      // (b) Usuário 3 (Browser 3) NÃO PODE ver o workspace nem as entidades do Usuário 1
+      const { data: u3ViewU1Ws } = await userClient3
+        .from('workspaces')
+        .select('*')
+        .eq('id', testWorkspaceId);
+      expect(u3ViewU1Ws?.length ?? 0).toBe(0);
+
+      const { data: u3ViewU1Acc } = await userClient3
+        .from('accounts')
+        .select('*')
+        .eq('workspace_id', testWorkspaceId);
+      expect(u3ViewU1Acc?.length ?? 0).toBe(0);
+    } finally {
+      // 5. Teardown controlado do Usuário 3 no Supabase Cloud Staging
+      await adminClient.from('workspaces').delete().eq('owner_id', testUser3Id);
+      await adminClient.auth.admin.deleteUser(testUser3Id);
+    }
+  });
 });

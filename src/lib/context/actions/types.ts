@@ -5,4 +5,5 @@ export interface FinanceActionDeps {
   commit(next: FinanceState): void;
   generateId(prefix: string): string;
   now(): Date;
+  getUserId(): string;
 }

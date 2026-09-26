@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -751,6 +751,7 @@ export type Database = {
           start_date: string
           suspended_reason: string | null
           type: string
+          updated_at: string
           workspace_id: string
         }
         Insert: {
@@ -771,6 +772,7 @@ export type Database = {
           start_date: string
           suspended_reason?: string | null
           type: string
+          updated_at?: string
           workspace_id: string
         }
         Update: {
@@ -791,6 +793,7 @@ export type Database = {
           start_date?: string
           suspended_reason?: string | null
           type?: string
+          updated_at?: string
           workspace_id?: string
         }
         Relationships: [
@@ -1380,6 +1383,10 @@ export type Database = {
             }
             Returns: string
           }
+      fn_materialize_recurring_transactions: {
+        Args: { p_target_date?: string; p_workspace_id?: string }
+        Returns: Json
+      }
       fn_record_payment: {
         Args: {
           p_account_id: string
@@ -1418,6 +1425,15 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: number
+      }
+      fn_step_next_occurrence: {
+        Args: {
+          p_curr_date: string
+          p_frequency: string
+          p_interval_days?: number
+          p_start_date: string
+        }
+        Returns: string
       }
       fn_transfer_workspace_ownership: {
         Args: { p_new_owner_id: string; p_workspace_id: string }

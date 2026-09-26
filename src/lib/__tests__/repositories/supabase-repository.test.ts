@@ -2048,4 +2048,44 @@ describe('SupabaseFinanceRepository', () => {
     const goal = await repo.saveGoal({ id: 'goal-1' } as any);
     expect(goal.id).toBe('goal-1');
   });
+
+  it('materializes recurring transactions via RPC and handles responses and errors', async () => {
+    const { client } = createMockSupabaseClient();
+    const repo = new SupabaseFinanceRepository(client);
+
+    // Sucesso com retorno completo
+    (client.rpc as any).mockResolvedValueOnce({
+      data: {
+        created_transactions: 3,
+        suspended_recurring: 1,
+        processed_recurring: 4,
+        target_date: '2026-09-26',
+      },
+      error: null,
+    });
+
+    const res = await repo.materializeRecurring('ws-1', '2026-09-26');
+    expect(res.created_transactions).toBe(3);
+    expect(res.suspended_recurring).toBe(1);
+    expect(res.processed_recurring).toBe(4);
+    expect(client.rpc).toHaveBeenCalledWith('fn_materialize_recurring_transactions', {
+      p_workspace_id: 'ws-1',
+      p_target_date: '2026-09-26',
+    });
+
+    // Sucesso com retorno null (fallback seguro)
+    (client.rpc as any).mockResolvedValueOnce({
+      data: null,
+      error: null,
+    });
+    const fallbackRes = await repo.materializeRecurring();
+    expect(fallbackRes.created_transactions).toBe(0);
+
+    // Erro PostgREST
+    (client.rpc as any).mockResolvedValueOnce({
+      data: null,
+      error: { message: 'Erro na RPC', code: '42P01' },
+    });
+    await expect(repo.materializeRecurring('ws-1')).rejects.toThrow();
+  });
 });

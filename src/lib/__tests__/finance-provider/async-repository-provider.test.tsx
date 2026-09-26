@@ -294,6 +294,11 @@ function createMockRepository(snapshot: FinanceState) {
       created_at: '2026-01-01',
     } as any)),
     deleteSettlement: vi.fn().mockResolvedValue(undefined),
+    materializeRecurring: vi.fn().mockResolvedValue({
+      created_transactions: 0,
+      suspended_recurring: 0,
+      processed_recurring: 0,
+    }),
   };
   return repo;
 }
@@ -318,6 +323,18 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     vi.restoreAllMocks();
   });
 
+  const defaultAuth: AuthContextType = {
+    user: { id: 'usr-1', name: 'Rodrigo', email: 'rodrigo@test.com', created_at: '2026-01-01' },
+    isLoading: false,
+    login: vi.fn(),
+    signUp: vi.fn(),
+    resetPassword: vi.fn(),
+    updatePassword: vi.fn(),
+    logout: vi.fn(),
+    updateProfile: vi.fn(),
+    dataMode: 'supabase',
+  };
+
   async function mountTestProvider(
     props: Partial<FinanceProviderProps> = {},
     authContextValue?: Partial<AuthContextType>
@@ -332,22 +349,15 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     const root = createRoot(container);
     activeRoots.push(root);
 
-    const defaultAuth: AuthContextType = {
-      user: { id: 'usr-1', name: 'Rodrigo', email: 'rodrigo@test.com', created_at: '2026-01-01' },
-      isLoading: false,
-      login: vi.fn(),
-      signUp: vi.fn(),
-      resetPassword: vi.fn(),
-      updatePassword: vi.fn(),
-      logout: vi.fn(),
-      updateProfile: vi.fn(),
+    const authVal: AuthContextType = {
+      ...defaultAuth,
       dataMode: props.initialDataMode || 'supabase',
       ...authContextValue,
     };
 
     await act(async () => {
       root.render(
-        <AuthContext.Provider value={defaultAuth}>
+        <AuthContext.Provider value={authVal}>
           <FinanceProvider {...props}>
             <Consumer />
           </FinanceProvider>
@@ -463,17 +473,37 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
         repository: repo,
         initialDataMode: 'supabase',
       },
-      { user: null }
+      { user: { id: 'usr-new-id', name: 'Rodrigo', email: 'rodrigo@test.com', created_at: '2026-01-01' } }
     );
 
     expect(getCtx().isLoaded).toBe(true);
     expect(repo.createWorkspace).toHaveBeenCalledWith({
       name: 'Meu Workspace',
-      owner_id: 'usr-1',
+      owner_id: 'usr-new-id',
       currency: 'BRL',
       tracking_mode: 'full',
     });
     expect(repo.loadSnapshot).toHaveBeenCalledWith('ws-remote-created');
+  });
+
+  it('deve parar com erro de autenticação no modo Supabase se auth.user for nulo', async () => {
+    const repo = createMockRepository(createMockSnapshot());
+
+    const { getCtx } = await mountTestProvider(
+      {
+        repository: repo,
+        initialDataMode: 'supabase',
+      },
+      { user: null }
+    );
+
+    expect(getCtx().isLoaded).toBe(true);
+    expect(getCtx().error).toBeDefined();
+    expect(getCtx().error?.message).toMatch(/não autenticado/i);
+    expect(repo.createWorkspace).not.toHaveBeenCalled();
+
+    // Também valida que mutações adicionais são rejeitadas com erro de autenticação
+    expect(() => getCtx().createWorkspace('Workspace Sem Auth')).toThrow(/não autenticado/i);
   });
 
   it('deve executar mutação otimista de addTransaction com persistência remota bem-sucedida', async () => {
@@ -736,9 +766,11 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
 
     await act(async () => {
       root.render(
-        <FinanceProvider repository={repo} initialDataMode="supabase">
-          <div>Test</div>
-        </FinanceProvider>
+        <AuthContext.Provider value={defaultAuth}>
+          <FinanceProvider repository={repo} initialDataMode="supabase">
+            <div>Test</div>
+          </FinanceProvider>
+        </AuthContext.Provider>
       );
     });
 
@@ -767,9 +799,11 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
 
     await act(async () => {
       root.render(
-        <FinanceProvider repository={repo} initialDataMode="supabase">
-          <div>Test</div>
-        </FinanceProvider>
+        <AuthContext.Provider value={defaultAuth}>
+          <FinanceProvider repository={repo} initialDataMode="supabase">
+            <div>Test</div>
+          </FinanceProvider>
+        </AuthContext.Provider>
       );
     });
 
@@ -959,7 +993,7 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
 
     // Aguarda todos os despachos remotos terminarem
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 60));
+      await new Promise((r) => setTimeout(r, 120));
     });
 
     // Deleta recorrência e conta após persistência concluída
@@ -2268,5 +2302,423 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     });
 
     expect(getCtx().activeWorkspace.id).toBe('ws-2');
+  });
+
+  it('deve disparar materializeRecurring e refreshData ao chamar processPendingRecurring em modo supabase', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    await act(async () => {
+      getCtx().processPendingRecurring();
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+
+    expect(repo.materializeRecurring).toHaveBeenCalledWith('ws-1');
+    expect(repo.loadSnapshot).toHaveBeenCalled();
+
+    // Cenário com erro em materializeRecurring
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (repo.materializeRecurring as any).mockRejectedValueOnce(new Error('Erro na materialização'));
+    await act(async () => {
+      getCtx().processPendingRecurring();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(consoleSpy).toHaveBeenCalledWith(
+      'Falha ao materializar recorrências no Supabase:',
+      expect.any(Error)
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('deve executar actions.processPendingRecurring em modo local', async () => {
+    const { getCtx } = await mountTestProvider({
+      initialDataMode: 'local',
+    });
+    await act(async () => {
+      getCtx().processPendingRecurring();
+      const rec = getCtx().addRecurring({
+        description: 'Rec Local Mode',
+        amount: 50,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-02-01',
+        auto_create: false,
+        active: true,
+      });
+      getCtx().toggleRecurring(rec.id);
+    });
+    expect(getCtx().dataMode).toBe('local');
+  });
+
+  it('deve sequenciar persistência remota antes de materializeRecurring e refreshData ao criar ou alternar recorrência em modo supabase', async () => {
+    const executionOrder: string[] = [];
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    (repo.saveRecurring as any).mockImplementation(async (rec: any) => {
+      await new Promise((r) => setTimeout(r, 20));
+      executionOrder.push('saveRecurring');
+      return { ...rec, id: 'rec-remote-1' };
+    });
+
+    (repo.materializeRecurring as any).mockImplementation(async () => {
+      executionOrder.push('materializeRecurring');
+      return { processed_recurring: 1, created_transactions: 1, suspended_recurring: 0 };
+    });
+
+    (repo.loadSnapshot as any).mockImplementation(async (wsId: string) => {
+      executionOrder.push('loadSnapshot');
+      return {
+        ...snapshot,
+        activeWorkspaceId: wsId,
+        allRecurring: [
+          ...snapshot.allRecurring,
+          {
+            id: 'rec-remote-1',
+            workspace_id: wsId,
+            description: 'Recorrência Sequenciada',
+            amount: 100,
+            type: 'expense' as const,
+            frequency: 'monthly' as const,
+            start_date: '2026-01-01',
+            next_occurrence: '2026-02-01',
+            auto_create: true,
+            active: true,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      };
+    });
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    executionOrder.length = 0; // limpa o bootstrap inicial
+
+    await act(async () => {
+      getCtx().addRecurring({
+        description: 'Recorrência Sequenciada',
+        amount: 100,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-02-01',
+        auto_create: true,
+        active: true,
+      });
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    // Comprova que saveRecurring finalizou ANTES de materializeRecurring e loadSnapshot
+    expect(executionOrder).toEqual(['saveRecurring', 'materializeRecurring', 'loadSnapshot']);
+    expect(getCtx().recurring.some((r) => r.description === 'Recorrência Sequenciada')).toBe(true);
+
+    // Agora testa toggleRecurring
+    executionOrder.length = 0;
+    await act(async () => {
+      getCtx().toggleRecurring('rec-remote-1');
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    expect(executionOrder).toEqual(['saveRecurring', 'materializeRecurring', 'loadSnapshot']);
+  });
+
+  it('preserva alterações pendentes durante a recarga com mutações concorrentes/sobrepostas (addRecurring + toggleRecurring)', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    const savedRecurringList: any[] = [];
+    const remoteRecurringList: any[] = [...snapshot.allRecurring];
+
+    (repo.saveRecurring as any).mockImplementation(async (r: any) => {
+      savedRecurringList.push({ ...r });
+      const saved = { ...r, id: r.id || 'rec-new-1' };
+      const idx = remoteRecurringList.findIndex((item) => item.id === saved.id);
+      if (idx >= 0) {
+        remoteRecurringList[idx] = saved;
+      } else {
+        remoteRecurringList.push(saved);
+      }
+      return saved;
+    });
+
+    (repo.loadSnapshot as any).mockImplementation(async (wsId: string) => {
+      // Retorna o estado atual do banco remoto (quando A recarrega, B ainda não foi salvo no banco)
+      return {
+        ...snapshot,
+        activeWorkspaceId: wsId,
+        allRecurring: remoteRecurringList.map((r) => ({ ...r })),
+      };
+    });
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    expect(getCtx().recurring.find((r) => r.id === 'rec-1')?.active).toBe(true);
+
+    // Dispara addRecurring (A) e imediatamente toggleRecurring de rec-1 (B)
+    await act(async () => {
+      getCtx().addRecurring({
+        description: 'Netflix Novo',
+        amount: 55,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-02-01',
+        auto_create: true,
+        active: true,
+      });
+
+      // B é disparado concorrentemente antes de A finalizar sua recarga
+      getCtx().toggleRecurring('rec-1');
+    });
+
+    // Aguarda o processamento de toda a fila ordenada de mutações
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 120));
+    });
+
+    // Verifica que rec-1 foi salvo com active: false (não foi revertido pela recarga de A)
+    const rec1SaveCall = savedRecurringList.find((r) => r.id === 'rec-1');
+    expect(rec1SaveCall).toBeDefined();
+    expect(rec1SaveCall.active).toBe(false);
+
+    // No estado final da UI, rec-1 está inativo e a nova recorrência está presente
+    const finalRec1 = getCtx().recurring.find((r) => r.id === 'rec-1');
+    expect(finalRec1?.active).toBe(false);
+    expect(getCtx().recurring.some((r) => r.description === 'Netflix Novo')).toBe(true);
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('toggle cuja RPC muda next_occurrence reflete a nova data na UI após refreshData', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    // rec-1 começa inativo com next_occurrence: 2026-09-01
+    let currentRemoteRec = {
+      ...snapshot.allRecurring[0],
+      active: false,
+      next_occurrence: '2026-09-01',
+    };
+
+    (repo.saveRecurring as any).mockImplementation(async (r: any) => {
+      currentRemoteRec = { ...currentRemoteRec, ...r };
+      return currentRemoteRec;
+    });
+
+    // Simula a RPC avançando next_occurrence no banco remoto para o próximo mês
+    (repo.materializeRecurring as any).mockImplementation(async () => {
+      currentRemoteRec = {
+        ...currentRemoteRec,
+        next_occurrence: '2026-10-01',
+      };
+      return { created_transactions: 1, suspended_rules: 0, advanced_rules: 1 };
+    });
+
+    (repo.loadSnapshot as any).mockImplementation(async (wsId: string) => {
+      return {
+        ...snapshot,
+        activeWorkspaceId: wsId,
+        allRecurring: [currentRemoteRec],
+      };
+    });
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    // Dispara toggleRecurring de rec-1 sem mutações subsequentes
+    await act(async () => {
+      getCtx().toggleRecurring('rec-1');
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 120));
+    });
+
+    // A UI deve refletir next_occurrence atualizada pela RPC (2026-10-01) e active: true
+    const rec1 = getCtx().recurring.find((r) => r.id === 'rec-1');
+    expect(rec1).toBeDefined();
+    expect(rec1?.active).toBe(true);
+    expect(rec1?.next_occurrence).toBe('2026-10-01');
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('addRecurring seguido imediatamente de toggleRecurring e deleteRecurring na mesma regra resolve o ID canônico', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    const callLog: { method: string; id?: string; payload?: any }[] = [];
+    const databaseRecords = new Map<string, any>();
+
+    // O repositório real diferencia INSERT (sem id) de UPDATE (com id)
+    (repo.saveRecurring as any).mockImplementation(async (r: any) => {
+      if (r.id) {
+        if (!databaseRecords.has(r.id)) {
+          throw new Error(`PGRST116: JSON object requested, no rows returned for update on id ${r.id}`);
+        }
+        const updated = { ...databaseRecords.get(r.id), ...r };
+        databaseRecords.set(r.id, updated);
+        callLog.push({ method: 'saveRecurring (update)', id: r.id, payload: updated });
+        return updated;
+      }
+      // Inserção: r.id deve ser undefined!
+      const canonical = { ...r, id: '70000000-0000-0000-0000-000000000099' };
+      databaseRecords.set(canonical.id, canonical);
+      callLog.push({ method: 'saveRecurring (create)', id: canonical.id, payload: canonical });
+      return canonical;
+    });
+
+    (repo.deleteRecurring as any).mockImplementation(async (id: string) => {
+      callLog.push({ method: 'deleteRecurring', id });
+    });
+
+    (repo.loadSnapshot as any).mockImplementation(async (wsId: string) => {
+      return {
+        ...snapshot,
+        activeWorkspaceId: wsId,
+      };
+    });
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    let createdId: string = '';
+
+    await act(async () => {
+      const res = getCtx().addRecurring({
+        description: 'Regra Relâmpago',
+        amount: 120,
+        type: 'expense',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        next_occurrence: '2026-01-01',
+        auto_create: true,
+        active: true,
+      });
+      createdId = res.id;
+
+      // Imediatamente na mesma regra recém-criada (usando o ID retornado/temporário):
+      getCtx().toggleRecurring(createdId);
+      getCtx().deleteRecurring(createdId);
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150));
+    });
+
+    // 1. A criação gerou o registro inicial e atribuiu o UUID canônico
+    const createCall = callLog.find((c) => c.method === 'saveRecurring (create)');
+    expect(createCall).toBeDefined();
+
+    // 2. O toggle usou o UUID canônico do banco (NÃO o createdId temporário)
+    const toggleCall = callLog.find((c) => c.method === 'saveRecurring (update)');
+    expect(toggleCall).toBeDefined();
+    expect(toggleCall?.id).toBe('70000000-0000-0000-0000-000000000099');
+
+    // 3. A exclusão usou o UUID canônico do banco (NÃO o createdId temporário)
+    const deleteCall = callLog.find((c) => c.method === 'deleteRecurring');
+    expect(deleteCall).toBeDefined();
+    expect(deleteCall?.id).toBe('70000000-0000-0000-0000-000000000099');
+
+    // 4. Na UI final, a regra foi removida e não há erros
+    expect(getCtx().recurring.some((r) => r.description === 'Regra Relâmpago')).toBe(false);
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('deve bloquear operações com erro quando em modo supabase sem usuário logado', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const { getCtx } = await mountTestProvider(
+      { repository: repo, initialDataMode: 'supabase' },
+      { user: null }
+    );
+
+    expect(getCtx().error?.message).toContain('Sessão não encontrada: usuário não autenticado no modo Supabase.');
+
+    // 1. Mutação que usa getUserId()
+    expect(() => {
+      getCtx().createWorkspace('Workspace Proibido');
+    }).toThrow('Operação não permitida: usuário não autenticado no modo Supabase.');
+
+    // 2. Mutação que NÃO usa getUserId() (ex: addAccount, addCategory)
+    expect(() => {
+      getCtx().addAccount({
+        name: 'Conta Proibida',
+        type: 'checking',
+        institution: 'Banco Teste',
+        initial_balance: 100,
+        current_balance: 100,
+        color: '#123456',
+        active: true,
+      });
+    }).toThrow('Operação não permitida: usuário não autenticado no modo Supabase.');
+
+    expect(() => {
+      getCtx().addCategory({
+        name: 'Categoria Proibida',
+        type: 'expense',
+        color: '#ff0000',
+        icon: 'tag',
+        active: true,
+      });
+    }).toThrow('Operação não permitida: usuário não autenticado no modo Supabase.');
+
+    // 3. Nenhuma mutação otimista deve ter sido aplicada ao estado
+    expect(getCtx().workspaces.some((w) => w.name === 'Workspace Proibido')).toBe(false);
+    expect(getCtx().accounts.some((a) => a.name === 'Conta Proibida')).toBe(false);
+    expect(getCtx().categories.some((c) => c.name === 'Categoria Proibida')).toBe(false);
+  });
+
+
+  it('deve usar o id do usuário logado no modo local ou fallback usr-1 quando não autenticado', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    // 1. Usuário logado no modo local
+    const { getCtx: getCtxWithUser } = await mountTestProvider(
+      { repository: repo, initialDataMode: 'local' },
+      { user: { id: 'usr-custom-local', name: 'Local User', email: 'local@test.com', created_at: '2026-01-01' } }
+    );
+    let ws1: any;
+    await act(async () => {
+      ws1 = getCtxWithUser().createWorkspace('Workspace Custom');
+    });
+    expect(ws1.owner_id).toBe('usr-custom-local');
+
+    // 2. Sem usuário no modo local (fallback usr-1)
+    const { getCtx: getCtxNoUser } = await mountTestProvider(
+      { repository: repo, initialDataMode: 'local' },
+      { user: null }
+    );
+    let ws2: any;
+    await act(async () => {
+      ws2 = getCtxNoUser().createWorkspace('Workspace Fallback');
+    });
+    expect(ws2.owner_id).toBe('usr-1');
   });
 });

@@ -25,6 +25,7 @@ import {
 } from '../context/finance-storage';
 import { FinanceRepository } from './finance-repository';
 import { RepositoryError } from './repository-errors';
+import { processRecurringBatchState } from '../financial-engine/recurring';
 
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();
@@ -1325,5 +1326,55 @@ export class LocalFinanceRepository implements FinanceRepository {
     }
     state.allSettlements = state.allSettlements.filter((s) => s.id !== id);
     this.saveState(state);
+  }
+
+  // Materialização de Recorrências
+  async materializeRecurring(
+    workspaceId?: string,
+    targetDate?: string
+  ): Promise<{
+    created_transactions: number;
+    suspended_recurring: number;
+    processed_recurring: number;
+    target_date?: string;
+  }> {
+    const state = this.getState();
+    const todayStr = targetDate || new Date().toISOString().split('T')[0];
+    const recsToProcess = workspaceId
+      ? state.allRecurring.filter((r) => r.workspace_id === workspaceId)
+      : state.allRecurring;
+
+    const res = processRecurringBatchState({
+      recurring: recsToProcess,
+      transactions: state.allTransactions,
+      bills: state.allCreditCardBills,
+      accounts: state.allAccounts,
+      paymentMethods: state.allPaymentMethods,
+      creditCards: state.allCreditCards,
+      categories: state.allCategories,
+      todayStr,
+      generateId: () => generateId(),
+    });
+
+    if (res.hasChanges) {
+      if (workspaceId) {
+        const recMap = new Map(res.updatedRecurring.map((r) => [r.id, r]));
+        state.allRecurring = state.allRecurring.map((r) => recMap.get(r.id) ?? r);
+      } else {
+        state.allRecurring = res.updatedRecurring;
+      }
+      state.allTransactions = [...state.allTransactions, ...res.newTransactions];
+      state.allCreditCardBills = res.updatedBills;
+      this.saveState(state);
+    }
+
+    const suspendedCount = res.updatedRecurring.filter((r) => !r.active && r.suspended_reason).length;
+
+    return {
+      created_transactions: res.newTransactions.length,
+      suspended_recurring: suspendedCount,
+      processed_recurring: recsToProcess.length,
+      target_date: todayStr,
+    };
   }
 }

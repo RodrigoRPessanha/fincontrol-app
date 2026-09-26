@@ -46,6 +46,8 @@ export function recordPayment(
     if (!pm) throw new Error('Método de pagamento não pertence ao workspace ativo.');
   }
 
+  const userId = deps.getUserId();
+
   // 1. Transação avulsa
   if (data.transaction_id) {
     const currentTxs = state.allTransactions;
@@ -79,7 +81,7 @@ export function recordPayment(
       amount: finalAmount,
       payment_date: data.payment_date,
       notes: data.notes,
-      created_by: 'usr-1',
+      created_by: userId,
       created_at: deps.now().toISOString(),
       affects_balance: shouldMutateAccount,
     };
@@ -153,7 +155,7 @@ export function recordPayment(
       amount: finalAmount,
       payment_date: data.payment_date,
       notes: data.notes,
-      created_by: 'usr-1',
+      created_by: userId,
       created_at: deps.now().toISOString(),
       affects_balance: shouldMutateAccount,
     };

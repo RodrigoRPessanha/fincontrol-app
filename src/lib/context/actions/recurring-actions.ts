@@ -110,10 +110,12 @@ export function toggleRecurring(
   deps: FinanceActionDeps,
   id: string,
   onProcessed?: () => void
-): void {
+): RecurringTransaction | undefined {
   const state = deps.getState();
   const todayStr = format(deps.now(), 'yyyy-MM-dd');
   const targetWsId = state.activeWorkspaceId;
+
+  let updatedRec: RecurringTransaction | undefined;
 
   const updateFn = (r: RecurringTransaction) => {
     if (r.id === id && r.workspace_id === targetWsId) {
@@ -122,12 +124,13 @@ export function toggleRecurring(
       if (willBeActive && nextOcc < todayStr) {
         nextOcc = calculateCatchUpOccurrence(nextOcc, r.start_date, r.frequency, r.interval_days, todayStr);
       }
-      return {
+      updatedRec = {
         ...r,
         active: willBeActive,
         next_occurrence: nextOcc,
         suspended_reason: willBeActive ? null : r.suspended_reason,
       };
+      return updatedRec;
     }
     return r;
   };
@@ -142,6 +145,8 @@ export function toggleRecurring(
   } else {
     processPendingRecurring(deps);
   }
+
+  return updatedRec;
 }
 
 export function deleteRecurring(

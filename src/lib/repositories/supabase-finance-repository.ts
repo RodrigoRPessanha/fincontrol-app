@@ -1063,4 +1063,31 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     const { error } = await this.client.from('settlements').delete().eq('id', id);
     if (error) throw RepositoryError.fromPostgrestError(error, 'settlements');
   }
+
+  // ==========================================
+  // Materialização de Recorrências
+  // ==========================================
+  async materializeRecurring(
+    workspaceId?: string,
+    targetDate?: string
+  ): Promise<{
+    created_transactions: number;
+    suspended_recurring: number;
+    processed_recurring: number;
+    target_date?: string;
+  }> {
+    const { data, error } = await this.client.rpc('fn_materialize_recurring_transactions', {
+      p_workspace_id: workspaceId || undefined,
+      p_target_date: targetDate || undefined,
+    });
+    if (error) {
+      throw RepositoryError.fromPostgrestError(error, 'recurring_transactions');
+    }
+    return (data as any) ?? {
+      created_transactions: 0,
+      suspended_recurring: 0,
+      processed_recurring: 0,
+      target_date: targetDate,
+    };
+  }
 }

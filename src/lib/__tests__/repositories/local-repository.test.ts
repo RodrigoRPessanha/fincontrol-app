@@ -2132,6 +2132,112 @@ describe('LocalFinanceRepository', () => {
     });
     await repo.deletePurchase(orphanPur.id);
   });
+
+  it('materializes recurring transactions in LocalFinanceRepository with and without changes', async () => {
+    // 1. Sem alterações quando não há recorrências vencidas
+    const emptyRes = await repo.materializeRecurring('ws-personal', '2020-01-01');
+    expect(emptyRes.created_transactions).toBe(0);
+
+    // 2. Cria recorrência vencida com cartão
+    const card = await repo.saveCreditCard({
+      workspace_id: 'ws-personal',
+      name: 'Cartao Rec',
+      institution: 'Banco Rec',
+      credit_limit: 5000,
+      closing_day: 5,
+      due_day: 15,
+      color: '#10b981',
+      active: true,
+    });
+
+    const cat = await repo.saveCategory({
+      workspace_id: 'ws-personal',
+      name: 'Assinaturas',
+      type: 'expense',
+      color: '#3b82f6',
+      icon: 'sparkles',
+      active: true,
+    });
+
+    await repo.saveRecurring({
+      workspace_id: 'ws-personal',
+      description: 'Streaming Rec',
+      amount: 45,
+      type: 'expense',
+      frequency: 'monthly',
+      start_date: '2026-01-10',
+      next_occurrence: '2026-01-10',
+      category_id: cat.id,
+      credit_card_id: card.id,
+      auto_create: true,
+      active: true,
+    });
+
+    await repo.saveRecurring({
+      workspace_id: 'ws-other',
+      description: 'Outro Workspace Rec',
+      amount: 10,
+      type: 'expense',
+      frequency: 'monthly',
+      start_date: '2026-01-10',
+      next_occurrence: '2026-01-10',
+      auto_create: true,
+      active: true,
+    });
+
+    const res = await repo.materializeRecurring('ws-personal', '2026-03-15');
+    expect(res.created_transactions).toBeGreaterThanOrEqual(1);
+
+    const txs = await repo.getTransactions('ws-personal');
+    const materializedTx = txs.find((t) => t.description === 'Streaming Rec');
+    expect(materializedTx).toBeDefined();
+    expect(materializedTx?.credit_card_id).toBe(card.id);
+    expect(materializedTx?.credit_card_bill_id).toBeDefined();
+
+    // Reexecução na mesma data não gera duplicatas (idempotência)
+    const reRes = await repo.materializeRecurring('ws-personal', '2026-03-15');
+    expect(reRes.created_transactions).toBe(0);
+
+    // Chamada sem workspaceId especificado (processa global)
+    const globalRes = await repo.materializeRecurring(undefined, '2026-03-15');
+    expect(globalRes.created_transactions).toBeGreaterThanOrEqual(1);
+
+    const globalReRes = await repo.materializeRecurring(undefined, '2026-03-15');
+    expect(globalReRes.created_transactions).toBe(0);
+
+    // Recorrência suspensa por conta inativa
+    const inactiveAcc = await repo.saveAccount({
+      workspace_id: 'ws-personal',
+      name: 'Conta Inativa',
+      type: 'checking',
+      current_balance: 0,
+      initial_balance: 0,
+      institution: 'Banco',
+      color: '#ef4444',
+      active: false,
+    });
+
+    await repo.saveRecurring({
+      workspace_id: 'ws-personal',
+      description: 'Recorrência que vai suspender',
+      amount: 100,
+      type: 'expense',
+      frequency: 'monthly',
+      start_date: '2026-01-01',
+      next_occurrence: '2026-01-01',
+      account_id: inactiveAcc.id,
+      auto_create: true,
+      active: true,
+    });
+
+    const suspRes = await repo.materializeRecurring('ws-personal', '2026-03-15');
+    expect(suspRes.suspended_recurring).toBeGreaterThanOrEqual(1);
+
+    // Chamada sem targetDate especificado (usa fallback new Date())
+    const defaultDateRes = await repo.materializeRecurring('ws-personal');
+    expect(defaultDateRes).toBeDefined();
+    expect(typeof defaultDateRes.created_transactions).toBe('number');
+  });
 });
 
 

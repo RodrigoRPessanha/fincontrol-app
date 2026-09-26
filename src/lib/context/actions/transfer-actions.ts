@@ -37,6 +37,7 @@ export function createTransfer(
   }
 
   const finalAmount = fromCents(transferCents);
+  const userId = deps.getUserId();
 
   const newTransfer: Transfer = {
     id: deps.generateId('trf'),
@@ -46,7 +47,7 @@ export function createTransfer(
     amount: finalAmount,
     transfer_date: date,
     notes: notes || undefined,
-    created_by: 'usr-1',
+    created_by: userId,
     created_at: deps.now().toISOString(),
     from_account: fromAcc,
     to_account: toAcc,

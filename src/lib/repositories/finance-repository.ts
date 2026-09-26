@@ -96,4 +96,15 @@ export interface FinanceRepository {
   getSettlements(workspaceId: string): Promise<Settlement[]>;
   saveSettlement(settlement: Omit<Settlement, 'id' | 'created_at'> & { id?: string }): Promise<Settlement>;
   deleteSettlement(id: string): Promise<void>;
+
+  // Materialização de Recorrências
+  materializeRecurring(
+    workspaceId?: string,
+    targetDate?: string
+  ): Promise<{
+    created_transactions: number;
+    suspended_recurring: number;
+    processed_recurring: number;
+    target_date?: string;
+  }>;
 }
