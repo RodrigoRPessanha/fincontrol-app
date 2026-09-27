@@ -153,8 +153,8 @@ function runTestWithCliLinked(filePath, declaredPlan) {
   const fileName = path.basename(filePath);
   const isWindows = process.platform === 'win32';
   const cmd = isWindows
-    ? `cmd /c npx supabase db query --linked --file "${filePath}"`
-    : `npx supabase db query --linked --file "${filePath}"`;
+    ? `cmd /c npx supabase db query --linked --output-format json --file "${filePath}"`
+    : `npx supabase db query --linked --output-format json --file "${filePath}"`;
 
   try {
     const rawOutput = execSync(cmd, {

@@ -64,8 +64,8 @@ function runReadOnlySql(sql) {
   try {
     const isWindows = process.platform === 'win32';
     const cmd = isWindows
-      ? `cmd /c npx supabase db query --linked --file "${tmpFile}"`
-      : `npx supabase db query --linked --file "${tmpFile}"`;
+      ? `cmd /c npx supabase db query --linked --output-format json --file "${tmpFile}"`
+      : `npx supabase db query --linked --output-format json --file "${tmpFile}"`;
     const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     const jsonMatch = out.match(/\{[\s\S]*"rows"[\s\S]*\}/);
     if (jsonMatch) {
