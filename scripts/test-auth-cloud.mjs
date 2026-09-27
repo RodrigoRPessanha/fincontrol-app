@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
+import { parseSupabaseQueryOutput } from './parse-supabase-query-output.mjs';
 import fs from 'fs';
 import path from 'path';
 
@@ -67,11 +68,7 @@ function runReadOnlySql(sql) {
       ? `cmd /c npx supabase db query --linked --output-format json --file "${tmpFile}"`
       : `npx supabase db query --linked --output-format json --file "${tmpFile}"`;
     const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    const jsonMatch = out.match(/\{[\s\S]*"rows"[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return null;
+    return parseSupabaseQueryOutput(out);
   } finally {
     if (fs.existsSync(tmpFile)) {
       try {

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import pg from 'pg';
+import { parseSupabaseQueryOutput } from './parse-supabase-query-output.mjs';
 
 const { Client } = pg;
 const __filename = fileURLToPath(import.meta.url);
@@ -165,22 +166,9 @@ function runTestWithCliLinked(filePath, declaredPlan) {
 
     const failures = [];
 
-    // 1. Extrair bloco JSON com rows de resultado
-    const jsonMatch = rawOutput.match(/\{[\s\S]*"rows"[\s\S]*\}/);
-    if (!jsonMatch) {
-      return {
-        fileName,
-        success: false,
-        planned: declaredPlan,
-        passed: 0,
-        failed: 1,
-        failures: [`Falha ao interpretar resposta do banco: ${rawOutput.trim()}`]
-      };
-    }
-
     let parsed;
     try {
-      parsed = JSON.parse(jsonMatch[0]);
+      parsed = parseSupabaseQueryOutput(rawOutput);
     } catch (parseErr) {
       return {
         fileName,
@@ -188,7 +176,7 @@ function runTestWithCliLinked(filePath, declaredPlan) {
         planned: declaredPlan,
         passed: 0,
         failed: 1,
-        failures: [`Erro de parsing JSON na resposta remota: ${parseErr.message}`]
+        failures: [`Falha ao interpretar resposta do banco: ${parseErr.message}`]
       };
     }
 
