@@ -8,6 +8,8 @@ import { AuthContext, AuthContextType } from '../../context/auth-context';
 import { SupabaseFinanceRepository } from '../../repositories/supabase-finance-repository';
 import { LocalFinanceRepository } from '../../repositories/local-finance-repository';
 import * as clientModule from '../../supabase/client';
+import { PaymentModal } from '../../../components/transactions/PaymentModal';
+import { GlobalErrorBanner } from '../../../components/shared/GlobalErrorBanner';
 
 function createMockSnapshot(overrides?: Partial<FinanceState>): FinanceState {
   return {
@@ -335,9 +337,36 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     dataMode: 'supabase',
   };
 
+  function getReactProps(element: any): any {
+    if (!element) return null;
+    const key = Object.keys(element).find((k) => k.startsWith('__reactProps$'));
+    return key ? element[key] : null;
+  }
+
+  function findNode(root: any, predicate: (node: any) => boolean): any {
+    if (!root) return null;
+    if (predicate(root)) return root;
+    for (const child of root.childNodes || []) {
+      const found = findNode(child, predicate);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function findNodes(root: any, predicate: (node: any) => boolean): any[] {
+    const list: any[] = [];
+    if (!root) return list;
+    if (predicate(root)) list.push(root);
+    for (const child of root.childNodes || []) {
+      list.push(...findNodes(child, predicate));
+    }
+    return list;
+  }
+
   async function mountTestProvider(
     props: Partial<FinanceProviderProps> = {},
-    authContextValue?: Partial<AuthContextType>
+    authContextValue?: Partial<AuthContextType>,
+    children?: React.ReactNode
   ) {
     let currentCtx!: ReturnType<typeof useFinance>;
     function Consumer() {
@@ -360,6 +389,7 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
         <AuthContext.Provider value={authVal}>
           <FinanceProvider {...props}>
             <Consumer />
+            {children}
           </FinanceProvider>
         </AuthContext.Provider>
       );
@@ -2720,5 +2750,152 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
       ws2 = getCtxNoUser().createWorkspace('Workspace Fallback');
     });
     expect(ws2.owner_id).toBe('usr-1');
+  });
+
+  it('fornece resultado aguardável da persistência remota em recordPaymentAsync e payCreditCardBillAsync capturando rejeição do repositório', async () => {
+    const snapshot = createMockSnapshot({
+      allTransactions: [
+        {
+          id: 'tx-1',
+          workspace_id: 'ws-1',
+          description: 'Licença Software',
+          amount: 1234.0,
+          paid_amount: 12.34,
+          type: 'expense',
+          status: 'partially_paid',
+          transaction_date: '2026-09-20',
+          due_date: '2026-09-20',
+          category_id: 'cat-1',
+          account_id: 'acc-1',
+          created_at: '2026-09-20',
+        },
+        {
+          id: 'tx-2',
+          workspace_id: 'ws-1',
+          description: 'Serviço Cloud',
+          amount: 100.0,
+          paid_amount: 0,
+          type: 'expense',
+          status: 'pending',
+          transaction_date: '2026-09-20',
+          due_date: '2026-09-20',
+          category_id: 'cat-1',
+          account_id: 'acc-1',
+          created_at: '2026-09-20',
+        },
+      ],
+    });
+    const repo = createMockRepository(snapshot);
+
+    // Simula a falha remota da RPC (excede saldo restante) no repositório real
+    const rpcErrorMessage = 'O valor do pagamento (R$ 1.234,00) excede o saldo restante da obrigação (R$ 1.221,66).';
+    repo.savePayment = vi.fn().mockRejectedValue(new Error(rpcErrorMessage));
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    expect(getCtx().isLoaded).toBe(true);
+
+    // 1. Chamada a recordPaymentAsync com await rejeita com o erro remoto da persistência
+    let caughtError: any = null;
+    await act(async () => {
+      try {
+        await getCtx().recordPaymentAsync({
+          transaction_id: 'tx-1',
+          account_id: 'acc-1',
+          amount: 1221.66,
+          payment_date: '2026-09-27',
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+    });
+
+    expect(caughtError).toBeDefined();
+    expect(caughtError.message).toContain('excede o saldo restante');
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(getCtx().error?.message).toContain('excede o saldo restante');
+
+    // 2. Quando o repositório salva com sucesso, recordPaymentAsync resolve normalmente
+    repo.savePayment = vi.fn().mockResolvedValue({
+      id: 'pay-success',
+      transaction_id: 'tx-1',
+      account_id: 'acc-1',
+      amount: 1221.66,
+      payment_date: '2026-09-27',
+      created_at: '2026-09-27',
+    });
+
+    let successPayment: any = null;
+    await act(async () => {
+      successPayment = await getCtx().recordPaymentAsync({
+        transaction_id: 'tx-1',
+        account_id: 'acc-1',
+        amount: 1221.66,
+        payment_date: '2026-09-27',
+      });
+    });
+
+    expect(successPayment).toBeDefined();
+    expect(successPayment.id).toBeDefined();
+    expect(successPayment.amount).toBe(1221.66);
+
+    // 3. O método síncrono recordPayment retorna o Payment de domínio sem propriedade 'then'
+    repo.savePayment = vi.fn().mockResolvedValue({
+      id: 'pay-sync',
+      transaction_id: 'tx-2',
+      account_id: 'acc-1',
+      amount: 10,
+      payment_date: '2026-09-27',
+      created_at: '2026-09-27',
+    });
+    let syncPayment: any = null;
+    await act(async () => {
+      syncPayment = getCtx().recordPayment({
+        transaction_id: 'tx-2',
+        account_id: 'acc-1',
+        amount: 10,
+        payment_date: '2026-09-27',
+      });
+      await getCtx().waitForPendingMutations();
+    });
+    expect(syncPayment).toBeDefined();
+    expect('then' in syncPayment).toBe(false);
+
+    // 4. payCreditCardBillAsync também oferece resultado aguardável e rejeita com erro remoto
+    repo.savePayment = vi.fn().mockRejectedValue(new Error('Falha remota na quitação da fatura'));
+    let billError: any = null;
+    await act(async () => {
+      try {
+        await getCtx().payCreditCardBillAsync('bill-1', 'acc-1', 100, '2026-09-27');
+      } catch (err) {
+        billError = err;
+      }
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(billError).toBeDefined();
+    expect(billError.message).toContain('Falha remota na quitação da fatura');
+
+    // 5. payCreditCardBill síncrono retorna sem 'then'
+    repo.savePayment = vi.fn().mockResolvedValue({
+      id: 'pay-bill-success',
+      credit_card_bill_id: 'bill-1',
+      amount: 50,
+      payment_date: '2026-09-27',
+      created_at: '2026-09-27',
+    });
+    let syncBillPayment: any = null;
+    await act(async () => {
+      syncBillPayment = getCtx().payCreditCardBill('bill-1', 'acc-1', 50, '2026-09-27');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(syncBillPayment).toBeDefined();
+    expect('then' in syncBillPayment).toBe(false);
   });
 });

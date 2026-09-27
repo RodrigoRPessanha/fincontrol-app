@@ -43,7 +43,7 @@ describe('SupabaseFinanceRepository', () => {
       transaction_splits: [{ id: 'ts-1', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-1', amount: 50 }],
       purchases: [{ id: 'p-1', workspace_id: 'ws-1', description: 'TV', total_amount: 1200, installment_count: 12, purchase_date: '2026-04-01' }],
       purchase_splits: [{ id: 'ps-1', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-1', amount: 1200 }],
-      payments: [{ id: 'pay-1', workspace_id: 'ws-1', amount: 100, payment_date: '2026-04-01', affects_balance: true }],
+      payments: [{ id: 'pay-1', workspace_id: 'ws-1', transaction_id: 'tx-1', amount: 100, payment_date: '2026-04-01', affects_balance: true }],
       transfers: [{ id: 'tr-1', workspace_id: 'ws-1', from_account_id: 'a-1', to_account_id: 'a-2', amount: 50, transfer_date: '2026-04-01' }],
       recurring_transactions: [{ id: 'r-1', workspace_id: 'ws-1', description: 'Net', amount: 30, frequency: 'monthly', day_of_month: 5, active: true }],
       budgets: [{ id: 'bg-1', workspace_id: 'ws-1', category_id: 'cat-1', planned_amount: 200, month: 4, year: 2026 }],
@@ -1565,8 +1565,10 @@ describe('SupabaseFinanceRepository', () => {
 
     (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [{ id: 'tx-1', workspace_id: 'ws-1', description: 'T', amount: 100, transaction_date: '2026-04-01', due_date: '2026-04-01', type: 'expense', status: 'completed' }], error: null }) });
     (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [{ id: 'ts-1', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-1', amount: 50 }, { id: 'ts-2', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-2', amount: 50 }], error: null }) });
+    (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [{ id: 'pay-tx-1', transaction_id: 'tx-1', amount: 50 }], error: null }) });
     const txWithMultiSplits = await repo.getTransactions('ws-1');
     expect(txWithMultiSplits[0].splits?.length).toBe(2);
+    expect(txWithMultiSplits[0].paid_amount).toBe(50);
 
     // 3. Profiles as array in addWorkspaceMember and updateWorkspaceMemberRole
     (client.from as any).mockReturnValueOnce({
@@ -1788,6 +1790,7 @@ describe('SupabaseFinanceRepository', () => {
 
     (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: null }) });
     (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: null }) });
+    (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: null }) });
     const emptyTxs = await repo.getTransactions('ws-1');
     expect(emptyTxs).toEqual([]);
 
@@ -1930,9 +1933,35 @@ describe('SupabaseFinanceRepository', () => {
         error: null,
       }),
     });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({
+        data: [
+          { id: 'pay-tx-1', transaction_id: 'tx-with-splits', amount: 30 },
+          { id: 'pay-inst-1', installment_id: 'inst-1', amount: 20 },
+        ],
+        error: null,
+      }),
+    });
     const mixedTxs = await repo.getTransactions('ws-1');
     expect(mixedTxs[0].splits?.length).toBe(1);
+    expect(mixedTxs[0].paid_amount).toBe(30);
     expect(mixedTxs[1].splits).toBeUndefined();
+
+    // 14.1. getTransactions throws when payments query fails
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+    });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: null, error: postgrestErr }),
+    });
+    await expect(repo.getTransactions('ws-1')).rejects.toThrow(RepositoryError);
 
     // 16. Covers getWorkspaces data null, createWorkspace default vs custom args, getWorkspaceMembers null & object profile
     (client.from as any).mockReturnValueOnce({

@@ -8,7 +8,7 @@ import {
   ChevronUp,
   AlertCircle,
 } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, parseCurrencyInput } from '@/lib/utils';
 import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits } from '@/lib/financial-engine';
 import { SplitType, TransactionSplit } from '@/lib/types';
 import { format } from 'date-fns';
@@ -110,7 +110,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     ? calculateCardBillDates(transactionDate, selectedCard.closing_day, selectedCard.due_day)
     : null;
 
-  const numAmount = parseFloat(amountStr.replace(/\./g, '').replace(',', '.')) || 0;
+  const numAmount = parseCurrencyInput(amountStr) || 0;
 
   const splitPreview =
     isCreditCardSelected && installmentCount > 1 && selectedCard && numAmount > 0
@@ -306,9 +306,14 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
 
           {/* Valor Principal */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Valor
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Valor
+              </label>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                Aceita vírgula ou ponto (ex: 12,34 ou 12.34)
+              </span>
+            </div>
             <div className="relative mt-1.5">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">
                 R$

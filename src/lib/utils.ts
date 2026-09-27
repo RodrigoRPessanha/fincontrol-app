@@ -121,3 +121,36 @@ export function getSafeRedirectPath(target: string | null | undefined, fallback:
     return fallback;
   }
 }
+
+/**
+ * Converte entradas de moeda em número, suportando:
+ * - Padrão brasileiro com vírgula decimal (ex: 1.234,56 ou 12,34)
+ * - Padrão com ponto decimal (ex: 1,234.56 ou 12.34)
+ * - Inteiros puros (ex: 1234)
+ */
+export function parseCurrencyInput(val: string): number {
+  const trimmed = val.trim();
+  if (!trimmed) return NaN;
+
+  // 1. Formato brasileiro com vírgula decimal (ex: 1.234,56 ou 1234,56 ou 12,34)
+  if (/^\d{1,3}(\.\d{3})*,\d{1,2}$/.test(trimmed) || /^\d+,\d{1,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  // 2. Formato internacional com ponto decimal (ex: 1,234.56 ou 1234.56 ou 12.34)
+  if (/^\d{1,3}(,\d{3})*\.\d{1,2}$/.test(trimmed) || /^\d+\.\d{1,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/,/g, '');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  // 3. Inteiro puro (ex: 20 ou 1000)
+  if (/^\d+$/.test(trimmed)) {
+    const num = parseFloat(trimmed);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  return NaN;
+}

@@ -69,6 +69,7 @@ export interface FinanceContextType {
   addCreditCard: (card: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => CreditCard;
   updateCreditCard: (id: string, card: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => void;
   payCreditCardBill: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string) => Payment;
+  payCreditCardBillAsync: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string) => Promise<Payment>;
 
   paymentMethods: PaymentMethod[];
   allWorkspacePaymentMethods: PaymentMethod[];
@@ -113,6 +114,16 @@ export interface FinanceContextType {
     payment_date: string;
     notes?: string;
   }) => Payment;
+  recordPaymentAsync: (data: {
+    transaction_id?: string;
+    installment_id?: string;
+    credit_card_bill_id?: string;
+    account_id?: string | null;
+    payment_method_id?: string;
+    amount: number;
+    payment_date: string;
+    notes?: string;
+  }) => Promise<Payment>;
 
   transfers: Transfer[];
   createTransfer: (fromAccountId: string, toAccountId: string, amount: number, date?: string, notes?: string) => Transfer | null;
@@ -144,4 +155,5 @@ export interface FinanceContextType {
 
   viewPerspective: 'realized' | 'planned';
   setViewPerspective: (p: 'realized' | 'planned') => void;
+  waitForPendingMutations: () => Promise<void>;
 }

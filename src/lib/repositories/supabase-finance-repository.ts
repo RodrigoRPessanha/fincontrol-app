@@ -160,6 +160,15 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       splitsByPurchase.set(split.purchase_id, existing);
     }
 
+    const paymentsByTx = new Map<string, DbTables['payments']['Row'][]>();
+    for (const payment of paymentsRes.data ?? []) {
+      if (payment.transaction_id) {
+        const existing = paymentsByTx.get(payment.transaction_id) ?? [];
+        existing.push(payment);
+        paymentsByTx.set(payment.transaction_id, existing);
+      }
+    }
+
     return {
       activeWorkspaceId: workspaceId,
       allWorkspaces: (wsRes.data ?? []).map(mapWorkspaceRowToDomain),
@@ -173,7 +182,11 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       allPaymentMethods: (methodsRes.data ?? []).map(mapPaymentMethodRowToDomain),
       allCategories: (catsRes.data ?? []).map(mapCategoryRowToDomain),
       allTransactions: (txsRes.data ?? []).map((tx) =>
-        mapTransactionRowToDomain(tx, splitsByTx.get(tx.id) ?? [])
+        mapTransactionRowToDomain(
+          tx,
+          splitsByTx.get(tx.id) ?? [],
+          paymentsByTx.get(tx.id) ?? []
+        )
       ),
       allPurchases: (purchasesRes.data ?? []).map((p) =>
         mapPurchaseRowToDomain(p, splitsByPurchase.get(p.id) ?? [])
@@ -495,12 +508,14 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   // Transações
   // ==========================================
   async getTransactions(workspaceId: string): Promise<Transaction[]> {
-    const [txsRes, splitsRes] = await Promise.all([
+    const [txsRes, splitsRes, paymentsRes] = await Promise.all([
       this.client.from('transactions').select('*').eq('workspace_id', workspaceId),
       this.client.from('transaction_splits').select('*').eq('workspace_id', workspaceId),
+      this.client.from('payments').select('*').eq('workspace_id', workspaceId),
     ]);
     if (txsRes.error) throw RepositoryError.fromPostgrestError(txsRes.error, 'transactions');
     if (splitsRes.error) throw RepositoryError.fromPostgrestError(splitsRes.error, 'transaction_splits');
+    if (paymentsRes.error) throw RepositoryError.fromPostgrestError(paymentsRes.error, 'payments');
 
     const splitsByTx = new Map<string, DbTables['transaction_splits']['Row'][]>();
     for (const split of splitsRes.data ?? []) {
@@ -509,8 +524,21 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       splitsByTx.set(split.transaction_id, existing);
     }
 
+    const paymentsByTx = new Map<string, DbTables['payments']['Row'][]>();
+    for (const payment of paymentsRes.data ?? []) {
+      if (payment.transaction_id) {
+        const existing = paymentsByTx.get(payment.transaction_id) ?? [];
+        existing.push(payment);
+        paymentsByTx.set(payment.transaction_id, existing);
+      }
+    }
+
     return (txsRes.data ?? []).map((tx) =>
-      mapTransactionRowToDomain(tx, splitsByTx.get(tx.id) ?? [])
+      mapTransactionRowToDomain(
+        tx,
+        splitsByTx.get(tx.id) ?? [],
+        paymentsByTx.get(tx.id) ?? []
+      )
     );
   }
 
@@ -585,7 +613,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     }
 
     return {
-      ...mapTransactionRowToDomain(savedRow),
+      ...mapTransactionRowToDomain(savedRow, undefined, transaction.paid_amount),
       splits: transaction.splits,
     };
   }

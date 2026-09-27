@@ -37,8 +37,18 @@ export function mapDomainSplitsToInsert(
 
 export function mapTransactionRowToDomain(
   row: TransactionRow,
-  splits?: TransactionSplitRow[]
+  splits?: TransactionSplitRow[],
+  payments?: { amount: number | string | null }[] | number
 ): Transaction {
+  const paidAmount =
+    typeof payments === 'number'
+      ? roundCurrency(payments)
+      : payments && payments.length > 0
+      ? roundCurrency(payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0))
+      : row.status === 'paid'
+      ? roundCurrency(Number(row.amount ?? 0))
+      : 0;
+
   return {
     id: row.id,
     workspace_id: row.workspace_id,
@@ -53,6 +63,7 @@ export function mapTransactionRowToDomain(
     splits: splits && splits.length > 0 ? mapTransactionSplitsToDomain(splits) : undefined,
     description: row.description,
     amount: roundCurrency(Number(row.amount ?? 0)),
+    paid_amount: paidAmount,
     type: (row.type as TransactionType) ?? 'expense',
     transaction_date: row.transaction_date,
     due_date: row.due_date,

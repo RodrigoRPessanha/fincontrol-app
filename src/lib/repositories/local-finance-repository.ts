@@ -925,8 +925,13 @@ export class LocalFinanceRepository implements FinanceRepository {
     if (payment.transaction_id) {
       const tx = state.allTransactions.find((t) => t.id === payment.transaction_id);
       if (tx) {
-        tx.status = 'paid';
-        tx.paid_at = payment.payment_date;
+        tx.paid_amount = Number(((tx.paid_amount ?? 0) + payment.amount).toFixed(2));
+        if (tx.paid_amount >= tx.amount) {
+          tx.status = 'paid';
+          tx.paid_at = payment.payment_date;
+        } else {
+          tx.status = 'partially_paid';
+        }
       }
     }
 
@@ -1002,6 +1007,7 @@ export class LocalFinanceRepository implements FinanceRepository {
         const remaining = state.allPayments
           .filter((p) => p.transaction_id === tx.id && p.id !== id)
           .reduce((sum, p) => sum + p.amount, 0);
+        tx.paid_amount = Number(remaining.toFixed(2));
         tx.status = remaining >= tx.amount ? 'paid' : remaining > 0 ? 'partially_paid' : 'pending';
         if (remaining < tx.amount) {
           tx.paid_at = null;
