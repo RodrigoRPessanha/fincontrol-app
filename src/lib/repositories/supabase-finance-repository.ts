@@ -794,15 +794,13 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       return mapPaymentRowToDomain(fetchRow);
     }
 
-    // Pagamento avulso sem obrigação
-    const payload = mapDomainToPaymentInsert(payment);
-    const { data, error } = await this.client
-      .from('payments')
-      .insert(payload)
-      .select()
-      .single();
-    if (error) throw RepositoryError.fromPostgrestError(error, 'payments');
-    return mapPaymentRowToDomain(data);
+    // No FinControl, todo pagamento deve estar estritamente vinculado a uma obrigação (fatura, parcela ou transação)
+    throw new RepositoryError(
+      'Informe exatamente uma obrigação de destino (transação, parcela ou fatura) para registrar um pagamento.',
+      'VALIDATION_FAILED',
+      null,
+      'payments'
+    );
   }
 
   async deletePayment(id: string): Promise<void> {

@@ -784,13 +784,10 @@ describe('SupabaseFinanceRepository', () => {
     });
     await repo.savePayment({ id: 'pay-1', workspace_id: 'ws-1', amount: 60, payment_date: '2026-04-01', affects_balance: false });
 
-    // standalone insert
-    (client.from as any).mockReturnValueOnce({
-      insert: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: { id: 'pay-standalone', workspace_id: 'ws-1', amount: 30, payment_date: '2026-04-01', affects_balance: false }, error: null }),
-    });
-    await repo.savePayment({ workspace_id: 'ws-1', amount: 30, payment_date: '2026-04-01', affects_balance: false });
+    // Pagamento sem obrigação de destino deve ser estritamente rejeitado
+    await expect(
+      repo.savePayment({ workspace_id: 'ws-1', amount: 30, payment_date: '2026-04-01', affects_balance: false })
+    ).rejects.toThrow(/Informe exatamente uma obrigação de destino/);
 
     // payment with installment
     (client.rpc as any).mockResolvedValueOnce({ data: 'pay-inst', error: null });
@@ -1291,12 +1288,7 @@ describe('SupabaseFinanceRepository', () => {
     });
     await expect(repo.savePayment({ workspace_id: 'ws-1', amount: 50, payment_date: '2026-04-01', transaction_id: 'tx-1', affects_balance: true })).rejects.toThrow(RepositoryError);
 
-    // savePayment standalone insert error
-    (client.from as any).mockReturnValueOnce({
-      insert: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: null, error: err }),
-    });
+    // savePayment sem obrigação de destino error
     await expect(repo.savePayment({ workspace_id: 'ws-1', amount: 50, payment_date: '2026-04-01', affects_balance: false })).rejects.toThrow(RepositoryError);
 
     // saveTransfer update rpc error
@@ -1880,21 +1872,14 @@ describe('SupabaseFinanceRepository', () => {
     });
     expect(updatedPay.id).toBe('pay-1');
 
-    (client.from as any).mockReturnValueOnce({
-      insert: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({
-        data: { id: 'pay-std', workspace_id: 'ws-1', amount: 25, payment_date: '2026-04-01', affects_balance: false },
-        error: null,
-      }),
-    });
-    const stdPay = await repo.savePayment({
-      workspace_id: 'ws-1',
-      amount: 25,
-      payment_date: '2026-04-01',
-      affects_balance: false,
-    });
-    expect(stdPay.id).toBe('pay-std');
+    await expect(
+      repo.savePayment({
+        workspace_id: 'ws-1',
+        amount: 25,
+        payment_date: '2026-04-01',
+        affects_balance: false,
+      })
+    ).rejects.toThrow(/Informe exatamente uma obrigação de destino/);
 
     // 13. getPaymentMethods, deletePaymentMethod, deleteCategory errors
     (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: postgrestErr }) });

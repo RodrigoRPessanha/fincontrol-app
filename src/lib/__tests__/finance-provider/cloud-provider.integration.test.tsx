@@ -136,6 +136,9 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
     if (login2Err) throw new Error(`Login 2 falhou: ${login2Err.message}`);
     repo2 = new SupabaseFinanceRepository(userClient2);
 
+    // Aguarda tolerância de clock skew de tokens de autenticação (JWT issued at future)
+    await new Promise((r) => setTimeout(r, 2000));
+
     // 5. Cria Workspace compartilhado via repo1
     const ws = await repo1.createWorkspace({
       name: 'Workspace Nuvem Integrada',

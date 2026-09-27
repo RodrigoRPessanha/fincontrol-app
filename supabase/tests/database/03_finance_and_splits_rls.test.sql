@@ -66,10 +66,10 @@ SELECT throws_ok(
 SET LOCAL "request.jwt.claim.sub" = '10000000-0000-0000-0000-000000000003';
 SET LOCAL role = 'authenticated';
 
--- 3.1. Member pode criar transação
+-- 3.1. Member pode criar transação via RPC
 SELECT lives_ok(
-    'INSERT INTO public.transactions (workspace_id, description, amount, type) SELECT ws_id, ''Despesa Member'', 75.00, ''expense'' FROM rbac_vars',
-    'Member pode criar transações no workspace'
+    'SELECT fn_create_transaction_with_splits((SELECT ws_id FROM rbac_vars), ''Despesa Member'', 75.00, CURRENT_DATE, ''expense'', ''pending'')',
+    'Member pode criar transações no workspace via RPC'
 );
 
 -- 3.2. Member pode registrar acerto de contas via RPC

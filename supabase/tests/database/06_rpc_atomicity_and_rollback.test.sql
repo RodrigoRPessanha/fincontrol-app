@@ -68,9 +68,15 @@ SELECT is(
 -- ==============================================================================
 SAVEPOINT sp_before_fail;
 
--- Inserção parcial seguida de falha em RPC de rateio
-INSERT INTO public.transactions (workspace_id, description, amount, type, status)
-SELECT ws_id, 'Transação Que Falhará no Rateio', 200.00, 'expense', 'pending' FROM atomic_vars;
+-- Inserção via RPC seguida de tentativa de alteração inválida de rateio
+SELECT fn_create_transaction_with_splits(
+    (SELECT ws_id FROM atomic_vars),
+    'Transação Que Falhará no Rateio',
+    200.00,
+    CURRENT_DATE,
+    'expense',
+    'pending'
+);
 
 -- Chamar fn_set_transaction_splits com soma inválida dentro da subtransação
 SELECT throws_ok(

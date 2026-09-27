@@ -461,14 +461,14 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
       ],
     });
 
-    // UPDATE direto em transactions alterando amount sem alterar splits deve ser rejeitado pelo trigger incondicional
+    // Com a migration 030, UPDATE direto em transactions é estritamente bloqueado no nível de permissão (42501)
     const { error } = await (repo as any).client
       .from('transactions')
       .update({ amount: 150 })
       .eq('id', tx.id);
 
     expect(error).toBeDefined();
-    expect(error?.message).toMatch(/viola a conservação das frações de rateio existentes/i);
+    expect(error?.code).toBe('42501');
   });
 
   it('12. reconcilia parcelas e faturas de cartão ao atualizar valor total da compra parcelada no staging', async () => {
@@ -1196,7 +1196,7 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     expect(deleteInstErr).toBeDefined();
     expect(deleteInstErr?.code).toBe('42501');
 
-    // 3.1. Comprova via fn_check_table_privilege que authenticated não possui TRUNCATE, TRIGGER, REFERENCES (Migration 020)
+    // 3.1. Comprova via fn_check_table_privilege que authenticated não possui TRUNCATE, TRIGGER, REFERENCES (Migration 020 e 029)
     const { data: billTruncate } = await client.rpc('fn_check_table_privilege', { p_table: 'credit_card_bills', p_privilege: 'truncate' });
     expect(billTruncate).toBe(false);
     const { data: billTrigger } = await client.rpc('fn_check_table_privilege', { p_table: 'credit_card_bills', p_privilege: 'trigger' });
@@ -1214,6 +1214,73 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     expect(instReferences).toBe(false);
     const { data: instSelect } = await client.rpc('fn_check_table_privilege', { p_table: 'installments', p_privilege: 'select' });
     expect(instSelect).toBe(true);
+
+    // 3.2. Comprova Least Privilege em rateios (splits), perfis e contas (Migration 029)
+    const { data: txSplitTruncate } = await client.rpc('fn_check_table_privilege', { p_table: 'transaction_splits', p_privilege: 'truncate' });
+    expect(txSplitTruncate).toBe(false);
+    const { data: txSplitInsert } = await client.rpc('fn_check_table_privilege', { p_table: 'transaction_splits', p_privilege: 'insert' });
+    expect(txSplitInsert).toBe(false);
+
+    const { data: purchaseSplitTruncate } = await client.rpc('fn_check_table_privilege', { p_table: 'purchase_splits', p_privilege: 'truncate' });
+    expect(purchaseSplitTruncate).toBe(false);
+    const { data: purchaseSplitDelete } = await client.rpc('fn_check_table_privilege', { p_table: 'purchase_splits', p_privilege: 'delete' });
+    expect(purchaseSplitDelete).toBe(false);
+
+    const { data: profileInsert } = await client.rpc('fn_check_table_privilege', { p_table: 'profiles', p_privilege: 'insert' });
+    expect(profileInsert).toBe(false);
+    const { data: profileDelete } = await client.rpc('fn_check_table_privilege', { p_table: 'profiles', p_privilege: 'delete' });
+    expect(profileDelete).toBe(false);
+    const { data: profileTruncate } = await client.rpc('fn_check_table_privilege', { p_table: 'profiles', p_privilege: 'truncate' });
+    expect(profileTruncate).toBe(false);
+    const { data: profileSelect } = await client.rpc('fn_check_table_privilege', { p_table: 'profiles', p_privilege: 'select' });
+    expect(profileSelect).toBe(true);
+
+    const { data: accountTruncate } = await client.rpc('fn_check_table_privilege', { p_table: 'accounts', p_privilege: 'truncate' });
+    expect(accountTruncate).toBe(false);
+
+    // 3.2.1. Comprova via fn_check_table_privilege que authenticated NÃO pode executar mutações diretas nas 4 tabelas financeiras (Migration 030)
+    for (const finTable of ['payments', 'transfers', 'transactions', 'purchases']) {
+      const { data: selPriv } = await client.rpc('fn_check_table_privilege', { p_table: finTable, p_privilege: 'select' });
+      expect(selPriv).toBe(true);
+      const { data: insPriv } = await client.rpc('fn_check_table_privilege', { p_table: finTable, p_privilege: 'insert' });
+      expect(insPriv).toBe(false);
+      const { data: updPriv } = await client.rpc('fn_check_table_privilege', { p_table: finTable, p_privilege: 'update' });
+      expect(updPriv).toBe(false);
+      const { data: delPriv } = await client.rpc('fn_check_table_privilege', { p_table: finTable, p_privilege: 'delete' });
+      expect(delPriv).toBe(false);
+      const { data: trnPriv } = await client.rpc('fn_check_table_privilege', { p_table: finTable, p_privilege: 'truncate' });
+      expect(trnPriv).toBe(false);
+    }
+
+    // 3.2.2. Comprova no Cloud que DELETE direto em payments e transfers é rejeitado com 42501 (P1 do Revisor)
+    const { error: directDelPayErr } = await client
+      .from('payments')
+      .delete()
+      .eq('id', '80000000-0000-0000-0000-000000000001');
+    expect(directDelPayErr).toBeDefined();
+    expect(directDelPayErr?.code).toBe('42501');
+
+    const { error: directDelTransErr } = await client
+      .from('transfers')
+      .delete()
+      .eq('id', '80000000-0000-0000-0000-000000000001');
+    expect(directDelTransErr).toBeDefined();
+    expect(directDelTransErr?.code).toBe('42501');
+
+    const { error: directDelPurErr } = await client
+      .from('purchases')
+      .delete()
+      .eq('id', '80000000-0000-0000-0000-000000000001');
+    expect(directDelPurErr).toBeDefined();
+    expect(directDelPurErr?.code).toBe('42501');
+
+    // 3.3. Comprova que trigger functions não possuem EXECUTE para authenticated
+    const { data: triggerExec } = await client.rpc('fn_check_routine_privilege', { p_routine: 'handle_new_user()' });
+    expect(triggerExec).toBe(false);
+    const { data: preventIdExec } = await client.rpc('fn_check_routine_privilege', { p_routine: 'fn_prevent_workspace_id_change()' });
+    expect(preventIdExec).toBe(false);
+    const { data: rpcExec } = await client.rpc('fn_check_routine_privilege', { p_routine: 'fn_create_workspace(text, text, text)' });
+    expect(rpcExec).toBe(true);
 
     // 4. Comprova que o ciclo oficial via RPCs continua 100% funcional
     // Paga a fatura via RPC fn_record_payment
