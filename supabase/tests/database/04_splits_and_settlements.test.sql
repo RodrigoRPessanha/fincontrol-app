@@ -217,18 +217,20 @@ SELECT throws_ok(
     'DELETE direto em frações de rateio é bloqueado no nível de permissão'
 );
 
--- 3.9. Bloqueio parent-side: alteração direta no amount da transação que viole a conservação dos rateios existentes
+-- 3.9. Bloqueio parent-side: alteração direta no amount da transação é bloqueada no nível de permissão (42501)
 SELECT throws_ok(
     'UPDATE public.transactions SET amount = 150.00 WHERE id = (SELECT tx_id FROM split_vars)',
-    'A alteração do valor da transação (R$ 150.00) viola a conservação das frações de rateio existentes (R$ 100.00). Atualize os rateios via fn_set_transaction_splits.',
-    'UPDATE parent-side em transactions.amount é bloqueado por violação de conservação'
+    '42501',
+    NULL,
+    'UPDATE parent-side em transactions.amount é bloqueado no nível de permissão (42501)'
 );
 
--- 3.10. Bloqueio parent-side: alteração direta no total_amount da compra que viole a conservação dos rateios existentes
+-- 3.10. Bloqueio parent-side: alteração direta no total_amount da compra é bloqueada no nível de permissão (42501)
 SELECT throws_ok(
     'UPDATE public.purchases SET total_amount = 350.00 WHERE id = (SELECT pur_id FROM split_vars)',
-    'A alteração do valor total da compra parcelada (R$ 350.00) viola a conservação das frações de rateio existentes (R$ 300.00). Atualize os rateios via fn_set_purchase_splits.',
-    'UPDATE parent-side em purchases.total_amount é bloqueado por violação de conservação'
+    '42501',
+    NULL,
+    'UPDATE parent-side em purchases.total_amount é bloqueado no nível de permissão (42501)'
 );
 
 SELECT * FROM finish();

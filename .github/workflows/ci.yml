@@ -44,6 +44,13 @@ jobs:
       - name: Next.js Production Build
         run: npm run build
 
+      - name: Next.js Supabase Build
+        env:
+          NEXT_PUBLIC_DATA_MODE: supabase
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+        run: npm run build
+
       - name: Security Audit
         run: npm run audit
 

@@ -58,6 +58,14 @@ export interface FinanceProviderProps {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
+const emptyWorkspace: Workspace = {
+  id: '',
+  name: 'Nenhum workspace',
+  owner_id: '',
+  currency: 'BRL',
+  created_at: '',
+};
+
 function generateId(prefix: string, dataMode?: 'local' | 'supabase'): string {
   if (dataMode === 'supabase') {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -744,7 +752,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     return (
       allWorkspaces.find((w) => w.id === activeWorkspaceId) ||
       allWorkspaces[0] ||
-      (isSupabaseMode ? ({} as Workspace) : mockWorkspaces[0])
+      (isSupabaseMode ? emptyWorkspace : mockWorkspaces[0])
     );
   }, [allWorkspaces, activeWorkspaceId, isSupabaseMode]);
 

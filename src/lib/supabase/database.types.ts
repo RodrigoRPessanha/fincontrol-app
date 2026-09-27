@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      _db_managed_objects: {
+        Row: {
+          created_at: string
+          object_identity: string
+          object_type: string
+        }
+        Insert: {
+          created_at?: string
+          object_identity: string
+          object_type: string
+        }
+        Update: {
+          created_at?: string
+          object_identity?: string
+          object_type?: string
+        }
+        Relationships: []
+      }
       accounts: {
         Row: {
           active: boolean
@@ -1261,6 +1279,10 @@ export type Database = {
         }
         Returns: string
       }
+      fn_check_routine_privilege: {
+        Args: { p_privilege?: string; p_routine: string }
+        Returns: boolean
+      }
       fn_check_table_privilege: {
         Args: { p_privilege: string; p_table: string }
         Returns: boolean
@@ -1347,16 +1369,10 @@ export type Database = {
         }
         Returns: string
       }
-      fn_create_workspace:
-        | { Args: { p_currency?: string; p_name: string }; Returns: string }
-        | {
-            Args: {
-              p_currency?: string
-              p_name: string
-              p_tracking_mode?: string
-            }
-            Returns: string
-          }
+      fn_create_workspace: {
+        Args: { p_currency?: string; p_name: string; p_tracking_mode?: string }
+        Returns: string
+      }
       fn_delete_payment: {
         Args: { p_payment_id: string; p_workspace_id: string }
         Returns: boolean
@@ -1373,16 +1389,14 @@ export type Database = {
         Args: { p_transfer_id: string; p_workspace_id: string }
         Returns: boolean
       }
-      fn_get_or_create_credit_card_bill:
-        | { Args: { p_card_id: string; p_date: string }; Returns: string }
-        | {
-            Args: {
-              p_credit_card_id: string
-              p_reference_month: string
-              p_workspace_id: string
-            }
-            Returns: string
-          }
+      fn_get_or_create_credit_card_bill: {
+        Args: {
+          p_credit_card_id: string
+          p_reference_month: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       fn_materialize_recurring_transactions: {
         Args: { p_target_date?: string; p_workspace_id?: string }
         Returns: Json
