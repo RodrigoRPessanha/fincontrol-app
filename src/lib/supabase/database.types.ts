@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      _db_managed_objects: {
+        Row: {
+          created_at: string
+          object_identity: string
+          object_type: string
+        }
+        Insert: {
+          created_at?: string
+          object_identity: string
+          object_type: string
+        }
+        Update: {
+          created_at?: string
+          object_identity?: string
+          object_type?: string
+        }
+        Relationships: []
+      }
       accounts: {
         Row: {
           active: boolean
