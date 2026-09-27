@@ -5,6 +5,7 @@ import {
   toCents,
   fromCents,
   roundCurrency,
+  compareCurrency,
 } from '../../financial-engine';
 import { Account, Category, CreditCard, CreditCardBill, Installment, Payment, Purchase, RecurringTransaction, Transaction, Settlement, WorkspaceMember } from '../../types';
 
@@ -153,6 +154,21 @@ describe('Financial Engine - Conversão e Precisão Monetária (toCents, fromCen
     expect(roundCurrency(10.555)).toBe(10.56);
     expect(roundCurrency(10.554)).toBe(10.55);
     expect(roundCurrency(0)).toBe(0);
+  });
+
+  it('cobre casos extremos de notação científica, -0 e compareCurrency', () => {
+    // targetExp < 0 em notação científica
+    expect(toCents(1.23e-4)).toBe(0);
+    expect(toCents(6e-3)).toBe(1);
+
+    // fromCents e toCents resultando em -0
+    expect(toCents(-0.001)).toBe(0);
+    expect(fromCents(-0.0001)).toBe(0);
+
+    // compareCurrency
+    expect(compareCurrency(20, 10)).toBeGreaterThan(0);
+    expect(compareCurrency(10, 20)).toBeLessThan(0);
+    expect(compareCurrency(10, 10)).toBe(0);
   });
 });
 

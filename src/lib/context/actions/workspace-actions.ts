@@ -7,10 +7,11 @@ export function createWorkspace(
   tracking_mode: WorkspaceTrackingMode = 'full'
 ): Workspace {
   const state = deps.getState();
+  const userId = deps.getUserId();
   const newWs: Workspace = {
     id: deps.generateId('ws'),
     name: name.trim(),
-    owner_id: 'usr-1',
+    owner_id: userId,
     currency: 'BRL',
     tracking_mode,
     created_at: deps.now().toISOString(),
@@ -19,7 +20,7 @@ export function createWorkspace(
   const newMember: WorkspaceMember = {
     id: deps.generateId('wsm'),
     workspace_id: newWs.id,
-    user_id: 'usr-1',
+    user_id: userId,
     role: 'owner',
     created_at: deps.now().toISOString(),
   };

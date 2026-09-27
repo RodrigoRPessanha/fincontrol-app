@@ -101,6 +101,8 @@ export function payCreditCardBill(
 
   const finalAmount = fromCents(paymentCents);
   const shouldMutateAccount = !!(accountId && !isExpenseTracker);
+  const userId = deps.getUserId();
+
   const newPay: Payment = {
     id: deps.generateId('pay'),
     workspace_id: targetWsId,
@@ -109,7 +111,7 @@ export function payCreditCardBill(
     amount: finalAmount,
     payment_date: paymentDate,
     notes: notes || `Pagamento de fatura ${bill.reference_month}`,
-    created_by: 'usr-1',
+    created_by: userId,
     created_at: deps.now().toISOString(),
     affects_balance: shouldMutateAccount,
   };

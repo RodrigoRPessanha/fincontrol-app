@@ -44,6 +44,11 @@ describe('Financial Engine - Rateio de Despesas (calculateExpenseSplits)', () =>
       amount: 100,
       percentage: 100,
     });
+
+    const splits3 = calculateExpenseSplits(100.01, 'full_other', members, 'usr-1');
+    expect(splits3).toHaveLength(2);
+    expect(splits3[0].amount).toBe(50.01);
+    expect(splits3[1].amount).toBe(50.00);
   });
 
   it('deve calcular divisão personalizada (custom) respeitando valores fixos informados', () => {
@@ -197,6 +202,27 @@ describe('Financial Engine - Balanço Líquido e Acertos (calculateMemberNetBala
       to_member_id: 'm-p1',
       amount: 50,
     });
+  });
+
+  it('deve consolidar compras parceladas com rateio no balanço líquido dos membros', () => {
+    const pur: Purchase = {
+      id: 'pur-1',
+      workspace_id: 'ws-1',
+      description: 'Notebook parcelado',
+      total_amount: 100,
+      installment_count: 2,
+      purchase_date: '2026-09-01',
+      paid_by_member_id: 'm-p1',
+      split_type: 'equal',
+      splits: [
+        { member_id: 'm-p1', amount: 50, percentage: 50 },
+        { member_id: 'm-p2', amount: 50, percentage: 50 },
+      ],
+      created_at: '2026-09-01T10:00:00Z',
+    };
+    const resWithPur = calculateMemberNetBalances([], [], members, 'ws-1', [pur]);
+    expect(resWithPur.balances.find((b) => b.member_id === 'm-p1')?.net_balance).toBe(50);
+    expect(resWithPur.balances.find((b) => b.member_id === 'm-p2')?.net_balance).toBe(-50);
   });
 
   it('deve zerar as pendências após o registro do acerto de contas (Settlement)', () => {

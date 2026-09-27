@@ -9,8 +9,8 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'payments_single_target_chk'
     ) THEN
-        ALTER TABLE public.payments 
-        ADD CONSTRAINT payments_single_target_chk 
+        ALTER TABLE public.payments
+        ADD CONSTRAINT payments_single_target_chk
         CHECK (num_nonnulls(transaction_id, installment_id, credit_card_bill_id) = 1);
     END IF;
 END $$;
@@ -88,7 +88,7 @@ BEGIN
     -- Valida Conta
     IF NEW.account_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.accounts 
+            SELECT 1 FROM public.accounts
             WHERE id = NEW.account_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A conta bancária informada não pertence ao mesmo workspace da transação.';
@@ -98,7 +98,7 @@ BEGIN
     -- Valida Categoria
     IF NEW.category_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.categories 
+            SELECT 1 FROM public.categories
             WHERE id = NEW.category_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A categoria informada não pertence ao mesmo workspace da transação.';
@@ -108,7 +108,7 @@ BEGIN
     -- Valida Cartão de Crédito
     IF NEW.credit_card_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.credit_cards 
+            SELECT 1 FROM public.credit_cards
             WHERE id = NEW.credit_card_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'O cartão de crédito informado não pertence ao mesmo workspace da transação.';
@@ -118,7 +118,7 @@ BEGIN
     -- Valida Fatura de Cartão
     IF NEW.credit_card_bill_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.credit_card_bills 
+            SELECT 1 FROM public.credit_card_bills
             WHERE id = NEW.credit_card_bill_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A fatura informada não pertence ao mesmo workspace da transação.';
@@ -128,7 +128,7 @@ BEGIN
     -- Valida Método de Pagamento
     IF NEW.payment_method_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.payment_methods 
+            SELECT 1 FROM public.payment_methods
             WHERE id = NEW.payment_method_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'O método de pagamento informado não pertence ao mesmo workspace da transação.';
@@ -138,7 +138,7 @@ BEGIN
     -- Valida Recorrência
     IF NEW.recurring_transaction_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.recurring_transactions 
+            SELECT 1 FROM public.recurring_transactions
             WHERE id = NEW.recurring_transaction_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A recorrência vinculada não pertence ao mesmo workspace da transação.';
@@ -162,7 +162,7 @@ AS $$
 BEGIN
     -- Valida Conta
     IF NOT EXISTS (
-        SELECT 1 FROM public.accounts 
+        SELECT 1 FROM public.accounts
         WHERE id = NEW.account_id AND workspace_id = NEW.workspace_id
     ) THEN
         RAISE EXCEPTION 'A conta bancária do pagamento não pertence ao workspace informado.';
@@ -171,7 +171,7 @@ BEGIN
     -- Valida Transação vinculada
     IF NEW.transaction_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.transactions 
+            SELECT 1 FROM public.transactions
             WHERE id = NEW.transaction_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A transação do pagamento não pertence ao mesmo workspace.';
@@ -181,7 +181,7 @@ BEGIN
     -- Valida Fatura vinculada
     IF NEW.credit_card_bill_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.credit_card_bills 
+            SELECT 1 FROM public.credit_card_bills
             WHERE id = NEW.credit_card_bill_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'A fatura do pagamento não pertence ao mesmo workspace.';
@@ -202,7 +202,7 @@ BEGIN
     -- Valida Método de Pagamento
     IF NEW.payment_method_id IS NOT NULL THEN
         IF NOT EXISTS (
-            SELECT 1 FROM public.payment_methods 
+            SELECT 1 FROM public.payment_methods
             WHERE id = NEW.payment_method_id AND workspace_id = NEW.workspace_id
         ) THEN
             RAISE EXCEPTION 'O método de pagamento não pertence ao workspace informado.';
@@ -218,4 +218,3 @@ CREATE TRIGGER trg_check_payment_workspace_integrity
     BEFORE INSERT OR UPDATE ON public.payments
     FOR EACH ROW
     EXECUTE FUNCTION public.fn_check_payment_workspace_integrity();
-

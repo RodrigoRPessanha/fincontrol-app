@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cn, formatCurrency, formatDate, formatMonthYear, getStatusBadge, sanitizeCsvCell } from '../utils';
+import { cn, formatCurrency, formatDate, formatMonthYear, getStatusBadge, sanitizeCsvCell, getSafeRedirectPath } from '../utils';
 
 describe('Utils - cn (Tailwind Class Merging)', () => {
   it('deve combinar e mesclar classes do Tailwind corretamente', () => {
@@ -116,5 +116,53 @@ describe('Utils - sanitizeCsvCell', () => {
     expect(sanitizeCsvCell(null)).toBe('""');
     expect(sanitizeCsvCell(undefined)).toBe('""');
     expect(sanitizeCsvCell('')).toBe('""');
+  });
+});
+
+describe('Utils - getSafeRedirectPath', () => {
+  it('deve aceitar caminhos relativos válidos', () => {
+    expect(getSafeRedirectPath('/dashboard')).toBe('/dashboard');
+    expect(getSafeRedirectPath('/accounts?id=123')).toBe('/accounts?id=123');
+    expect(getSafeRedirectPath('/settings#profile')).toBe('/settings#profile');
+    expect(getSafeRedirectPath('/')).toBe('/');
+  });
+
+  it('deve bloquear tentativa de open redirect com @evil.example', () => {
+    expect(getSafeRedirectPath('@evil.example/path')).toBe('/');
+    expect(getSafeRedirectPath('/@evil.example')).toBe('/');
+    expect(getSafeRedirectPath('/dashboard@evil.com')).toBe('/');
+  });
+
+  it('deve bloquear URLs com barras duplas protocol-relative ou barras invertidas', () => {
+    expect(getSafeRedirectPath('//evil.example')).toBe('/');
+    expect(getSafeRedirectPath('/\\evil.example')).toBe('/');
+    expect(getSafeRedirectPath('///evil.example')).toBe('/');
+  });
+
+  it('deve bloquear URLs absolutas e esquemas perigosos', () => {
+    expect(getSafeRedirectPath('https://evil.com/dashboard')).toBe('/');
+    expect(getSafeRedirectPath('http://evil.com/dashboard')).toBe('/');
+    expect(getSafeRedirectPath('javascript:alert(1)')).toBe('/');
+    expect(getSafeRedirectPath('data:text/html,<script>alert(1)</script>')).toBe('/');
+  });
+
+  it('deve bloquear caracteres de controle', () => {
+    expect(getSafeRedirectPath('/dashboard\n/evil')).toBe('/');
+    expect(getSafeRedirectPath('/dashboard\r/evil')).toBe('/');
+    expect(getSafeRedirectPath('/dashboard\x00')).toBe('/');
+  });
+
+  it('deve retornar fallback customizado quando especificado', () => {
+    expect(getSafeRedirectPath(null, '/fallback')).toBe('/fallback');
+    expect(getSafeRedirectPath(undefined, '/auth/login')).toBe('/auth/login');
+    expect(getSafeRedirectPath('', '/custom')).toBe('/custom');
+    expect(getSafeRedirectPath('//evil.com', '/safe')).toBe('/safe');
+  });
+
+  it('deve capturar falhas de parsing de URL malformada ou origem divergente', () => {
+    // Malformed URI that throws in URL parser
+    expect(getSafeRedirectPath('/%E0%A4%A')).toBe('/');
+    // Non-matching origin check
+    expect(getSafeRedirectPath('http://outra-origem.com/path')).toBe('/');
   });
 });

@@ -43,6 +43,12 @@ export interface FinanceState {
 
 export interface FinanceContextType {
   isLoaded: boolean;
+  isLoading: boolean;
+  isSaving: boolean;
+  error: Error | null;
+  clearError: () => void;
+  refreshData: () => Promise<void>;
+  dataMode: 'local' | 'supabase';
   workspaces: Workspace[];
   activeWorkspace: Workspace;
   workspaceMembers: WorkspaceMember[];

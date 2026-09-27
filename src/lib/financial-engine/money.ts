@@ -89,17 +89,7 @@ export function toCents(amount: number): number {
   // Limite de segurança de representação inteira em centavos
   if (abs * 100 > Number.MAX_SAFE_INTEGER) return 0;
 
-  // Deslocamento de escala decimal imune a números já formatados em notação científica (ex: 1e-7)
-  const parts = String(abs).split(/[eE]/);
-  const base = parts[0];
-  const exp = parts[1] ? Number(parts[1]) : 0;
-  const targetExp = exp + 2;
-  const num = Number(`${base}e${targetExp >= 0 ? '+' : ''}${targetExp}`);
-
-  if (!Number.isFinite(num)) return 0;
-  const rounded = sign * Math.round(num);
-
-  return !Number.isFinite(rounded) || !Number.isSafeInteger(rounded) || Object.is(rounded, -0) ? 0 : rounded;
+  return sign * Math.round(Number(`${abs}e2`));
 }
 
 /**

@@ -104,6 +104,7 @@ export function addTransaction(
   let nextPayments = currentState.allPayments;
 
   if (newTx.status === 'paid' && !newTx.credit_card_id) {
+    const userId = deps.getUserId();
     const shouldMutateAccount = !!(newTx.account_id && !isExpenseTracker);
 
     if (shouldMutateAccount) {
@@ -129,7 +130,7 @@ export function addTransaction(
       payment_method_id: newTx.payment_method_id || undefined,
       amount: newTx.amount,
       payment_date: format(deps.now(), 'yyyy-MM-dd'),
-      created_by: 'usr-1',
+      created_by: userId,
       created_at: deps.now().toISOString(),
       affects_balance: shouldMutateAccount,
     };

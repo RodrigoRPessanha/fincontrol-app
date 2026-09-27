@@ -80,3 +80,44 @@ export function sanitizeCsvCell(val: string | number | undefined | null): string
   }
   return `"${str}"`;
 }
+
+/**
+ * Valida e sanitiza caminhos de redirecionamento interno.
+ * Impede Open Redirects (ex: //evil.com, @evil.example, https://...),
+ * ataques baseados em esquemas javascript: ou caracteres de controle,
+ * garantindo retorno de um caminho estritamente relativo interno que começa com '/'.
+ */
+export function getSafeRedirectPath(target: string | null | undefined, fallback: string = '/'): string {
+  if (!target || typeof target !== 'string') {
+    return fallback;
+  }
+  const trimmed = target.trim();
+  // Deve iniciar com uma única '/' e não '//' ou '/\'
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.startsWith('/\\')) {
+    return fallback;
+  }
+  // Não pode conter '@' (impede http://localhost:3000@evil.com)
+  if (trimmed.includes('@')) {
+    return fallback;
+  }
+  // Não pode conter caracteres de controle ASCII
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) {
+    return fallback;
+  }
+  // Verifica se a codificação de URI é válida
+  try {
+    decodeURI(trimmed);
+  } catch {
+    return fallback;
+  }
+  try {
+    const dummyOrigin = 'http://localhost';
+    const parsed = new URL(trimmed, dummyOrigin);
+    if (parsed.origin !== dummyOrigin || !parsed.pathname.startsWith('/')) {
+      return fallback;
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
+}
