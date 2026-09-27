@@ -38,6 +38,7 @@ export function Header() {
   const [isNewWsModalOpen, setIsNewWsModalOpen] = useState(false);
   const [newWsName, setNewWsName] = useState('');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const workspaceName = activeWorkspace.name || 'Nenhum workspace';
 
   const handleCreateWs = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,10 +60,10 @@ export function Header() {
               className="flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-sm font-bold text-xs">
-                {activeWorkspace.name.charAt(0)}
+                {activeWorkspace.name?.charAt(0) || '—'}
               </div>
               <span className="max-w-[140px] truncate sm:max-w-[200px]">
-                {activeWorkspace.name}
+                {workspaceName}
               </span>
               <ChevronDown className="h-4 w-4 text-slate-500" />
             </button>
