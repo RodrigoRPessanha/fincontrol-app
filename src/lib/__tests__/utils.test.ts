@@ -1,5 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { cn, formatCurrency, formatDate, formatMonthYear, getStatusBadge, sanitizeCsvCell, getSafeRedirectPath } from '../utils';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  cn,
+  formatCurrency,
+  formatDate,
+  formatMonthYear,
+  getStatusBadge,
+  sanitizeCsvCell,
+  getSafeRedirectPath,
+  parseCurrencyInput,
+} from '../utils';
 
 describe('Utils - cn (Tailwind Class Merging)', () => {
   it('deve combinar e mesclar classes do Tailwind corretamente', () => {
@@ -54,8 +63,9 @@ describe('Utils - formatDate', () => {
     expect(formatDate('2026/08/22')).toBe('22/08/2026');
   });
 
-  it('deve retornar a string original se a data for inválida', () => {
+  it('deve retornar a string original se a data for inválida ou se a formatação lançar exceção', () => {
     expect(formatDate('data-invalida')).toBe('data-invalida');
+    expect(formatDate('2026-08-22', 'invalid format \'\'\'')).toBe('2026-08-22');
   });
 });
 
@@ -164,5 +174,41 @@ describe('Utils - getSafeRedirectPath', () => {
     expect(getSafeRedirectPath('/%E0%A4%A')).toBe('/');
     // Non-matching origin check
     expect(getSafeRedirectPath('http://outra-origem.com/path')).toBe('/');
+  });
+});
+
+describe('Utils - parseCurrencyInput', () => {
+  it('deve converter valores brasileiros com vírgula decimal e separador de milhar', () => {
+    expect(parseCurrencyInput('1.234,56')).toBe(1234.56);
+    expect(parseCurrencyInput('12,34')).toBe(12.34);
+    expect(parseCurrencyInput('0,50')).toBe(0.5);
+    expect(parseCurrencyInput('1234,56')).toBe(1234.56);
+  });
+
+  it('deve converter valores internacionais com ponto decimal e vírgula de milhar', () => {
+    expect(parseCurrencyInput('1,234.56')).toBe(1234.56);
+    expect(parseCurrencyInput('12.34')).toBe(12.34);
+    expect(parseCurrencyInput('0.50')).toBe(0.5);
+    expect(parseCurrencyInput('1234.56')).toBe(1234.56);
+  });
+
+  it('deve converter números inteiros puros', () => {
+    expect(parseCurrencyInput('100')).toBe(100);
+    expect(parseCurrencyInput('1234')).toBe(1234);
+    expect(parseCurrencyInput('0')).toBe(0);
+  });
+
+  it('deve retornar NaN para strings vazias, com espaços ou caracteres inválidos', () => {
+    expect(parseCurrencyInput('')).toBeNaN();
+    expect(parseCurrencyInput('   ')).toBeNaN();
+    expect(parseCurrencyInput('abc')).toBeNaN();
+    expect(parseCurrencyInput('12.34.56')).toBeNaN();
+    expect(parseCurrencyInput('12,34,56')).toBeNaN();
+    expect(parseCurrencyInput('R$ 10,00')).toBeNaN();
+
+    // Valores que geram Infinity
+    expect(parseCurrencyInput('9'.repeat(400) + ',00')).toBeNaN();
+    expect(parseCurrencyInput('9'.repeat(400) + '.00')).toBeNaN();
+    expect(parseCurrencyInput('9'.repeat(400))).toBeNaN();
   });
 });

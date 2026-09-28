@@ -299,6 +299,36 @@ describe('Transaction & Split Mappers', () => {
 
     const directSplits = mapTransactionSplitsToDomain(splitRows);
     expect(directSplits.length).toBe(2);
+
+    // mapTransactionRowToDomain com array de pagamentos
+    const domainWithPayments = mapTransactionRowToDomain(txRow, splitRows, [
+      { amount: 50 },
+      { amount: 25 },
+      { amount: null },
+    ]);
+    expect(domainWithPayments.paid_amount).toBe(75);
+
+    // mapTransactionRowToDomain com payments como número
+    const domainWithNum = mapTransactionRowToDomain(txRow, splitRows, 150);
+    expect(domainWithNum.paid_amount).toBe(150);
+
+    // mapTransactionRowToDomain com payments vazio e status pago
+    const domainPaidEmpty = mapTransactionRowToDomain({ ...txRow, status: 'paid' }, splitRows, []);
+    expect(domainPaidEmpty.paid_amount).toBe(250);
+
+    // mapTransactionRowToDomain com payments vazio e status pendente
+    const domainPendingEmpty = mapTransactionRowToDomain({ ...txRow, status: 'pending' }, splitRows, []);
+    expect(domainPendingEmpty.paid_amount).toBe(0);
+
+    // mapTransactionSplitsToDomain com amount null (linha 19)
+    const nullAmountSplits = mapTransactionSplitsToDomain([
+      { id: 's-null', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'mem-1', amount: null as any, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' }
+    ]);
+    expect(nullAmountSplits[0].amount).toBe(0);
+
+    // mapTransactionRowToDomain com row.amount null e status paid (linha 49)
+    const paidNullAmount = mapTransactionRowToDomain({ ...txRow, amount: null as any, status: 'paid' }, splitRows, []);
+    expect(paidNullAmount.paid_amount).toBe(0);
   });
 });
 

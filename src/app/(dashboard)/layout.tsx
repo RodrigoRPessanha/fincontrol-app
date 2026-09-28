@@ -2,6 +2,7 @@ import React from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { MobileNav } from '@/components/layout/MobileNav';
+import { GlobalErrorBanner } from '@/components/shared/GlobalErrorBanner';
 
 export default function DashboardLayout({
   children,
@@ -17,6 +18,7 @@ export default function DashboardLayout({
       <div className="flex flex-1 flex-col pb-20 lg:pb-8">
         <Header />
         <main className="flex-1 px-4 py-6 sm:px-8 max-w-7xl w-full mx-auto">
+          <GlobalErrorBanner />
           {children}
         </main>
       </div>

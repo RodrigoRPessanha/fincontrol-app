@@ -85,6 +85,7 @@ export default function ReportsPage() {
       paymentMethodId?: string;
       paymentMethodName: string;
       amount: number;
+      paidAmount?: number;
       status: string;
     }[] = [];
 
@@ -104,6 +105,7 @@ export default function ReportsPage() {
         paymentMethodId: t.payment_method_id || undefined,
         paymentMethodName: pm?.name || 'Outro / Sem Método',
         amount: t.amount,
+        paidAmount: t.paid_amount ?? (t.status === 'paid' ? t.amount : 0),
         status: t.status,
       });
     });
@@ -125,6 +127,7 @@ export default function ReportsPage() {
         paymentMethodId: pur?.payment_method_id || undefined,
         paymentMethodName: pm?.name || 'Outro / Sem Método',
         amount: i.amount,
+        paidAmount: i.paid_amount ?? (i.status === 'paid' ? i.amount : 0),
         status: i.status,
       });
     });
@@ -179,14 +182,18 @@ export default function ReportsPage() {
 
   const paidExpensesCents = useMemo(() => {
     return reportRows
-      .filter((r) => r.type === 'expense' && r.status === 'paid')
-      .reduce((acc, r) => acc + toCents(r.amount), 0);
+      .filter((r) => r.type === 'expense')
+      .reduce((acc, r) => acc + toCents(r.paidAmount || (r.status === 'paid' ? r.amount : 0)), 0);
   }, [reportRows]);
 
   const pendingExpensesCents = useMemo(() => {
     return reportRows
-      .filter((r) => r.type === 'expense' && r.status !== 'paid')
-      .reduce((acc, r) => acc + toCents(r.amount), 0);
+      .filter((r) => r.type === 'expense')
+      .reduce((acc, r) => {
+        const paidCents = toCents(r.paidAmount || (r.status === 'paid' ? r.amount : 0));
+        const totalCents = toCents(r.amount);
+        return acc + Math.max(0, totalCents - paidCents);
+      }, 0);
   }, [reportRows]);
 
   const totalExpensePeriodCents = toCents(totalExpensePeriod);

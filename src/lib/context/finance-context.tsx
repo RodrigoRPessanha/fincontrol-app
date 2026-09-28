@@ -600,20 +600,29 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const failedEntityIdsRef = useRef<Set<string>>(new Set());
   const workspaceSwitchSeqRef = useRef(0);
 
-  const runMutation = useCallback(
+  const runMutationInternal = useCallback(
     <T,>(
       localAction: () => T,
       remotePersist?: (result: T, confirmPending?: () => void) => Promise<unknown>,
       targetWorkspaceId?: string,
       entityId?: string
-    ): T => {
+    ): { result: T; done: Promise<T> } => {
       if (dataMode === 'supabase' && !currentUserId) {
         throw new Error('Operação não permitida: usuário não autenticado no modo Supabase.');
       }
 
       if (dataMode === 'local' || !remotePersist) {
-        return localAction();
+        const res = localAction();
+        return { result: res, done: Promise.resolve(res) };
       }
+
+      let resolveRemote!: (value: T) => void;
+      let rejectRemote!: (reason: any) => void;
+      const done = new Promise<T>((resolve, reject) => {
+        resolveRemote = resolve;
+        rejectRemote = reject;
+      });
+      done.catch(() => {});
 
       const wsId = targetWorkspaceId ?? stateRef.current.activeWorkspaceId;
       if (pendingMutationsCountRef.current === 0) {
@@ -622,7 +631,13 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         failedEntityIdsRef.current.clear();
       }
       const previousState = stateRef.current;
-      const result = localAction();
+      let result: T;
+      try {
+        result = localAction();
+      } catch (err) {
+        rejectRemote(err);
+        throw err;
+      }
       const afterState = stateRef.current;
       const changedIds = collectChangedIds(previousState, afterState);
       if (entityId) {
@@ -675,6 +690,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
             if (failedWorkspacesRef.current.size === 0) {
               setError(null);
             }
+            resolveRemote(result);
           } catch (err) {
             console.error('Falha na persistência remota, reconciliando estado com repositório:', err);
             const errorObj = err instanceof Error ? err : new Error(String(err));
@@ -683,6 +699,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
             for (const id of changedIds) {
               failedEntityIdsRef.current.add(id);
             }
+            rejectRemote(errorObj);
           } finally {
             confirmPending();
             pendingMutationsCountRef.current = Math.max(0, pendingMutationsCountRef.current - 1);
@@ -743,9 +760,21 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
           }
         });
 
-      return result;
+      return { result, done };
     },
     [dataMode, effectiveRepository, commitState, currentUserId]
+  );
+
+  const runMutation = useCallback(
+    <T,>(
+      localAction: () => T,
+      remotePersist?: (result: T, confirmPending?: () => void) => Promise<unknown>,
+      targetWorkspaceId?: string,
+      entityId?: string
+    ): T => {
+      return runMutationInternal(localAction, remotePersist, targetWorkspaceId, entityId).result;
+    },
+    [runMutationInternal]
   );
 
   const activeWorkspace = useMemo(() => {
@@ -1103,12 +1132,12 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     [deps, effectiveRepository, runMutation, resolveCanonicalId, commitState]
   );
 
-  const handlePayCreditCardBill = useCallback(
+  const executePayCreditCardBill = useCallback(
     (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
       const canonicalBillId = resolveCanonicalId(billId);
       const canonicalAccountId = resolveCanonicalId(accountId);
-      return runMutation(
+      return runMutationInternal(
         () => actions.payCreditCardBill(deps, billId, accountId, amount, paymentDate, notes),
         async (res) => {
           await effectiveRepository.savePayment({
@@ -1124,7 +1153,21 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, resolveCanonicalId]
+    [deps, effectiveRepository, runMutationInternal, resolveCanonicalId]
+  );
+
+  const handlePayCreditCardBill = useCallback(
+    (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string): Payment => {
+      return executePayCreditCardBill(billId, accountId, amount, paymentDate, notes).result;
+    },
+    [executePayCreditCardBill]
+  );
+
+  const handlePayCreditCardBillAsync = useCallback(
+    async (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string): Promise<Payment> => {
+      return executePayCreditCardBill(billId, accountId, amount, paymentDate, notes).done;
+    },
+    [executePayCreditCardBill]
   );
 
   const handleAddPaymentMethod = useCallback(
@@ -1364,10 +1407,10 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     [deps, effectiveRepository, runMutation, commitState, resolveCanonicalId]
   );
 
-  const handleRecordPayment = useCallback(
+  const executeRecordPayment = useCallback(
     (data: Parameters<typeof actions.recordPayment>[1]) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      return runMutation(
+      return runMutationInternal(
         () => actions.recordPayment(deps, data),
         async (res) => {
           const canonicalInstallmentId = resolveCanonicalId(data.installment_id);
@@ -1398,7 +1441,21 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, resolveCanonicalId]
+    [deps, effectiveRepository, runMutationInternal, commitState, resolveCanonicalId]
+  );
+
+  const handleRecordPayment = useCallback(
+    (data: Parameters<typeof actions.recordPayment>[1]): Payment => {
+      return executeRecordPayment(data).result;
+    },
+    [executeRecordPayment]
+  );
+
+  const handleRecordPaymentAsync = useCallback(
+    async (data: Parameters<typeof actions.recordPayment>[1]): Promise<Payment> => {
+      return executeRecordPayment(data).done;
+    },
+    [executeRecordPayment]
   );
 
   const handleCreateTransfer = useCallback(
@@ -1678,6 +1735,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         addCreditCard: handleAddCreditCard,
         updateCreditCard: handleUpdateCreditCard,
         payCreditCardBill: handlePayCreditCardBill,
+        payCreditCardBillAsync: handlePayCreditCardBillAsync,
 
         paymentMethods,
         allWorkspacePaymentMethods,
@@ -1700,6 +1758,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
 
         payments,
         recordPayment: handleRecordPayment,
+        recordPaymentAsync: handleRecordPaymentAsync,
 
         transfers,
         createTransfer: handleCreateTransfer,
@@ -1724,6 +1783,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
 
         viewPerspective,
         setViewPerspective,
+        waitForPendingMutations: useCallback(() => mutationQueueRef.current, []),
       }}
     >
       {children}

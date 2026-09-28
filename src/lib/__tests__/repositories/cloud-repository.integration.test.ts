@@ -1417,4 +1417,101 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     await repo.deleteRecurring(recCard.id);
     await repo.deleteCategory(category.id);
   });
+
+  it('25. lida com pagamentos parciais em despesas: snapshot e lista refletem paid_amount e status, rejeita pagamento que excede saldo restante e quita com pagamento final', async () => {
+    // 1. Cria uma categoria para o teste
+    const cat = await repo.saveCategory({
+      workspace_id: testWorkspaceId,
+      name: 'Despesa Parcial Test',
+      type: 'expense',
+      color: '#ef4444',
+      icon: 'receipt',
+      active: true,
+    });
+
+    // 2. Cria despesa de R$ 1.234,00 (cenário relatado pelo revisor)
+    const expense = await repo.saveTransaction({
+      workspace_id: testWorkspaceId,
+      description: 'Licença Software Corporativo',
+      amount: 1234.0,
+      type: 'expense',
+      status: 'pending',
+      transaction_date: '2026-09-27',
+      due_date: '2026-09-27',
+      category_id: cat.id,
+      paid_amount: 0,
+    });
+
+    expect(expense.id).toBeDefined();
+    expect(expense.amount).toBe(1234.0);
+
+    // 3. Registra pagamento parcial de R$ 12,34
+    const payment1 = await repo.savePayment({
+      workspace_id: testWorkspaceId,
+      transaction_id: expense.id,
+      account_id: testAccountId,
+      amount: 12.34,
+      payment_date: '2026-09-27',
+      affects_balance: true,
+    });
+
+    expect(payment1.id).toBeDefined();
+    expect(payment1.amount).toBe(12.34);
+
+    // 4. Valida loadSnapshot: status deve ser 'partially_paid' e paid_amount deve ser 12.34
+    const snapshotAfterP1 = await repo.loadSnapshot(testWorkspaceId);
+    const snapTx1 = snapshotAfterP1.allTransactions.find((t) => t.id === expense.id);
+    expect(snapTx1).toBeDefined();
+    expect(snapTx1?.status).toBe('partially_paid');
+    expect(snapTx1?.paid_amount).toBe(12.34);
+
+    // 5. Valida getTransactions: status deve ser 'partially_paid' e paid_amount deve ser 12.34
+    const txsAfterP1 = await repo.getTransactions(testWorkspaceId);
+    const listTx1 = txsAfterP1.find((t) => t.id === expense.id);
+    expect(listTx1).toBeDefined();
+    expect(listTx1?.status).toBe('partially_paid');
+    expect(listTx1?.paid_amount).toBe(12.34);
+
+    // 6. Tentar pagar R$ 1.234,00 deve falhar no banco (excede o saldo restante de R$ 1.221,66)
+    await expect(
+      repo.savePayment({
+        workspace_id: testWorkspaceId,
+        transaction_id: expense.id,
+        account_id: testAccountId,
+        amount: 1234.0,
+        payment_date: '2026-09-27',
+        affects_balance: true,
+      })
+    ).rejects.toThrow(/excede o saldo restante/i);
+
+    // 7. Registra pagamento do valor restante de R$ 1.221,66
+    const payment2 = await repo.savePayment({
+      workspace_id: testWorkspaceId,
+      transaction_id: expense.id,
+      account_id: testAccountId,
+      amount: 1221.66,
+      payment_date: '2026-09-27',
+      affects_balance: true,
+    });
+
+    expect(payment2.id).toBeDefined();
+    expect(payment2.amount).toBe(1221.66);
+
+    // 8. Valida loadSnapshot e getTransactions: agora status deve ser 'paid' e paid_amount 1234.00
+    const snapshotFinal = await repo.loadSnapshot(testWorkspaceId);
+    const snapTxFinal = snapshotFinal.allTransactions.find((t) => t.id === expense.id);
+    expect(snapTxFinal?.status).toBe('paid');
+    expect(snapTxFinal?.paid_amount).toBe(1234.0);
+
+    const txsFinal = await repo.getTransactions(testWorkspaceId);
+    const listTxFinal = txsFinal.find((t) => t.id === expense.id);
+    expect(listTxFinal?.status).toBe('paid');
+    expect(listTxFinal?.paid_amount).toBe(1234.0);
+
+    // 9. Limpeza
+    await repo.deletePayment(payment2.id);
+    await repo.deletePayment(payment1.id);
+    await repo.deleteTransaction(expense.id);
+    await repo.deleteCategory(cat.id);
+  });
 });
