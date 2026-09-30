@@ -17,7 +17,11 @@ type InstallmentInsert = Database['public']['Tables']['installments']['Insert'];
 
 export function mapPurchaseSplitsToDomain(rows: PurchaseSplitRow[]): TransactionSplit[] {
   return rows.map((r) => ({
-    member_id: r.member_id,
+    id: r.id,
+    workspace_id: r.workspace_id,
+    purchase_id: r.purchase_id,
+    member_id: r.member_id ?? undefined,
+    person_id: r.person_id ?? undefined,
     amount: roundCurrency(Number(r.amount ?? 0)),
     percentage: r.percentage !== null && r.percentage !== undefined ? Number(r.percentage) : undefined,
   }));
@@ -31,7 +35,8 @@ export function mapDomainPurchaseSplitsToInsert(
   return splits.map((s) => ({
     purchase_id: purchaseId,
     workspace_id: workspaceId,
-    member_id: s.member_id,
+    member_id: s.member_id ?? null,
+    person_id: s.person_id ?? null,
     amount: roundCurrency(s.amount),
     percentage: s.percentage !== undefined ? s.percentage : null,
   }));
@@ -85,6 +90,7 @@ export function mapPurchaseRowToDomain(
     installment_count: row.installment_count,
     paid_installments_count: row.paid_installments_count ?? 0,
     paid_by_member_id: row.paid_by_member_id ?? undefined,
+    paid_by_person_id: row.paid_by_person_id ?? undefined,
     split_type: (row.split_type as SplitType) ?? undefined,
     splits: splits && splits.length > 0 ? mapPurchaseSplitsToDomain(splits) : undefined,
     purchase_date: row.purchase_date,
@@ -109,6 +115,7 @@ export function mapDomainToPurchaseInsert(
     installment_count: domain.installment_count,
     paid_installments_count: domain.paid_installments_count ?? 0,
     paid_by_member_id: domain.paid_by_member_id ?? null,
+    paid_by_person_id: domain.paid_by_person_id ?? null,
     split_type: domain.split_type ?? 'individual',
     purchase_date: domain.purchase_date,
     created_by: domain.created_by ?? null,

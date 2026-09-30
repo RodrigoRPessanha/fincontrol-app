@@ -15,7 +15,11 @@ type TransactionSplitInsert = Database['public']['Tables']['transaction_splits']
 
 export function mapTransactionSplitsToDomain(rows: TransactionSplitRow[]): TransactionSplit[] {
   return rows.map((r) => ({
-    member_id: r.member_id,
+    id: r.id,
+    workspace_id: r.workspace_id,
+    transaction_id: r.transaction_id,
+    member_id: r.member_id ?? undefined,
+    person_id: r.person_id ?? undefined,
     amount: roundCurrency(Number(r.amount ?? 0)),
     percentage: r.percentage !== null && r.percentage !== undefined ? Number(r.percentage) : undefined,
   }));
@@ -29,7 +33,8 @@ export function mapDomainSplitsToInsert(
   return splits.map((s) => ({
     transaction_id: transactionId,
     workspace_id: workspaceId,
-    member_id: s.member_id,
+    member_id: s.member_id ?? null,
+    person_id: s.person_id ?? null,
     amount: roundCurrency(s.amount),
     percentage: s.percentage !== undefined ? s.percentage : null,
   }));
@@ -59,6 +64,7 @@ export function mapTransactionRowToDomain(
     credit_card_bill_id: row.credit_card_bill_id ?? undefined,
     recurring_transaction_id: row.recurring_transaction_id ?? undefined,
     paid_by_member_id: row.paid_by_member_id ?? undefined,
+    paid_by_person_id: row.paid_by_person_id ?? undefined,
     split_type: (row.split_type as SplitType) ?? undefined,
     splits: splits && splits.length > 0 ? mapTransactionSplitsToDomain(splits) : undefined,
     description: row.description,
@@ -89,6 +95,7 @@ export function mapDomainToTransactionInsert(
     credit_card_bill_id: domain.credit_card_bill_id ?? null,
     recurring_transaction_id: domain.recurring_transaction_id ?? null,
     paid_by_member_id: domain.paid_by_member_id ?? null,
+    paid_by_person_id: domain.paid_by_person_id ?? null,
     split_type: domain.split_type ?? 'individual',
     description: domain.description,
     amount: roundCurrency(domain.amount),

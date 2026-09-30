@@ -82,9 +82,6 @@ export function deleteAccount(
     allTransactions: state.allTransactions.map((t) =>
       t.account_id === id ? { ...t, account_id: undefined } : t
     ),
-    allPurchases: state.allPurchases.map((pur) =>
-      pur.account_id === id ? { ...pur, account_id: undefined } : pur
-    ),
     allRecurring: state.allRecurring.map((r) =>
       r.account_id === id ? { ...r, account_id: undefined } : r
     ),

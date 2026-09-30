@@ -725,25 +725,23 @@ describe('SupabaseFinanceRepository', () => {
     const settlements = await repo.getSettlements('ws-1');
     expect(settlements.length).toBe(1);
 
+    (client.rpc as any).mockResolvedValueOnce({ data: 's-1', error: null });
     (client.from as any).mockReturnValueOnce({
-      insert: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: { id: 's-1', workspace_id: 'ws-1', from_member_id: 'm-1', to_member_id: 'm-2', amount: 50, settlement_date: '2026-04-01' }, error: null }),
     });
     await repo.saveSettlement({ workspace_id: 'ws-1', from_member_id: 'm-1', to_member_id: 'm-2', amount: 50, settlement_date: '2026-04-01' });
 
+    (client.rpc as any).mockResolvedValueOnce({ data: 's-1', error: null });
     (client.from as any).mockReturnValueOnce({
-      update: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: { id: 's-1', workspace_id: 'ws-1', from_member_id: 'm-1', to_member_id: 'm-2', amount: 75, settlement_date: '2026-04-01' }, error: null }),
     });
     await repo.saveSettlement({ id: 's-1', workspace_id: 'ws-1', from_member_id: 'm-1', to_member_id: 'm-2', amount: 75, settlement_date: '2026-04-01' });
 
-    (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
-    });
+    (client.rpc as any).mockResolvedValueOnce({ data: true, error: null });
     await expect(repo.deleteSettlement('s-1')).resolves.toBeUndefined();
   });
 
@@ -1132,10 +1130,7 @@ describe('SupabaseFinanceRepository', () => {
     });
     await expect(repo.getSettlements('ws-1')).rejects.toThrow(RepositoryError);
 
-    (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: err }),
-    });
+    (client.rpc as any).mockResolvedValueOnce({ data: null, error: err });
     await expect(repo.deleteSettlement('s-1')).rejects.toThrow(RepositoryError);
   });
 
@@ -1354,13 +1349,8 @@ describe('SupabaseFinanceRepository', () => {
     });
     await expect(repo.saveGoal({ id: 'g-1', workspace_id: 'ws-1', name: 'G', target_amount: 100, current_amount: 10, status: 'in_progress', color: '#10b981', icon: 'target' })).rejects.toThrow(RepositoryError);
 
-    // saveSettlement update error
-    (client.from as any).mockReturnValueOnce({
-      update: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: null, error: err }),
-    });
+    // saveSettlement RPC error
+    (client.rpc as any).mockResolvedValueOnce({ data: null, error: err });
     await expect(repo.saveSettlement({ id: 's-1', workspace_id: 'ws-1', from_member_id: 'm-1', to_member_id: 'm-2', amount: 10, settlement_date: '2026-04-01' })).rejects.toThrow(RepositoryError);
 
     // createWorkspace with null id and null rpc error
@@ -1447,10 +1437,11 @@ describe('SupabaseFinanceRepository', () => {
     });
     await expect(repo.saveGoal({ workspace_id: 'ws-1', name: 'G', target_amount: 100, current_amount: 10, status: 'in_progress', color: '#10b981', icon: 'target' })).rejects.toThrow(RepositoryError);
 
-    // saveSettlement insert error
+    // saveSettlement fetch after RPC error
+    (client.rpc as any).mockResolvedValueOnce({ data: 's-1', error: null });
     (client.from as any).mockReturnValueOnce({
-      insert: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: null, error: err }),
     });
     await expect(repo.saveSettlement({ workspace_id: 'ws-1', from_member_id: 'm-1', to_member_id: 'm-2', amount: 10, settlement_date: '2026-04-01' })).rejects.toThrow(RepositoryError);
@@ -2101,5 +2092,121 @@ describe('SupabaseFinanceRepository', () => {
       error: { message: 'Erro na RPC', code: '42P01' },
     });
     await expect(repo.materializeRecurring('ws-1')).rejects.toThrow();
+  });
+
+  it('gerencia pessoas (getPeople, savePerson, deletePerson) e trata erros no SupabaseFinanceRepository', async () => {
+    const { client } = createMockSupabaseClient();
+    const repo = new SupabaseFinanceRepository(client);
+
+    const personRow = {
+      id: 'person-1',
+      workspace_id: 'ws-1',
+      name: 'Camila Santos',
+      archived: false,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+
+    // 1. getPeople sucesso
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: [personRow], error: null }),
+    });
+    const people = await repo.getPeople('ws-1');
+    expect(people.length).toBe(1);
+    expect(people[0].name).toBe('Camila Santos');
+
+    // getPeople erro
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: null, error: { message: 'DB error', code: '500' } }),
+    });
+    await expect(repo.getPeople('ws-1')).rejects.toThrow();
+
+    // 2. savePerson insert sucesso
+    (client.from as any).mockReturnValueOnce({
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: personRow, error: null }),
+    });
+    const saved = await repo.savePerson({
+      workspace_id: 'ws-1',
+      name: 'Camila Santos',
+    });
+    expect(saved.id).toBe('person-1');
+
+    // savePerson insert erro
+    (client.from as any).mockReturnValueOnce({
+      insert: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: { message: 'insert error', code: '42501' } }),
+    });
+    await expect(repo.savePerson({ workspace_id: 'ws-1', name: 'Erro' })).rejects.toThrow();
+
+    // savePerson update sucesso
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { ...personRow, name: 'Camila Atualizada' }, error: null }),
+    });
+    const updated = await repo.savePerson({
+      id: 'person-1',
+      workspace_id: 'ws-1',
+      name: 'Camila Atualizada',
+    });
+    expect(updated.name).toBe('Camila Atualizada');
+
+    // savePerson update erro
+    (client.from as any).mockReturnValueOnce({
+      update: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: { message: 'update error', code: '42501' } }),
+    });
+    await expect(repo.savePerson({ id: 'person-1', workspace_id: 'ws-1', name: 'Erro' })).rejects.toThrow();
+
+    // 3. deletePerson sucesso
+    (client.from as any).mockReturnValueOnce({
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
+    await expect(repo.deletePerson('person-1')).resolves.toBeUndefined();
+
+    // deletePerson erro
+    (client.from as any).mockReturnValueOnce({
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: { message: 'delete error', code: '23503' } }),
+    });
+    await expect(repo.deletePerson('person-1')).rejects.toThrow();
+
+    // 4. saveSettlement com person_id e campos opcionais ausentes
+    (client.rpc as any).mockResolvedValueOnce({ data: 's-person-1', error: null });
+    (client.from as any).mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: {
+          id: 's-person-1',
+          workspace_id: 'ws-1',
+          from_member_id: null,
+          to_member_id: null,
+          from_person_id: 'person-1',
+          to_person_id: 'person-2',
+          amount: 50.0,
+          settlement_date: '2026-04-01',
+          notes: null,
+        },
+        error: null,
+      }),
+    });
+    const personSettlement = await repo.saveSettlement({
+      workspace_id: 'ws-1',
+      from_person_id: 'person-1',
+      to_person_id: 'person-2',
+      amount: 50.0,
+      settlement_date: '2026-04-01',
+    });
+    expect(personSettlement.id).toBe('s-person-1');
   });
 });

@@ -891,5 +891,23 @@ describe('FinanceProvider - Transações', () => {
       expect(updated?.amount).toBe(200);
       expect(updated?.splits?.length).toBeGreaterThan(0);
     });
+
+    it('addTransaction: rejeita receita vinculada a cartão de crédito', async () => {
+      const { getCtx } = await mountProvider();
+      const card = getCtx().creditCards[0];
+      if (card) {
+        expect(() => {
+          getCtx().addTransaction({
+            description: 'Receita Inválida',
+            amount: 100,
+            type: 'income',
+            credit_card_id: card.id,
+            transaction_date: '2026-08-01',
+            due_date: '2026-08-01',
+            status: 'pending',
+          });
+        }).toThrow('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
+      }
+    });
 });
 

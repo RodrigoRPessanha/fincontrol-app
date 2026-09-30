@@ -5,6 +5,7 @@ import {
   isValidCustomInterval,
   validateRecurringMaterialization,
   stepNextOccurrence,
+  calculateCatchUpOccurrence,
   processRecurringBatchState,
 } from '../../financial-engine';
 import { Account, Category, CreditCard, CreditCardBill, Installment, Payment, Purchase, RecurringTransaction, Transaction, Settlement, WorkspaceMember, PaymentMethod } from '../../types';
@@ -460,6 +461,60 @@ describe('Financial Engine - Materialização Completa de Recorrências (materia
     expect(res.newTransactions).toHaveLength(0);
     expect(res.updatedRecurring[0].next_occurrence).toBe('2026-08-15');
     expect(res.updatedRecurring[0].active).toBe(true);
+  });
+
+  it('deve exercitar frequência semiannual, catch-up no futuro e cartão inexistente', () => {
+    // 1. Semiannual
+    const nextSemi = stepNextOccurrence('2026-01-15', '2026-01-15', 'semiannual');
+    expect(nextSemi).toBe('2026-07-15');
+
+    // 2. Catch up no futuro
+    const catchUp = calculateCatchUpOccurrence('2026-10-01', '2026-01-01', 'monthly', null, '2026-08-01');
+    expect(catchUp).toBe('2026-10-01');
+
+    // 3. Materialização de recorrência com cartão de crédito
+    const testCard: CreditCard = {
+      id: 'card-1',
+      workspace_id: 'ws-1',
+      name: 'Nubank',
+      institution: 'Nubank',
+      color: '#820ad1',
+      credit_limit: 5000,
+      closing_day: 5,
+      due_day: 12,
+      active: true,
+      created_at: '2026-01-01',
+    };
+
+    const recWithCard: RecurringTransaction = {
+      id: 'rec-card-valid',
+      workspace_id: 'ws-1',
+      description: 'Conta Cartão',
+      amount: 150,
+      type: 'expense',
+      credit_card_id: 'card-1',
+      frequency: 'monthly',
+      start_date: '2026-01-01',
+      next_occurrence: '2026-01-01',
+      auto_create: true,
+      active: true,
+      created_at: '2026-01-01',
+    };
+
+    const res = processRecurringBatchState({
+      recurring: [recWithCard],
+      accounts,
+      paymentMethods: [],
+      creditCards: [testCard],
+      categories,
+      transactions: [],
+      bills: [],
+      todayStr: '2026-01-02',
+    });
+
+    expect(res.newTransactions).toHaveLength(1);
+    expect(res.newTransactions[0].credit_card_id).toBe('card-1');
+    expect(res.newTransactions[0].credit_card_bill_id).toBeDefined();
   });
 });
 

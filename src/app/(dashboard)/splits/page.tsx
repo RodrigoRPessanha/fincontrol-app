@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import { calculateMemberNetBalances } from '@/lib/financial-engine';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import {
   Scale,
@@ -16,16 +16,22 @@ import { MemberBalances } from '@/components/splits/MemberBalances';
 import { SharedExpensesList } from '@/components/splits/SharedExpensesList';
 import { SettlementHistory } from '@/components/splits/SettlementHistory';
 import { SettlementModal } from '@/components/splits/SettlementModal';
+import { PeopleManager } from '@/components/splits/PeopleManager';
 
 export default function SplitsPage() {
   const {
     activeWorkspace,
     workspaceMembers,
+    people = [],
+    allWorkspacePeople = [],
     transactions,
     purchases,
     settlements,
     recordSettlement,
     deleteSettlement,
+    addPerson,
+    updatePerson,
+    deletePerson,
   } = useFinance();
 
   // Modal de Liquidação / Registro de Acerto
@@ -44,21 +50,29 @@ export default function SplitsPage() {
     [workspaceMembers, activeWorkspace.id]
   );
 
-  // Cálculo de Balanços e Dívidas Consolidadas pelo Motor Financeiro Puro (com Purchases parceladas)
+  const effectivePeople = useMemo(
+    () => (allWorkspacePeople?.length ? allWorkspacePeople : people),
+    [allWorkspacePeople, people]
+  );
+
+  const totalParticipantsCount = currentMembers.length + effectivePeople.length;
+
+  // Cálculo de Balanços e Dívidas Consolidadas pelo Motor Financeiro Puro (com Pessoas e Purchases parceladas)
   const { balances, pairwiseDebts } = useMemo(() => {
-    return calculateMemberNetBalances(transactions, settlements, currentMembers, activeWorkspace.id, purchases);
-  }, [transactions, settlements, currentMembers, activeWorkspace.id, purchases]);
+    return calculateMemberNetBalances(transactions, settlements, currentMembers, activeWorkspace.id, purchases, effectivePeople);
+  }, [transactions, settlements, currentMembers, activeWorkspace.id, purchases, effectivePeople]);
 
   // Itens com rateio no workspace (Transações avulsas e Compras parceladas)
   const splitItems = useMemo(() => {
     const txs = transactions
-      .filter((t) => t.workspace_id === activeWorkspace.id && t.type === 'expense' && t.splits && t.splits.length > 0)
+      .filter((t) => t.workspace_id === activeWorkspace.id && t.type === 'expense' && t.split_type && t.split_type !== 'individual')
       .map((t) => ({
         id: t.id,
         description: t.description,
         amount: t.amount,
         date: t.transaction_date,
         paid_by_member_id: t.paid_by_member_id,
+        paid_by_person_id: t.paid_by_person_id,
         split_type: t.split_type,
         splits: t.splits || [],
         isPurchase: false,
@@ -66,13 +80,14 @@ export default function SplitsPage() {
       }));
 
     const purs = purchases
-      .filter((p) => p.workspace_id === activeWorkspace.id && p.splits && p.splits.length > 0)
+      .filter((p) => p.workspace_id === activeWorkspace.id && p.split_type && p.split_type !== 'individual')
       .map((p) => ({
         id: p.id,
         description: p.description,
         amount: p.total_amount,
         date: p.purchase_date,
         paid_by_member_id: p.paid_by_member_id,
+        paid_by_person_id: p.paid_by_person_id,
         split_type: p.split_type,
         splits: p.splits || [],
         isPurchase: true,
@@ -89,15 +104,26 @@ export default function SplitsPage() {
       .sort((a, b) => b.settlement_date.localeCompare(a.settlement_date));
   }, [settlements, activeWorkspace.id]);
 
-  const getMemberName = (id?: string | null) => {
+  const getParticipantName = (id?: string | null) => {
     if (!id) return 'Membro não identificado';
-    const found = currentMembers.find((m) => m.id === id);
-    return found?.user?.name || found?.user?.email?.split('@')[0] || `Membro ${id.substring(0, 4)}`;
+    const foundMember = currentMembers.find((m) => m.id === id);
+    if (foundMember) {
+      return foundMember.user?.name || foundMember.user?.email?.split('@')[0] || `Membro ${id.substring(0, 4)}`;
+    }
+    const foundPerson = (allWorkspacePeople?.length ? allWorkspacePeople : people).find((p: any) => p.id === id);
+    if (foundPerson) {
+      return foundPerson.name;
+    }
+    return `Membro ${id.substring(0, 4)}`;
   };
 
   const selectedPairDebt = useMemo(() => {
     if (!fromMemberId || !toMemberId) return null;
-    return pairwiseDebts.find((d) => d.from_member_id === fromMemberId && d.to_member_id === toMemberId) || null;
+    return (
+      pairwiseDebts.find(
+        (d) => d.from_member_id === fromMemberId && d.to_member_id === toMemberId
+      ) || null
+    );
   }, [pairwiseDebts, fromMemberId, toMemberId]);
 
   const handleOpenSettleDebt = (debtFrom: string, debtTo: string, amount: number) => {
@@ -132,7 +158,7 @@ export default function SplitsPage() {
       (d) => d.from_member_id === fromMemberId && d.to_member_id === toMemberId
     );
     if (!matchingDebt || matchingDebt.amount <= 0) {
-      setSettlementError(`Não há débito pendente de ${getMemberName(fromMemberId)} para ${getMemberName(toMemberId)}.`);
+      setSettlementError(`Não há débito pendente de ${getParticipantName(fromMemberId)} para ${getParticipantName(toMemberId)}.`);
       return;
     }
     const maxCents = Math.round(matchingDebt.amount * 100);
@@ -144,10 +170,15 @@ export default function SplitsPage() {
       return;
     }
 
+    const isFromPerson = people.some((p) => p.id === fromMemberId);
+    const isToPerson = people.some((p) => p.id === toMemberId);
+
     try {
       recordSettlement({
-        from_member_id: fromMemberId,
-        to_member_id: toMemberId,
+        from_member_id: isFromPerson ? null : fromMemberId,
+        to_member_id: isToPerson ? null : toMemberId,
+        from_person_id: isFromPerson ? fromMemberId : null,
+        to_person_id: isToPerson ? toMemberId : null,
         amount,
         settlement_date: settlementDate,
         notes: settlementNotes.trim() || undefined,
@@ -160,6 +191,9 @@ export default function SplitsPage() {
       setSettlementError(err.message || 'Erro ao registrar o acerto.');
     }
   };
+
+  const defaultFromId = currentMembers[1]?.id || people[0]?.id || '';
+  const defaultToId = currentMembers[0]?.id || '';
 
   return (
     <div className="space-y-6 pb-12">
@@ -175,19 +209,19 @@ export default function SplitsPage() {
             </h1>
           </div>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Divisão equilibrada de despesas compartilhadas (estilo Splitwise) e compensação líquida entre membros do workspace.
+            Divisão equilibrada de despesas compartilhadas (estilo Splitwise) e compensação líquida entre membros e pessoas.
           </p>
         </div>
 
         <button
           onClick={() => {
-            setFromMemberId(currentMembers[1]?.id || '');
-            setToMemberId(currentMembers[0]?.id || '');
+            setFromMemberId(defaultFromId);
+            setToMemberId(defaultToId);
             setSettlementAmountStr('');
             setSettlementError(null);
             setIsSettlementModalOpen(true);
           }}
-          disabled={currentMembers.length <= 1}
+          disabled={totalParticipantsCount <= 1}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-teal-600/20 transition hover:bg-teal-500 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <PlusCircle className="h-4 w-4" />
@@ -195,14 +229,14 @@ export default function SplitsPage() {
         </button>
       </div>
 
-      {/* Aviso de Membro Único */}
-      {currentMembers.length <= 1 && (
+      {/* Aviso de Participante Único */}
+      {totalParticipantsCount <= 1 && (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-medium text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
           <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <div>
             <p className="font-bold text-sm">Workspace com membro único</p>
             <p className="mt-0.5 text-amber-800 dark:text-amber-300">
-              Para utilizar a divisão de despesas e cálculo de acertos entre pessoas, convide outros membros para este workspace ou selecione um workspace compartilhado no topo da página.
+              Para utilizar a divisão de despesas e cálculo de acertos entre pessoas, convide outros membros para este workspace ou cadastre pessoas pelo nome na seção abaixo.
             </p>
           </div>
         </div>
@@ -219,28 +253,37 @@ export default function SplitsPage() {
       {/* Seção 1: Acertos Recomendados (Dívidas Consolidadas) */}
       <SplitSummary
         pairwiseDebts={pairwiseDebts}
-        getMemberName={getMemberName}
+        getMemberName={getParticipantName}
         onOpenSettleDebt={handleOpenSettleDebt}
       />
 
-      {/* Seção 2: Balanço Consolidado por Membro */}
+      {/* Seção 2: Balanço Consolidado por Participante */}
       <MemberBalances
         balances={balances}
         currentMembers={currentMembers}
-        getMemberName={getMemberName}
+        getMemberName={getParticipantName}
+        participantsCount={totalParticipantsCount}
       />
 
       {/* Seção 3: Histórico de Despesas Rateadas */}
       <SharedExpensesList
         splitItems={splitItems}
         currentMembers={currentMembers}
-        getMemberName={getMemberName}
+        getMemberName={getParticipantName}
       />
 
-      {/* Seção 4: Histórico de Acertos / Liquidações Realizadas */}
+      {/* Seção 4: Gerenciamento de Pessoas Cadastradas (Rateio por Nome) */}
+      <PeopleManager
+        people={effectivePeople}
+        onAddPerson={addPerson}
+        onUpdatePerson={updatePerson}
+        onDeletePerson={deletePerson}
+      />
+
+      {/* Seção 5: Histórico de Acertos / Liquidações Realizadas */}
       <SettlementHistory
         workspaceSettlements={workspaceSettlements}
-        getMemberName={getMemberName}
+        getMemberName={getParticipantName}
         onDeleteSettlement={(id) => {
           if (window.confirm('Deseja realmente excluir este registro de acerto? O balanço líquido será recalculado.')) {
             deleteSettlement(id);
@@ -264,6 +307,7 @@ export default function SplitsPage() {
         setSettlementNotes={setSettlementNotes}
         settlementError={settlementError}
         currentMembers={currentMembers}
+        people={people}
         selectedPairDebt={selectedPairDebt}
         onSubmit={handleSaveSettlement}
       />

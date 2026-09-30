@@ -44,7 +44,7 @@ export function SettlementHistory({
                 </div>
                 <div>
                   <div className="text-xs font-bold text-slate-900 dark:text-white">
-                    {getMemberName(s.from_member_id)} pagou {getMemberName(s.to_member_id)}
+                    {getMemberName(s.from_person_id || s.from_member_id)} pagou {getMemberName(s.to_person_id || s.to_member_id)}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     {formatDate(s.settlement_date)} {s.notes ? `• ${s.notes}` : ''}

@@ -30,7 +30,8 @@ export function createInstallmentPurchase(
     account_id?: string;
     payment_method_id?: string;
     paid_installments_count?: number;
-    paid_by_member_id?: string;
+    paid_by_member_id?: string | null;
+    paid_by_person_id?: string | null;
     split_type?: SplitType;
     splits?: TransactionSplit[];
   }
@@ -66,7 +67,15 @@ export function createInstallmentPurchase(
     targetWsId
   );
   validateActiveCategory(deps, targetWsId, data.category_id);
-  validateTransactionSplits(deps, data.total_amount, targetWsId, data.paid_by_member_id, data.splits, data.split_type);
+  validateTransactionSplits(
+    deps,
+    data.total_amount,
+    targetWsId,
+    data.paid_by_member_id,
+    data.splits,
+    data.split_type,
+    data.paid_by_person_id
+  );
 
   const paidCount = Math.max(0, Math.min(data.installment_count, data.paid_installments_count || 0));
   const card = effectiveCardId ? state.allCreditCards.find((c) => c.id === effectiveCardId && c.workspace_id === targetWsId) : undefined;
@@ -87,7 +96,8 @@ export function createInstallmentPurchase(
     paid_installments_count: paidCount,
     credit_card_id: effectiveCardId,
     account_id: effectiveAccountId,
-    paid_by_member_id: data.paid_by_member_id,
+    paid_by_member_id: data.paid_by_member_id ?? null,
+    paid_by_person_id: data.paid_by_person_id ?? null,
     split_type: effectiveSplitType,
     splits: effectiveSplits,
     created_by: userId,
@@ -134,7 +144,7 @@ export function createInstallmentPurchase(
           account_id: effectiveAccountId || null,
           payment_method_id: data.payment_method_id,
           amount: inst.amount,
-          payment_date: inst.paid_at || inst.due_date,
+          payment_date: inst.due_date,
           notes: 'Quitação prévia de parcela importada',
           created_by: userId,
           created_at: deps.now().toISOString(),

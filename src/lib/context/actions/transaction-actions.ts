@@ -43,7 +43,15 @@ export function addTransaction(
     state.allPaymentMethods,
     targetWsId
   );
-  validateTransactionSplits(deps, txData.amount, targetWsId, txData.paid_by_member_id, txData.splits, txData.split_type);
+  validateTransactionSplits(
+    deps,
+    txData.amount,
+    targetWsId,
+    txData.paid_by_member_id,
+    txData.splits,
+    txData.split_type,
+    txData.paid_by_person_id
+  );
 
   if (effectiveAccountId) {
     const a = state.allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === targetWsId);
@@ -176,18 +184,21 @@ export function updateTransaction(
 
   const willChangeAmount = data.amount !== undefined && data.amount !== existing.amount;
   const willChangeSplitType = data.split_type !== undefined && data.split_type !== existing.split_type;
-  const willChangePayer = data.paid_by_member_id !== undefined && data.paid_by_member_id !== existing.paid_by_member_id;
+  const willChangePayer =
+    (data.paid_by_member_id !== undefined && data.paid_by_member_id !== existing.paid_by_member_id) ||
+    (data.paid_by_person_id !== undefined && data.paid_by_person_id !== existing.paid_by_person_id);
 
   const targetAmount = data.amount !== undefined ? data.amount : existing.amount;
   const targetSplitType = data.split_type !== undefined ? data.split_type : existing.split_type;
   const targetPayer = data.paid_by_member_id !== undefined ? data.paid_by_member_id : existing.paid_by_member_id;
+  const targetPersonPayer = data.paid_by_person_id !== undefined ? data.paid_by_person_id : existing.paid_by_person_id;
 
   let reconciledSplits: TransactionSplit[] | undefined = undefined;
 
   const isTargetDivided = targetSplitType && targetSplitType !== 'individual';
 
   if (data.splits !== undefined) {
-    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, data.splits, targetSplitType);
+    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, data.splits, targetSplitType, targetPersonPayer);
     reconciledSplits = data.splits;
   } else if (!isTargetDivided) {
     reconciledSplits = [];
@@ -197,7 +208,7 @@ export function updateTransaction(
     if (willChangeAmount || willChangeSplitType || willChangePayer || !existing.splits || existing.splits.length === 0) {
       reconciledSplits = calculateExpenseSplits(targetAmount, targetSplitType, wsMembers, effectivePayer);
     } else {
-      validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType);
+      validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType, targetPersonPayer);
     }
   } else if (targetSplitType === 'custom') {
     if (willChangeAmount || willChangeSplitType || willChangePayer || !existing.splits || existing.splits.length === 0) {
@@ -205,7 +216,7 @@ export function updateTransaction(
         'Ao alterar o valor total, pagador ou regra de uma transação com divisão personalizada, é obrigatório fornecer os novos valores de rateio correspondentes.'
       );
     }
-    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType);
+    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType, targetPersonPayer);
   }
 
   const nextTxs = state.allTransactions.map((t) => {
@@ -219,6 +230,7 @@ export function updateTransaction(
         transaction_date: data.transaction_date !== undefined ? data.transaction_date : t.transaction_date,
         notes: data.notes !== undefined ? data.notes : t.notes,
         paid_by_member_id: data.paid_by_member_id !== undefined ? data.paid_by_member_id : t.paid_by_member_id,
+        paid_by_person_id: data.paid_by_person_id !== undefined ? data.paid_by_person_id : t.paid_by_person_id,
         split_type: targetSplitType,
         splits: reconciledSplits !== undefined ? (reconciledSplits.length > 0 ? reconciledSplits : undefined) : t.splits,
         updated_at: deps.now().toISOString(),

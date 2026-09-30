@@ -8,6 +8,7 @@ import {
   Installment,
   Payment,
   PaymentMethod,
+  Person,
   Purchase,
   RecurringTransaction,
   Settlement,
@@ -367,6 +368,15 @@ export class LocalFinanceRepository implements FinanceRepository {
     const state = this.getState();
 
     // Validação de integridade de rateios
+    if (transaction.paid_by_member_id && transaction.paid_by_person_id) {
+      throw new RepositoryError(
+        'Transação não pode ter pagador membro e pagador pessoa simultaneamente',
+        'VALIDATION_FAILED',
+        undefined,
+        'transactions'
+      );
+    }
+
     if (transaction.splits && transaction.splits.length > 0) {
       const sum = transaction.splits.reduce((acc, s) => acc + Number(s.amount), 0);
       if (Math.abs(sum - transaction.amount) > 0.01) {
@@ -530,6 +540,15 @@ export class LocalFinanceRepository implements FinanceRepository {
     const state = this.getState();
 
     // Validação de integridade de rateios
+    if (purchase.paid_by_member_id && purchase.paid_by_person_id) {
+      throw new RepositoryError(
+        'Compra parcelada não pode ter pagador membro e pagador pessoa simultaneamente',
+        'VALIDATION_FAILED',
+        undefined,
+        'purchases'
+      );
+    }
+
     if (purchase.splits && purchase.splits.length > 0) {
       const sum = purchase.splits.reduce((acc, s) => acc + Number(s.amount), 0);
       if (Math.abs(sum - purchase.total_amount) > 0.01) {
@@ -1331,6 +1350,99 @@ export class LocalFinanceRepository implements FinanceRepository {
       throw new RepositoryError(`Acerto com id ${id} não encontrado`, 'NOT_FOUND', undefined, 'settlements');
     }
     state.allSettlements = state.allSettlements.filter((s) => s.id !== id);
+    this.saveState(state);
+  }
+
+  // Pessoas (People & Flexible Splits)
+  async getPeople(workspaceId: string): Promise<Person[]> {
+    return (this.getState().allPeople ?? []).filter((p) => p.workspace_id === workspaceId);
+  }
+
+  async savePerson(person: Omit<Person, 'id' | 'created_at'> & { id?: string }): Promise<Person> {
+    const trimmedName = person.name?.trim();
+    if (!trimmedName) {
+      throw new RepositoryError('Nome da pessoa não pode ser vazio', 'VALIDATION_FAILED', undefined, 'people');
+    }
+
+    const state = this.getState();
+    if (!state.allPeople) state.allPeople = [];
+
+    // Unique active name check
+    const isArchived = Boolean(person.archived);
+    if (!isArchived) {
+      const duplicate = state.allPeople.find(
+        (p) =>
+          p.workspace_id === person.workspace_id &&
+          p.id !== person.id &&
+          !p.archived &&
+          p.name.trim().toLowerCase() === trimmedName.toLowerCase()
+      );
+      if (duplicate) {
+        throw new RepositoryError(
+          `Já existe uma pessoa ativa com o nome "${trimmedName}" neste workspace`,
+          'CONFLICT',
+          undefined,
+          'people'
+        );
+      }
+    }
+
+    const now = new Date().toISOString();
+    let savedPerson: Person;
+
+    if (person.id) {
+      const existing = state.allPeople.find((p) => p.id === person.id);
+      if (!existing) {
+        throw new RepositoryError(`Pessoa com id ${person.id} não encontrada`, 'NOT_FOUND', undefined, 'people');
+      }
+      savedPerson = {
+        ...existing,
+        name: trimmedName,
+        archived: isArchived,
+        updated_at: now,
+      };
+      state.allPeople = state.allPeople.map((p) => (p.id === person.id ? savedPerson : p));
+    } else {
+      savedPerson = {
+        id: generateId(),
+        workspace_id: person.workspace_id,
+        name: trimmedName,
+        archived: isArchived,
+        created_at: now,
+        updated_at: now,
+      };
+      state.allPeople = [...state.allPeople, savedPerson];
+    }
+
+    this.saveState(state);
+    return savedPerson;
+  }
+
+  async deletePerson(id: string): Promise<void> {
+    const state = this.getState();
+    if (!state.allPeople) state.allPeople = [];
+    const person = state.allPeople.find((p) => p.id === id);
+    if (!person) {
+      throw new RepositoryError(`Pessoa com id ${id} não encontrada`, 'NOT_FOUND', undefined, 'people');
+    }
+
+    // RESTRICT check: cannot delete person with history
+    const hasTxPayer = state.allTransactions.some((t) => t.paid_by_person_id === id);
+    const hasTxSplit = state.allTransactions.some((t) => (t.splits ?? []).some((s) => s.person_id === id));
+    const hasPurchasePayer = state.allPurchases.some((p) => p.paid_by_person_id === id);
+    const hasPurchaseSplit = state.allPurchases.some((p) => (p.splits ?? []).some((s) => s.person_id === id));
+    const hasSettlement = (state.allSettlements ?? []).some((s) => s.from_person_id === id || s.to_person_id === id);
+
+    if (hasTxPayer || hasTxSplit || hasPurchasePayer || hasPurchaseSplit || hasSettlement) {
+      throw new RepositoryError(
+        'Esta pessoa possui histórico financeiro vinculado e não pode ser excluída. Em vez disso, arquive-a.',
+        'CONFLICT',
+        undefined,
+        'people'
+      );
+    }
+
+    state.allPeople = state.allPeople.filter((p) => p.id !== id);
     this.saveState(state);
   }
 

@@ -8,6 +8,7 @@ import {
   Installment,
   Payment,
   PaymentMethod,
+  Person,
   Purchase,
   RecurringTransaction,
   Settlement,
@@ -36,6 +37,11 @@ export interface FinanceRepository {
   addWorkspaceMember(member: Omit<WorkspaceMember, 'id' | 'created_at'>): Promise<WorkspaceMember>;
   updateWorkspaceMemberRole(id: string, role: WorkspaceRole): Promise<WorkspaceMember>;
   removeWorkspaceMember(id: string): Promise<void>;
+
+  // Pessoas (Divisão Flexível / Não-Membros)
+  getPeople(workspaceId: string): Promise<Person[]>;
+  savePerson(person: Omit<Person, 'id' | 'created_at'> & { id?: string }): Promise<Person>;
+  deletePerson(id: string): Promise<void>;
 
   // Contas
   getAccounts(workspaceId: string): Promise<Account[]>;

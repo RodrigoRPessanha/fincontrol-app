@@ -10,3 +10,4 @@ export * from './transfer-mapper';
 export * from './recurring-mapper';
 export * from './goal-budget-mapper';
 export * from './settlement-mapper';
+export * from './person-mapper';
