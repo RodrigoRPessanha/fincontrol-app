@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { WorkspaceMember } from '@/lib/types';
+import { WorkspaceMember, Person } from '@/lib/types';
 import { PairwiseDebt } from '@/lib/financial-engine';
 import { formatCurrency } from '@/lib/utils';
 import { Scale, X, AlertCircle } from 'lucide-react';
@@ -21,6 +21,7 @@ export interface SettlementModalProps {
   setSettlementNotes: (val: string) => void;
   settlementError: string | null;
   currentMembers: WorkspaceMember[];
+  people?: Person[];
   selectedPairDebt: PairwiseDebt | null;
   onSubmit: (e: React.FormEvent) => void;
 }
@@ -40,6 +41,7 @@ export function SettlementModal({
   setSettlementNotes,
   settlementError,
   currentMembers,
+  people = [],
   selectedPairDebt,
   onSubmit,
 }: SettlementModalProps) {
@@ -89,6 +91,11 @@ export function SettlementModal({
                     {m.user?.name || m.user?.email?.split('@')[0] || m.id}
                   </option>
                 ))}
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (Pessoa)
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -105,6 +112,11 @@ export function SettlementModal({
                 {currentMembers.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.user?.name || m.user?.email?.split('@')[0] || m.id}
+                  </option>
+                ))}
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (Pessoa)
                   </option>
                 ))}
               </select>

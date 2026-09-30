@@ -2238,4 +2238,176 @@ describe('LocalFinanceRepository', () => {
     expect(defaultDateRes).toBeDefined();
     expect(typeof defaultDateRes.created_transactions).toBe('number');
   });
+
+  it('gerencia pessoas e restrições de exclusão no LocalFinanceRepository', async () => {
+    const repo = new LocalFinanceRepository();
+
+    // 1. Cria nova pessoa
+    const p1 = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Carlos Oliveira',
+    });
+    expect(p1.id).toBeDefined();
+    expect(p1.name).toBe('Carlos Oliveira');
+    expect(p1.archived).toBe(false);
+
+    // 2. Impede duplicidade de nome ativo no mesmo workspace
+    await expect(
+      repo.savePerson({
+        workspace_id: 'ws-personal',
+        name: '  carlos oliveira  ',
+      })
+    ).rejects.toThrow('Já existe uma pessoa ativa com o nome "carlos oliveira"');
+
+    // 3. Atualiza pessoa (renomeia e arquiva)
+    const updatedP1 = await repo.savePerson({
+      id: p1.id,
+      workspace_id: 'ws-personal',
+      name: 'Carlos O. Silva',
+      archived: true,
+    });
+    expect(updatedP1.name).toBe('Carlos O. Silva');
+    expect(updatedP1.archived).toBe(true);
+
+    // Agora que está arquivada, permite criar outra pessoa com o nome antigo
+    const p2 = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Carlos Oliveira',
+    });
+    expect(p2.id).toBeDefined();
+
+    // 4. getPeople filtra por workspace
+    const peoplePersonal = await repo.getPeople('ws-personal');
+    expect(peoplePersonal.some((p) => p.id === p1.id)).toBe(true);
+    expect(peoplePersonal.some((p) => p.id === p2.id)).toBe(true);
+
+    const peopleOther = await repo.getPeople('ws-other');
+    expect(peopleOther.length).toBe(0);
+
+    // 5. Exclui pessoa sem histórico com sucesso
+    await repo.deletePerson(p1.id);
+    const peopleAfterDelete = await repo.getPeople('ws-personal');
+    expect(peopleAfterDelete.some((p) => p.id === p1.id)).toBe(false);
+
+    // 6. Tenta atualizar pessoa inexistente
+    await expect(
+      repo.savePerson({
+        id: 'inexistent-id',
+        workspace_id: 'ws-personal',
+        name: 'Inexistente',
+      })
+    ).rejects.toThrow('não encontrada');
+
+    // 7. Impede exclusão quando pessoa possui transação vinculada (RESTRICT)
+    await repo.saveTransaction({
+      workspace_id: 'ws-personal',
+      description: 'Almoço com Carlos',
+      amount: 60,
+      type: 'expense',
+      transaction_date: '2026-04-01',
+      due_date: '2026-04-01',
+      status: 'paid',
+      splits: [
+        { person_id: p2.id, amount: 60 },
+      ],
+    });
+
+    await expect(repo.deletePerson(p2.id)).rejects.toThrow(
+      'Esta pessoa possui histórico financeiro vinculado e não pode ser excluída'
+    );
+
+    // 8. Tenta excluir pessoa inexistente
+    await expect(repo.deletePerson('inexistent-person')).rejects.toThrow(
+      'não encontrada'
+    );
+
+    // 9. Impede exclusão quando pessoa pagou uma compra ou está em settlement
+    const p3 = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Fernanda',
+    });
+    await repo.savePurchase({
+      workspace_id: 'ws-personal',
+      description: 'Compra parcelada por Fernanda',
+      total_amount: 100,
+      installment_count: 2,
+      purchase_date: '2026-04-01',
+      paid_by_person_id: p3.id,
+    });
+    await expect(repo.deletePerson(p3.id)).rejects.toThrow(
+      'Esta pessoa possui histórico financeiro vinculado e não pode ser excluída'
+    );
+
+    const p4 = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Gustavo',
+    });
+    await repo.saveSettlement({
+      workspace_id: 'ws-personal',
+      from_person_id: p4.id,
+      amount: 50,
+      settlement_date: '2026-04-01',
+    });
+    await expect(repo.deletePerson(p4.id)).rejects.toThrow(
+      'Esta pessoa possui histórico financeiro vinculado e não pode ser excluída'
+    );
+
+    const p5 = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Helena',
+    });
+    await repo.savePurchase({
+      workspace_id: 'ws-personal',
+      description: 'Compra com split de Helena',
+      total_amount: 100,
+      installment_count: 2,
+      purchase_date: '2026-04-01',
+      splits: [{ person_id: p5.id, amount: 100 }],
+    });
+    await expect(repo.deletePerson(p5.id)).rejects.toThrow(
+      'Esta pessoa possui histórico financeiro vinculado e não pode ser excluída'
+    );
+
+    // 10. Impede exclusão quando pessoa é recebedora (to_person_id) em settlement
+    const p6 = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Igor',
+    });
+    await repo.saveSettlement({
+      workspace_id: 'ws-personal',
+      to_person_id: p6.id,
+      amount: 50,
+      settlement_date: '2026-04-01',
+    });
+    await expect(repo.deletePerson(p6.id)).rejects.toThrow(
+      'Esta pessoa possui histórico financeiro vinculado e não pode ser excluída'
+    );
+
+    // 11. Atualiza pessoa existente (savePerson com ID existente)
+    const updatedP6 = await repo.savePerson({
+      id: p6.id,
+      workspace_id: 'ws-personal',
+      name: 'Igor Atualizado',
+      archived: true,
+    });
+    expect(updatedP6.name).toBe('Igor Atualizado');
+    expect(updatedP6.archived).toBe(true);
+
+    // 12. Salva e exclui pessoa quando allPeople e allSettlements são undefined no state
+    const rawState = (repo as any).getState();
+    delete rawState.allPeople;
+    delete rawState.allSettlements;
+    (repo as any).saveState(rawState);
+
+    const pUndefined = await repo.savePerson({
+      workspace_id: 'ws-personal',
+      name: 'Pessoa Inicial Sem Lista',
+    });
+    expect(pUndefined.name).toBe('Pessoa Inicial Sem Lista');
+
+    const rawState2 = (repo as any).getState();
+    delete rawState2.allPeople;
+    (repo as any).saveState(rawState2);
+    await expect(repo.deletePerson('qualquer-id')).rejects.toThrow('não encontrada');
+  });
 });

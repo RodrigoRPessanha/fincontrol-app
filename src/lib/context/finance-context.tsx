@@ -11,6 +11,7 @@ import {
   Installment,
   Payment,
   PaymentMethod,
+  Person,
   Purchase,
   RecurringTransaction,
   Transaction,
@@ -141,6 +142,7 @@ function collectChangedIds(before: FinanceState, after: FinanceState): Set<strin
     'allGoals',
     'allSettlements',
     'allWorkspaceMembers',
+    'allPeople',
   ];
   for (let k = 0; k < keys.length; k++) {
     const key = keys[k];
@@ -192,6 +194,7 @@ function applyConfirmedEntities(
     'allGoals',
     'allSettlements',
     'allWorkspaceMembers',
+    'allPeople',
   ];
   for (let k = 0; k < keys.length; k++) {
     const key = keys[k];
@@ -253,6 +256,7 @@ function mergeSnapshotWithPendingState(
     'allGoals',
     'allSettlements',
     'allWorkspaceMembers',
+    'allPeople',
   ];
 
   for (let k = 0; k < keys.length; k++) {
@@ -351,6 +355,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const [allBudgets, setAllBudgets] = useState<Budget[]>(() => isSupabaseMode ? [] : mockBudgets);
   const [allGoals, setAllGoals] = useState<FinancialGoal[]>(() => isSupabaseMode ? [] : mockGoals);
   const [allSettlements, setAllSettlements] = useState<Settlement[]>([]);
+  const [allPeople, setAllPeople] = useState<Person[]>([]);
 
   const [viewPerspective, setViewPerspective] = useState<'realized' | 'planned'>('realized');
 
@@ -373,6 +378,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     allCategories,
     allBudgets,
     allSettlements,
+    allPeople,
   });
   const canPersistRef = useRef<boolean>(true);
 
@@ -395,6 +401,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
       allCategories,
       allBudgets,
       allSettlements,
+      allPeople,
     };
   });
 
@@ -418,6 +425,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     if (next.allBudgets !== prev.allBudgets) setAllBudgets(next.allBudgets);
     if (next.allGoals !== prev.allGoals) setAllGoals(next.allGoals);
     if (next.allSettlements !== prev.allSettlements) setAllSettlements(next.allSettlements);
+    if (next.allPeople !== prev.allPeople) setAllPeople(next.allPeople || []);
   }, []);
 
   // Carregamento Determinístico Seguro no Mount + Saneamento Idempotente de Dados Legados V20 (P0-01) - Modo Local
@@ -532,6 +540,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
     allBudgets,
     allGoals,
     allSettlements,
+    allPeople,
   ]);
 
   const refreshData = useCallback(async () => {
@@ -739,6 +748,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
                           allGoals: reconcileFailedEntities(s.allGoals, base?.allGoals, failedIds),
                           allSettlements: reconcileFailedEntities(s.allSettlements, base?.allSettlements, failedIds),
                           allWorkspaceMembers: reconcileFailedEntities(s.allWorkspaceMembers, base?.allWorkspaceMembers, failedIds),
+                          allPeople: reconcileFailedEntities(s.allPeople || [], base?.allPeople || [], failedIds),
                         });
                       } else if (rollbackBaseStateRef.current) {
                         commitState(rollbackBaseStateRef.current);
@@ -890,6 +900,16 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const settlements = useMemo(
     () => allSettlements.filter((s) => s.workspace_id === activeWorkspace.id),
     [allSettlements, activeWorkspace.id]
+  );
+
+  const people = useMemo(
+    () => (allPeople || []).filter((p) => p.workspace_id === activeWorkspace.id && !p.archived),
+    [allPeople, activeWorkspace.id]
+  );
+
+  const allWorkspacePeople = useMemo(
+    () => (allPeople || []).filter((p) => p.workspace_id === activeWorkspace.id),
+    [allPeople, activeWorkspace.id]
   );
 
   // Executa processamento de recorrências
@@ -1261,6 +1281,12 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
             credit_card_id: resolveCanonicalId(txData.credit_card_id),
             credit_card_bill_id: resolveCanonicalId(txData.credit_card_bill_id),
             paid_by_member_id: resolveCanonicalId(txData.paid_by_member_id),
+            paid_by_person_id: resolveCanonicalId(txData.paid_by_person_id),
+            splits: txData.splits?.map((s) => ({
+              ...s,
+              member_id: resolveCanonicalId(s.member_id),
+              person_id: resolveCanonicalId(s.person_id),
+            })),
             workspace_id: targetWorkspaceId,
           });
           idMapRef.current.set(res.id, saved.id);
@@ -1292,6 +1318,12 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
             id: canonicalId,
             category_id: data.category_id !== undefined ? resolveCanonicalId(data.category_id) : item!.category_id,
             paid_by_member_id: data.paid_by_member_id !== undefined ? resolveCanonicalId(data.paid_by_member_id) : item!.paid_by_member_id,
+            paid_by_person_id: data.paid_by_person_id !== undefined ? resolveCanonicalId(data.paid_by_person_id) : item!.paid_by_person_id,
+            splits: (data.splits !== undefined ? data.splits : item?.splits)?.map((s) => ({
+              ...s,
+              member_id: resolveCanonicalId(s.member_id),
+              person_id: resolveCanonicalId(s.person_id),
+            })),
             workspace_id: targetWorkspaceId,
           } as any);
         },
@@ -1364,6 +1396,7 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
           const canonicalCategoryId = resolveCanonicalId(data.category_id);
           const canonicalPaymentMethodId = resolveCanonicalId(data.payment_method_id);
           const canonicalPaidByMemberId = resolveCanonicalId(data.paid_by_member_id);
+          const canonicalPaidByPersonId = resolveCanonicalId(data.paid_by_person_id);
 
           const remotePurchase = await effectiveRepository.savePurchase({
             ...data,
@@ -1372,6 +1405,12 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
             category_id: canonicalCategoryId,
             payment_method_id: canonicalPaymentMethodId,
             paid_by_member_id: canonicalPaidByMemberId,
+            paid_by_person_id: canonicalPaidByPersonId,
+            splits: data.splits?.map((s) => ({
+              ...s,
+              member_id: resolveCanonicalId(s.member_id),
+              person_id: resolveCanonicalId(s.person_id),
+            })),
             workspace_id: targetWorkspaceId,
           });
 
@@ -1484,16 +1523,20 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
   const handleRecordSettlement = useCallback(
     (data: Parameters<typeof actions.recordSettlement>[1]) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      const canonicalFrom = resolveCanonicalId(data.from_member_id);
-      const canonicalTo = resolveCanonicalId(data.to_member_id);
+      const canonicalFromMember = resolveCanonicalId(data.from_member_id);
+      const canonicalToMember = resolveCanonicalId(data.to_member_id);
+      const canonicalFromPerson = resolveCanonicalId(data.from_person_id);
+      const canonicalToPerson = resolveCanonicalId(data.to_person_id);
       const canonicalAccount = resolveCanonicalId(data.payment_account_id);
       return runMutation(
         () => actions.recordSettlement(deps, data),
         async (res) => {
           const saved = await effectiveRepository.saveSettlement({
             ...data,
-            from_member_id: canonicalFrom,
-            to_member_id: canonicalTo,
+            from_member_id: canonicalFromMember ?? res.from_member_id,
+            to_member_id: canonicalToMember ?? res.to_member_id,
+            from_person_id: canonicalFromPerson ?? res.from_person_id,
+            to_person_id: canonicalToPerson ?? res.to_person_id,
             payment_account_id: (canonicalAccount ?? null) as string | null,
             settlement_date: res.settlement_date,
             workspace_id: targetWorkspaceId,
@@ -1515,6 +1558,70 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         () => effectiveRepository.deleteSettlement(canonicalId),
         targetWorkspaceId,
         id
+      );
+    },
+    [deps, effectiveRepository, runMutation, resolveCanonicalId]
+  );
+
+  const handleAddPerson = useCallback(
+    (nameOrData: string | { name: string; workspace_id?: string }) => {
+      const data = typeof nameOrData === 'string' ? { name: nameOrData } : nameOrData;
+      const targetWorkspaceId = data.workspace_id || stateRef.current.activeWorkspaceId;
+      return runMutation(
+        () => actions.addPerson(deps, data),
+        async (res) => {
+          const saved = await effectiveRepository.savePerson({
+            workspace_id: targetWorkspaceId,
+            name: res.name,
+            archived: res.archived,
+          });
+          idMapRef.current.set(res.id, saved.id);
+          const current = stateRef.current;
+          if (current.activeWorkspaceId === targetWorkspaceId) {
+            commitState({
+              ...current,
+              allPeople: (current.allPeople || []).map((p) => (p.id === res.id ? saved : p)),
+            });
+          }
+        },
+        targetWorkspaceId
+      );
+    },
+    [deps, effectiveRepository, runMutation, commitState]
+  );
+
+  const handleUpdatePerson = useCallback(
+    (id: string, data: { name?: string; archived?: boolean }) => {
+      const targetWorkspaceId = stateRef.current.activeWorkspaceId;
+      const canonicalId = resolveCanonicalId(id);
+      const targetId = (stateRef.current.allPeople || []).some((p) => p.id === canonicalId) ? canonicalId : id;
+      return runMutation(
+        () => actions.updatePerson(deps, targetId, data),
+        async (res) => {
+          await effectiveRepository.savePerson({
+            id: canonicalId,
+            workspace_id: targetWorkspaceId,
+            name: res.name,
+            archived: res.archived,
+          });
+        },
+        targetWorkspaceId,
+        canonicalId
+      );
+    },
+    [deps, effectiveRepository, runMutation, resolveCanonicalId]
+  );
+
+  const handleDeletePerson = useCallback(
+    (id: string) => {
+      const targetWorkspaceId = stateRef.current.activeWorkspaceId;
+      const canonicalId = resolveCanonicalId(id);
+      const targetId = (stateRef.current.allPeople || []).some((p) => p.id === canonicalId) ? canonicalId : id;
+      return runMutation(
+        () => actions.deletePerson(deps, targetId),
+        () => effectiveRepository.deletePerson(canonicalId),
+        targetWorkspaceId,
+        canonicalId
       );
     },
     [deps, effectiveRepository, runMutation, resolveCanonicalId]
@@ -1766,6 +1873,12 @@ export function FinanceProvider({ children, repository, initialDataMode, initial
         settlements,
         recordSettlement: handleRecordSettlement,
         deleteSettlement: handleDeleteSettlement,
+
+        people,
+        allWorkspacePeople,
+        addPerson: handleAddPerson,
+        updatePerson: handleUpdatePerson,
+        deletePerson: handleDeletePerson,
 
         recurring,
         addRecurring: handleAddRecurring,

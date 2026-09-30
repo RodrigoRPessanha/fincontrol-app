@@ -8,6 +8,7 @@ import {
   Installment,
   Payment,
   PaymentMethod,
+  Person,
   Purchase,
   RecurringTransaction,
   Settlement,
@@ -44,6 +45,7 @@ export const STORAGE_KEYS = {
   workspaces: `${STORAGE_PREFIX}workspaces`,
   activeWorkspaceId: `${STORAGE_PREFIX}active_ws`,
   members: `${STORAGE_PREFIX}members`,
+  people: `${STORAGE_PREFIX}people`,
   accounts: `${STORAGE_PREFIX}accounts`,
   creditCards: `${STORAGE_PREFIX}creditCards`,
   bills: `${STORAGE_PREFIX}bills`,
@@ -84,6 +86,7 @@ export function getInitialFinanceState(): FinanceState {
     allWorkspaces: mockWorkspaces,
     activeWorkspaceId: mockWorkspaces[0].id,
     allWorkspaceMembers: mockWorkspaceMembers,
+    allPeople: [],
     allAccounts: mockAccounts,
     allCreditCards: mockCreditCards,
     allCreditCardBills: mockCreditCardBills,
@@ -220,6 +223,7 @@ export function loadFinanceSnapshot(storage: Storage): LoadFinanceSnapshotResult
     allWorkspaces: safeParseDomainKey<Workspace[]>(storage, STORAGE_KEYS.workspaces, initial.allWorkspaces, errors),
     activeWorkspaceId: activeWsId,
     allWorkspaceMembers: safeParseDomainKey<WorkspaceMember[]>(storage, STORAGE_KEYS.members, initial.allWorkspaceMembers, errors),
+    allPeople: safeParseDomainKey<Person[]>(storage, STORAGE_KEYS.people, initial.allPeople, errors),
     allAccounts: safeParseDomainKey<Account[]>(storage, STORAGE_KEYS.accounts, initial.allAccounts, errors),
     allCreditCards: safeParseDomainKey<CreditCard[]>(storage, STORAGE_KEYS.creditCards, initial.allCreditCards, errors),
     allCreditCardBills: safeParseDomainKey<CreditCardBill[]>(storage, STORAGE_KEYS.bills, initial.allCreditCardBills, errors),
@@ -264,6 +268,7 @@ export function saveFinanceSnapshot(storage: Storage, state: FinanceState): void
     storage.setItem(STORAGE_KEYS.workspaces, JSON.stringify(state.allWorkspaces));
     storage.setItem(STORAGE_KEYS.activeWorkspaceId, state.activeWorkspaceId);
     storage.setItem(STORAGE_KEYS.members, JSON.stringify(state.allWorkspaceMembers));
+    storage.setItem(STORAGE_KEYS.people, JSON.stringify(state.allPeople));
     storage.setItem(STORAGE_KEYS.accounts, JSON.stringify(state.allAccounts));
     storage.setItem(STORAGE_KEYS.creditCards, JSON.stringify(state.allCreditCards));
     storage.setItem(STORAGE_KEYS.bills, JSON.stringify(state.allCreditCardBills));

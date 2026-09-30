@@ -252,7 +252,7 @@ SELECT ok(
     'authenticated pode executar RPC fn_create_workspace'
 );
 SELECT ok(
-    has_function_privilege('authenticated', 'public.fn_create_transaction_with_splits(uuid, text, numeric, date, text, text, uuid, uuid, uuid, uuid, uuid, text, uuid, text, date, jsonb)', 'execute'),
+    has_function_privilege('authenticated', 'public.fn_create_transaction_with_splits(uuid, text, numeric, date, text, text, uuid, uuid, uuid, uuid, uuid, text, uuid, text, date, jsonb, uuid)', 'execute'),
     'authenticated pode executar RPC fn_create_transaction_with_splits'
 );
 SELECT ok(

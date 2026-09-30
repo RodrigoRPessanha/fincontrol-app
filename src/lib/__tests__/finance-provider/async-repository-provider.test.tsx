@@ -157,6 +157,7 @@ function createMockSnapshot(overrides?: Partial<FinanceState>): FinanceState {
         created_at: '2026-01-01',
       },
     ],
+    allPeople: [],
     allSettlements: [],
     ...overrides,
   };
@@ -296,6 +297,14 @@ function createMockRepository(snapshot: FinanceState) {
       created_at: '2026-01-01',
     } as any)),
     deleteSettlement: vi.fn().mockResolvedValue(undefined),
+    getPeople: vi.fn().mockImplementation(async () => snapshot.allPeople),
+    savePerson: vi.fn().mockImplementation(async (data) => ({
+      ...data,
+      id: data.id || 'person-remote-created',
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+    } as any)),
+    deletePerson: vi.fn().mockResolvedValue(undefined),
     materializeRecurring: vi.fn().mockResolvedValue({
       created_transactions: 0,
       suspended_recurring: 0,
@@ -2897,5 +2906,115 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     });
     expect(syncBillPayment).toBeDefined();
     expect('then' in syncBillPayment).toBe(false);
+  });
+
+  it('persiste remotamente addPerson, updatePerson, deletePerson e resolve splits em updateTransaction e createInstallmentPurchase', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    expect(getCtx().isLoaded).toBe(true);
+
+    // 1. addPerson persiste remotamente e atualiza allPeople com ID canônico
+    let createdPerson: any = null;
+    await act(async () => {
+      createdPerson = getCtx().addPerson('Fernanda Remota');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(createdPerson).toBeDefined();
+    expect(repo.savePerson).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Fernanda Remota', workspace_id: 'ws-1' })
+    );
+
+    // 2. updatePerson persiste remotamente
+    await act(async () => {
+      getCtx().updatePerson(createdPerson.id, { name: 'Fernanda Atualizada' });
+      await getCtx().waitForPendingMutations();
+    });
+    expect(repo.savePerson).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Fernanda Atualizada' })
+    );
+
+    // 3. deletePerson persiste remotamente
+    await act(async () => {
+      getCtx().deletePerson(createdPerson.id);
+      await getCtx().waitForPendingMutations();
+    });
+    expect(repo.deletePerson).toHaveBeenCalled();
+
+    // 4. updateTransaction com splits mapeia canonicalIds
+    await act(async () => {
+      getCtx().updateTransaction('tx-1', {
+        split_type: 'equal',
+        splits: [
+          { member_id: 'wsm-1', amount: 40 },
+          { member_id: 'wsm-2', amount: 40 },
+        ],
+      });
+      await getCtx().waitForPendingMutations();
+    });
+    expect(repo.saveTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tx-1',
+        splits: expect.arrayContaining([
+          expect.objectContaining({ member_id: 'wsm-1', amount: 40 }),
+        ]),
+      })
+    );
+
+    // 5. createInstallmentPurchase com splits mapeia canonicalIds
+    await act(async () => {
+      getCtx().createInstallmentPurchase({
+        description: 'TV Sala 2x',
+        total_amount: 500,
+        installment_count: 2,
+        purchase_date: '2026-09-20',
+        split_type: 'equal',
+        splits: [
+          { member_id: 'wsm-1', amount: 250 },
+          { member_id: 'wsm-2', amount: 250 },
+        ],
+      });
+      await getCtx().waitForPendingMutations();
+    });
+    expect(repo.savePurchase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'TV Sala 2x',
+        splits: expect.arrayContaining([
+          expect.objectContaining({ member_id: 'wsm-1', amount: 250 }),
+        ]),
+      })
+    );
+  });
+
+  it('rejeita mutação assíncrona quando ação local síncrona falha na validação', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const { getCtx } = await mountTestProvider({
+      repository: repo,
+      initialDataMode: 'supabase',
+    });
+
+    let caughtError: any = null;
+    await act(async () => {
+      try {
+        await (getCtx() as any).addTransactionAsync({
+          description: 'Inválido',
+          amount: -50,
+          type: 'expense',
+          transaction_date: '2026-09-20',
+          due_date: '2026-09-20',
+          status: 'pending',
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+    });
+
+    expect(caughtError).toBeDefined();
   });
 });

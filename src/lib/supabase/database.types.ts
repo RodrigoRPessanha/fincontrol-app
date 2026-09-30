@@ -561,6 +561,41 @@ export type Database = {
           },
         ]
       }
+      people: {
+        Row: {
+          archived: boolean
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          archived?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          archived?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "people_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -593,8 +628,9 @@ export type Database = {
           amount: number
           created_at: string
           id: string
-          member_id: string
+          member_id: string | null
           percentage: number | null
+          person_id: string | null
           purchase_id: string
           updated_at: string
           workspace_id: string
@@ -603,8 +639,9 @@ export type Database = {
           amount: number
           created_at?: string
           id?: string
-          member_id: string
+          member_id?: string | null
           percentage?: number | null
+          person_id?: string | null
           purchase_id: string
           updated_at?: string
           workspace_id: string
@@ -613,8 +650,9 @@ export type Database = {
           amount?: number
           created_at?: string
           id?: string
-          member_id?: string
+          member_id?: string | null
           percentage?: number | null
+          person_id?: string | null
           purchase_id?: string
           updated_at?: string
           workspace_id?: string
@@ -625,6 +663,13 @@ export type Database = {
             columns: ["member_id"]
             isOneToOne: false
             referencedRelation: "workspace_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_splits_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
             referencedColumns: ["id"]
           },
           {
@@ -654,6 +699,7 @@ export type Database = {
           id: string
           installment_count: number
           paid_by_member_id: string | null
+          paid_by_person_id: string | null
           paid_installments_count: number | null
           payment_method_id: string | null
           purchase_date: string
@@ -672,6 +718,7 @@ export type Database = {
           id?: string
           installment_count: number
           paid_by_member_id?: string | null
+          paid_by_person_id?: string | null
           paid_installments_count?: number | null
           payment_method_id?: string | null
           purchase_date?: string
@@ -690,6 +737,7 @@ export type Database = {
           id?: string
           installment_count?: number
           paid_by_member_id?: string | null
+          paid_by_person_id?: string | null
           paid_installments_count?: number | null
           payment_method_id?: string | null
           purchase_date?: string
@@ -732,6 +780,13 @@ export type Database = {
             columns: ["paid_by_member_id"]
             isOneToOne: false
             referencedRelation: "workspace_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchases_paid_by_person_id_fkey"
+            columns: ["paid_by_person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
             referencedColumns: ["id"]
           },
           {
@@ -857,12 +912,14 @@ export type Database = {
           amount: number
           created_at: string
           created_by: string | null
-          from_member_id: string
+          from_member_id: string | null
+          from_person_id: string | null
           id: string
           notes: string | null
           payment_account_id: string | null
           settlement_date: string
-          to_member_id: string
+          to_member_id: string | null
+          to_person_id: string | null
           updated_at: string
           workspace_id: string
         }
@@ -870,12 +927,14 @@ export type Database = {
           amount: number
           created_at?: string
           created_by?: string | null
-          from_member_id: string
+          from_member_id?: string | null
+          from_person_id?: string | null
           id?: string
           notes?: string | null
           payment_account_id?: string | null
           settlement_date?: string
-          to_member_id: string
+          to_member_id?: string | null
+          to_person_id?: string | null
           updated_at?: string
           workspace_id: string
         }
@@ -883,12 +942,14 @@ export type Database = {
           amount?: number
           created_at?: string
           created_by?: string | null
-          from_member_id?: string
+          from_member_id?: string | null
+          from_person_id?: string | null
           id?: string
           notes?: string | null
           payment_account_id?: string | null
           settlement_date?: string
-          to_member_id?: string
+          to_member_id?: string | null
+          to_person_id?: string | null
           updated_at?: string
           workspace_id?: string
         }
@@ -908,6 +969,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "settlements_from_person_id_fkey"
+            columns: ["from_person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "settlements_payment_account_id_fkey"
             columns: ["payment_account_id"]
             isOneToOne: false
@@ -919,6 +987,13 @@ export type Database = {
             columns: ["to_member_id"]
             isOneToOne: false
             referencedRelation: "workspace_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "settlements_to_person_id_fkey"
+            columns: ["to_person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
             referencedColumns: ["id"]
           },
           {
@@ -935,8 +1010,9 @@ export type Database = {
           amount: number
           created_at: string
           id: string
-          member_id: string
+          member_id: string | null
           percentage: number | null
+          person_id: string | null
           transaction_id: string
           updated_at: string
           workspace_id: string
@@ -945,8 +1021,9 @@ export type Database = {
           amount: number
           created_at?: string
           id?: string
-          member_id: string
+          member_id?: string | null
           percentage?: number | null
+          person_id?: string | null
           transaction_id: string
           updated_at?: string
           workspace_id: string
@@ -955,8 +1032,9 @@ export type Database = {
           amount?: number
           created_at?: string
           id?: string
-          member_id?: string
+          member_id?: string | null
           percentage?: number | null
+          person_id?: string | null
           transaction_id?: string
           updated_at?: string
           workspace_id?: string
@@ -967,6 +1045,13 @@ export type Database = {
             columns: ["member_id"]
             isOneToOne: false
             referencedRelation: "workspace_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transaction_splits_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
             referencedColumns: ["id"]
           },
           {
@@ -1000,6 +1085,7 @@ export type Database = {
           notes: string | null
           paid_at: string | null
           paid_by_member_id: string | null
+          paid_by_person_id: string | null
           payment_method_id: string | null
           recurring_transaction_id: string | null
           split_type: string
@@ -1023,6 +1109,7 @@ export type Database = {
           notes?: string | null
           paid_at?: string | null
           paid_by_member_id?: string | null
+          paid_by_person_id?: string | null
           payment_method_id?: string | null
           recurring_transaction_id?: string | null
           split_type?: string
@@ -1046,6 +1133,7 @@ export type Database = {
           notes?: string | null
           paid_at?: string | null
           paid_by_member_id?: string | null
+          paid_by_person_id?: string | null
           payment_method_id?: string | null
           recurring_transaction_id?: string | null
           split_type?: string
@@ -1096,6 +1184,13 @@ export type Database = {
             columns: ["paid_by_member_id"]
             isOneToOne: false
             referencedRelation: "workspace_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_paid_by_person_id_fkey"
+            columns: ["paid_by_person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
             referencedColumns: ["id"]
           },
           {
@@ -1309,6 +1404,7 @@ export type Database = {
           p_description: string
           p_installment_count: number
           p_paid_by_member_id?: string
+          p_paid_by_person_id?: string
           p_paid_installments_count?: number
           p_payment_method_id?: string
           p_purchase_date?: string
@@ -1326,6 +1422,7 @@ export type Database = {
           p_description: string
           p_installment_count: number
           p_paid_by_member_id?: string
+          p_paid_by_person_id?: string
           p_paid_installments_count?: number
           p_payment_method_id?: string
           p_purchase_date?: string
@@ -1347,6 +1444,7 @@ export type Database = {
           p_due_date?: string
           p_notes?: string
           p_paid_by_member_id?: string
+          p_paid_by_person_id?: string
           p_payment_method_id?: string
           p_split_type?: string
           p_splits?: Json
@@ -1379,6 +1477,10 @@ export type Database = {
       }
       fn_delete_purchase: {
         Args: { p_purchase_id: string; p_workspace_id: string }
+        Returns: boolean
+      }
+      fn_delete_settlement: {
+        Args: { p_settlement_id: string; p_workspace_id?: string }
         Returns: boolean
       }
       fn_delete_transaction: {
@@ -1418,12 +1520,14 @@ export type Database = {
       }
       fn_record_settlement: {
         Args: {
-          p_amount: number
-          p_from_member_id: string
+          p_amount?: number
+          p_from_member_id?: string
+          p_from_person_id?: string
           p_notes?: string
           p_payment_account_id?: string
           p_settlement_date?: string
-          p_to_member_id: string
+          p_to_member_id?: string
+          p_to_person_id?: string
           p_workspace_id: string
         }
         Returns: string
@@ -1473,6 +1577,7 @@ export type Database = {
           p_credit_card_id?: string
           p_description?: string
           p_paid_by_member_id?: string
+          p_paid_by_person_id?: string
           p_payment_method_id?: string
           p_purchase_date?: string
           p_purchase_id: string
@@ -1494,6 +1599,7 @@ export type Database = {
           p_due_date?: string
           p_notes?: string
           p_paid_by_member_id?: string
+          p_paid_by_person_id?: string
           p_payment_method_id?: string
           p_split_type?: string
           p_splits?: Json

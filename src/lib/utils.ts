@@ -113,7 +113,7 @@ export function getSafeRedirectPath(target: string | null | undefined, fallback:
   try {
     const dummyOrigin = 'http://localhost';
     const parsed = new URL(trimmed, dummyOrigin);
-    if (parsed.origin !== dummyOrigin || !parsed.pathname.startsWith('/')) {
+    if (parsed.origin !== dummyOrigin) {
       return fallback;
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;

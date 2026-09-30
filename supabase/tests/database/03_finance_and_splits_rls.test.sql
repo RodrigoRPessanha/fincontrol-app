@@ -2,7 +2,7 @@
 -- TESTE 03: PERMISSÕES RBAC POR PAPEL (VIEWER, MEMBER, ADMIN, OWNER)
 -- ==============================================================================
 BEGIN;
-SELECT plan(13);
+SELECT plan(14);
 
 -- 1. Setup: 4 usuários com papéis distintos no mesmo workspace
 INSERT INTO auth.users (id, aud, role, email)
@@ -72,6 +72,25 @@ SELECT lives_ok(
     'Member pode criar transações no workspace via RPC'
 );
 
+-- Configura despesa onde Admin paga e Member fica com dívida de R$ 50,00
+SELECT fn_create_transaction_with_splits(
+    (SELECT ws_id FROM rbac_vars),
+    'Despesa Compartilhada Admin e Member',
+    100.00,
+    CURRENT_DATE,
+    'expense',
+    'pending',
+    NULL, NULL, NULL, NULL, NULL,
+    NULL,
+    (SELECT id FROM public.workspace_members WHERE user_id = '10000000-0000-0000-0000-000000000002' AND workspace_id = (SELECT ws_id FROM rbac_vars)),
+    'equal',
+    CURRENT_DATE,
+    jsonb_build_array(
+        jsonb_build_object('member_id', (SELECT id FROM public.workspace_members WHERE user_id = '10000000-0000-0000-0000-000000000002' AND workspace_id = (SELECT ws_id FROM rbac_vars)), 'amount', 50.00),
+        jsonb_build_object('member_id', (SELECT id FROM public.workspace_members WHERE user_id = '10000000-0000-0000-0000-000000000003' AND workspace_id = (SELECT ws_id FROM rbac_vars)), 'amount', 50.00)
+    )
+);
+
 -- 3.2. Member pode registrar acerto de contas via RPC
 SELECT lives_ok(
     'SELECT fn_record_settlement((SELECT ws_id FROM rbac_vars),
@@ -82,11 +101,15 @@ SELECT lives_ok(
 );
 
 -- 3.3. Member NÃO pode excluir acerto de contas (apenas admin/owner)
-DELETE FROM public.settlements WHERE workspace_id = (SELECT ws_id FROM rbac_vars);
+SELECT throws_ok(
+    'SELECT fn_delete_settlement((SELECT id FROM public.settlements WHERE workspace_id = (SELECT ws_id FROM rbac_vars) LIMIT 1))',
+    'Acesso negado: apenas proprietários e administradores podem excluir acertos.',
+    'Member é impedido de deletar acertos financeiros'
+);
 SELECT is(
     (SELECT count(*)::INT FROM public.settlements WHERE workspace_id = (SELECT ws_id FROM rbac_vars)),
     1,
-    'Member é impedido pelo RLS de deletar acertos financeiros (acerto permanece intacto)'
+    'Acerto permanece intacto após tentativa de deleção por Member'
 );
 
 -- 3.4. Member NÃO pode excluir workspace
@@ -103,10 +126,10 @@ SELECT is(
 SET LOCAL "request.jwt.claim.sub" = '10000000-0000-0000-0000-000000000002';
 SET LOCAL role = 'authenticated';
 
--- 4.1. Admin pode excluir acertos de contas
+-- 4.1. Admin pode excluir acertos de contas via RPC
 SELECT lives_ok(
-    'DELETE FROM public.settlements WHERE workspace_id = (SELECT ws_id FROM rbac_vars)',
-    'Admin pode excluir acertos de contas'
+    'SELECT fn_delete_settlement((SELECT id FROM public.settlements WHERE workspace_id = (SELECT ws_id FROM rbac_vars) LIMIT 1))',
+    'Admin pode excluir acertos de contas via RPC'
 );
 
 -- 4.2. Admin pode gerenciar membros não-owners

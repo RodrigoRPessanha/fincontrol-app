@@ -174,6 +174,18 @@ describe('Utils - getSafeRedirectPath', () => {
     expect(getSafeRedirectPath('/%E0%A4%A')).toBe('/');
     // Non-matching origin check
     expect(getSafeRedirectPath('http://outra-origem.com/path')).toBe('/');
+    expect(getSafeRedirectPath('http://localhost:8080/path')).toBe('/');
+
+    // Erro inesperado no construtor URL
+    const originalURL = globalThis.URL;
+    try {
+      (globalThis as any).URL = function () {
+        throw new Error('URL constructor failure');
+      };
+      expect(getSafeRedirectPath('/valid-path')).toBe('/');
+    } finally {
+      globalThis.URL = originalURL;
+    }
   });
 });
 

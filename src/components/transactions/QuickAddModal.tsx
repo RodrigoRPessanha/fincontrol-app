@@ -30,6 +30,8 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     accounts,
     creditCards,
     workspaceMembers,
+    people = [],
+    addPerson,
     addTransaction,
     createInstallmentPurchase,
     createTransfer,
@@ -47,8 +49,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
 
   // Rateio de Despesas (Splitwise)
   const [paidByMemberId, setPaidByMemberId] = useState('');
+  const [paidByPersonId, setPaidByPersonId] = useState('');
   const [splitType, setSplitType] = useState<SplitType>('individual');
   const [customSplits, setCustomSplits] = useState<Record<string, number>>({});
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
 
   // Transferência
   const [fromAccountId, setFromAccountId] = useState('');
@@ -130,8 +134,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     setInstallmentCount(1);
     setPaidInstallmentsCount(0);
     setPaidByMemberId('');
+    setPaidByPersonId('');
     setSplitType('individual');
     setCustomSplits({});
+    setSelectedParticipantIds([]);
     setFromAccountId('');
     setToAccountId('');
     setTransactionDate(format(new Date(), 'yyyy-MM-dd'));
@@ -168,14 +174,62 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
         return;
       }
 
-      const effectivePayerId = paidByMemberId || workspaceMembers[0]?.id;
+      const effectivePayerId = paidByPersonId
+        ? paidByPersonId
+        : (paidByMemberId || workspaceMembers[0]?.id || (people[0]?.id ?? ''));
+
+      const isPayerPerson = Boolean(paidByPersonId || people.some((p) => p.id === effectivePayerId));
+
+      const allAvailableParticipants = [
+        ...workspaceMembers.map((m) => ({
+          id: m.id,
+          name: m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`,
+          type: 'member' as const,
+        })),
+        ...(people || []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          type: 'person' as const,
+        })),
+      ];
+
+      let activeParticipants = allAvailableParticipants;
+      if (selectedParticipantIds.length > 0) {
+        activeParticipants = allAvailableParticipants.filter((p) => selectedParticipantIds.includes(p.id));
+        if (effectivePayerId && !activeParticipants.some((p) => p.id === effectivePayerId)) {
+          const payerPart = allAvailableParticipants.find((p) => p.id === effectivePayerId);
+          if (payerPart) activeParticipants.push(payerPart);
+        }
+      } else if (workspaceMembers.length > 1 && (!people || people.length === 0)) {
+        activeParticipants = workspaceMembers.map((m) => ({
+          id: m.id,
+          name: m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`,
+          type: 'member' as const,
+        }));
+      }
+
+      const isSplitActive = type === 'expense' && splitType !== 'individual' && activeParticipants.length > 1 && !!effectivePayerId;
+      const effectiveSplitType = isSplitActive ? splitType : 'individual';
+
       let resolvedSplits: TransactionSplit[] | undefined = undefined;
 
-      if (type === 'expense' && splitType !== 'individual' && workspaceMembers.length > 1 && effectivePayerId) {
-        const customList = splitType === 'custom'
-          ? workspaceMembers.map((m) => ({ member_id: m.id, amount: customSplits[m.id] || 0 }))
+      if (isSplitActive) {
+        const customList = effectiveSplitType === 'custom'
+          ? activeParticipants.map((p) => ({
+              id: p.id,
+              type: p.type,
+              member_id: p.type === 'member' ? p.id : null,
+              person_id: p.type === 'person' ? p.id : null,
+              amount: customSplits[p.id] || 0,
+            }))
           : undefined;
-        resolvedSplits = calculateExpenseSplits(numAmount, splitType, workspaceMembers, effectivePayerId, customList);
+        resolvedSplits = calculateExpenseSplits(
+          numAmount,
+          effectiveSplitType,
+          activeParticipants,
+          { id: effectivePayerId, type: isPayerPerson ? 'person' : 'member' },
+          customList
+        );
       }
 
       if (isCreditCardSelected && installmentCount > 1 && selectedCard) {
@@ -190,8 +244,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           payment_method_id: paymentMethodId || undefined,
           account_id: accountId || selectedPaymentMethod?.linked_account_id || selectedCard.linked_payment_account_id || undefined,
           paid_installments_count: paidInstallmentsCount,
-          paid_by_member_id: effectivePayerId,
-          split_type: splitType !== 'individual' ? splitType : undefined,
+          paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
+          paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
+          split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
           splits: resolvedSplits,
         });
       } else {
@@ -209,8 +264,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           status: isAlreadyPaid ? 'paid' : 'pending',
           paid_at: isAlreadyPaid ? new Date().toISOString() : null,
           notes: notes || undefined,
-          paid_by_member_id: effectivePayerId,
-          split_type: splitType !== 'individual' ? splitType : undefined,
+          paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
+          paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
+          split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
           splits: resolvedSplits,
         });
       }
@@ -377,15 +433,35 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
             <SplitFields
               type={type}
               workspaceMembers={workspaceMembers}
+              people={people}
               paidByMemberId={paidByMemberId}
               onPaidByMemberIdChange={setPaidByMemberId}
+              paidByPersonId={paidByPersonId}
+              onPaidByPersonIdChange={setPaidByPersonId}
               splitType={splitType}
               onSplitTypeChange={setSplitType}
               customSplits={customSplits}
-              onCustomSplitChange={(mId, val) =>
-                setCustomSplits((prev) => ({ ...prev, [mId]: val }))
+              onCustomSplitChange={(id, val) =>
+                setCustomSplits((prev) => ({ ...prev, [id]: val }))
               }
               numAmount={numAmount}
+              onAddPerson={addPerson}
+              selectedParticipantIds={selectedParticipantIds}
+              onToggleParticipant={(id) => {
+                setSelectedParticipantIds((prev) => {
+                  const allIds = [
+                    ...workspaceMembers.map((m) => m.id),
+                    ...people.map((p) => p.id),
+                  ];
+                  const current = prev.length > 0 ? prev : allIds;
+                  if (current.includes(id)) {
+                    if (current.length <= 1) return current;
+                    return current.filter((item) => item !== id);
+                  } else {
+                    return [...current, id];
+                  }
+                });
+              }}
             />
           )}
 

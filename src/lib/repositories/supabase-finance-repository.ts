@@ -10,6 +10,7 @@ import {
   Installment,
   Payment,
   PaymentMethod,
+  Person,
   Purchase,
   RecurringTransaction,
   Settlement,
@@ -39,6 +40,8 @@ import {
   mapDomainToPaymentMethodInsert,
   mapPaymentRowToDomain,
   mapDomainToPaymentInsert,
+  mapPersonRowToDomain,
+  mapDomainToPersonInsert,
   mapPurchaseRowToDomain,
   mapDomainToPurchaseInsert,
   mapInstallmentRowToDomain,
@@ -92,6 +95,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       budgetsRes,
       goalsRes,
       settlementsRes,
+      peopleRes,
     ] = await Promise.all([
       this.client.from('workspaces').select('*'),
       this.client
@@ -113,6 +117,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       this.client.from('budgets').select('*').eq('workspace_id', workspaceId),
       this.client.from('financial_goals').select('*').eq('workspace_id', workspaceId),
       this.client.from('settlements').select('*').eq('workspace_id', workspaceId),
+      this.client.from('people').select('*').eq('workspace_id', workspaceId),
     ]);
 
     if (wsRes.error) throw RepositoryError.fromPostgrestError(wsRes.error, 'workspaces');
@@ -132,6 +137,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     if (budgetsRes.error) throw RepositoryError.fromPostgrestError(budgetsRes.error, 'budgets');
     if (goalsRes.error) throw RepositoryError.fromPostgrestError(goalsRes.error, 'financial_goals');
     if (settlementsRes.error) throw RepositoryError.fromPostgrestError(settlementsRes.error, 'settlements');
+    if (peopleRes.error) throw RepositoryError.fromPostgrestError(peopleRes.error, 'people');
 
     // Carrega parcelas das compras deste workspace
     const purchaseIds = (purchasesRes.data ?? []).map((p) => p.id);
@@ -198,6 +204,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       allBudgets: (budgetsRes.data ?? []).map(mapBudgetRowToDomain),
       allGoals: (goalsRes.data ?? []).map(mapFinancialGoalRowToDomain),
       allSettlements: (settlementsRes.data ?? []).map(mapSettlementRowToDomain),
+      allPeople: (peopleRes.data ?? []).map(mapPersonRowToDomain),
     };
   }
 
@@ -561,6 +568,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_credit_card_bill_id: (transaction.credit_card_bill_id ?? null) as string | null,
         p_notes: (transaction.notes ?? null) as string | null,
         p_paid_by_member_id: (transaction.paid_by_member_id ?? null) as string | null,
+        p_paid_by_person_id: (transaction.paid_by_person_id ?? null) as string | null,
         p_split_type: (transaction.split_type ?? null) as string | null,
         p_splits: transaction.splits !== undefined ? (transaction.splits as unknown as Json) : undefined,
       } as any);
@@ -595,6 +603,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_credit_card_bill_id: (transaction.credit_card_bill_id ?? null) as string | null,
         p_notes: (transaction.notes ?? null) as string | null,
         p_paid_by_member_id: (transaction.paid_by_member_id ?? null) as string | null,
+        p_paid_by_person_id: (transaction.paid_by_person_id ?? null) as string | null,
         p_split_type: (transaction.split_type ?? null) as string | null,
         p_splits: (transaction.splits ?? []) as unknown as Json,
       } as any);
@@ -673,6 +682,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_payment_method_id: (purchase.payment_method_id ?? null) as string | null,
         p_credit_card_id: (purchase.credit_card_id ?? null) as string | null,
         p_paid_by_member_id: (purchase.paid_by_member_id ?? null) as string | null,
+        p_paid_by_person_id: (purchase.paid_by_person_id ?? null) as string | null,
         p_split_type: (purchase.split_type ?? null) as string | null,
         p_splits: purchase.splits !== undefined ? (purchase.splits as unknown as Json) : undefined,
       } as any);
@@ -704,6 +714,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_payment_method_id: (purchase.payment_method_id ?? null) as string | null,
         p_paid_installments_count: purchase.paid_installments_count ?? 0,
         p_paid_by_member_id: (purchase.paid_by_member_id ?? null) as string | null,
+        p_paid_by_person_id: (purchase.paid_by_person_id ?? null) as string | null,
         p_split_type: (purchase.split_type ?? null) as string | null,
         p_splits: (purchase.splits ?? []) as unknown as Json,
       } as any);
@@ -1065,29 +1076,72 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async saveSettlement(settlement: Omit<Settlement, 'id' | 'created_at'> & { id?: string }): Promise<Settlement> {
-    const payload = mapDomainToSettlementInsert(settlement);
-    if (settlement.id) {
-      const { data, error } = await this.client
-        .from('settlements')
-        .update(payload)
-        .eq('id', settlement.id)
-        .select()
-        .single();
-      if (error) throw RepositoryError.fromPostgrestError(error, 'settlements');
-      return mapSettlementRowToDomain(data);
-    }
-    const { data, error } = await this.client
-      .from('settlements')
-      .insert(payload)
-      .select()
-      .single();
+    const payload = {
+      p_workspace_id: settlement.workspace_id,
+      p_from_member_id: settlement.from_member_id || undefined,
+      p_to_member_id: settlement.to_member_id || undefined,
+      p_amount: settlement.amount,
+      p_settlement_date: settlement.settlement_date || undefined,
+      p_notes: settlement.notes || undefined,
+      p_payment_account_id: settlement.payment_account_id || undefined,
+      p_from_person_id: settlement.from_person_id || undefined,
+      p_to_person_id: settlement.to_person_id || undefined,
+    };
+
+    const { data: settlementId, error } = await this.client.rpc('fn_record_settlement', payload);
     if (error) throw RepositoryError.fromPostgrestError(error, 'settlements');
+
+    const { data, error: fetchError } = await this.client
+      .from('settlements')
+      .select('*')
+      .eq('id', settlementId)
+      .single();
+    if (fetchError) throw RepositoryError.fromPostgrestError(fetchError, 'settlements');
+
     return mapSettlementRowToDomain(data);
   }
 
   async deleteSettlement(id: string): Promise<void> {
-    const { error } = await this.client.from('settlements').delete().eq('id', id);
+    const { error } = await this.client.rpc('fn_delete_settlement', { p_settlement_id: id });
     if (error) throw RepositoryError.fromPostgrestError(error, 'settlements');
+  }
+
+  // ==========================================
+  // Pessoas (People & Flexible Splits)
+  // ==========================================
+  async getPeople(workspaceId: string): Promise<Person[]> {
+    const { data, error } = await this.client
+      .from('people')
+      .select('*')
+      .eq('workspace_id', workspaceId);
+    if (error) throw RepositoryError.fromPostgrestError(error, 'people');
+    return (data ?? []).map(mapPersonRowToDomain);
+  }
+
+  async savePerson(person: Omit<Person, 'id' | 'created_at'> & { id?: string }): Promise<Person> {
+    const payload = mapDomainToPersonInsert(person);
+    if (person.id) {
+      const { data, error } = await this.client
+        .from('people')
+        .update(payload)
+        .eq('id', person.id)
+        .select()
+        .single();
+      if (error) throw RepositoryError.fromPostgrestError(error, 'people');
+      return mapPersonRowToDomain(data);
+    }
+    const { data, error } = await this.client
+      .from('people')
+      .insert(payload)
+      .select()
+      .single();
+    if (error) throw RepositoryError.fromPostgrestError(error, 'people');
+    return mapPersonRowToDomain(data);
+  }
+
+  async deletePerson(id: string): Promise<void> {
+    const { error } = await this.client.from('people').delete().eq('id', id);
+    if (error) throw RepositoryError.fromPostgrestError(error, 'people');
   }
 
   // ==========================================

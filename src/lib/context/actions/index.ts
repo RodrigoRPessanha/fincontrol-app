@@ -13,3 +13,4 @@ export * from './recurring-actions';
 export * from './transaction-actions';
 export * from './installment-actions';
 export * from './payment-actions';
+export * from './person-actions';

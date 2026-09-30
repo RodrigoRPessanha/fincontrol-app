@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateExpenseSplits,
   calculateMemberNetBalances,
-  validateSettlement
+  validateSettlement,
+  PairwiseDebt,
 } from '../../financial-engine';
 import { Account, Category, CreditCard, CreditCardBill, Installment, Payment, Purchase, RecurringTransaction, Transaction, Settlement, WorkspaceMember } from '../../types';
 
@@ -628,5 +629,310 @@ describe('Financial Engine - Balanços com Compras Parceladas (calculateMemberNe
       { from_member_id: 'm-2', to_member_id: 'm-1', amount: 1500 },
     ]);
   });
-});
 
+  it('calcula balanços quando compras e liquidações envolvem pessoas sem cadastro prévio', () => {
+    const members: WorkspaceMember[] = [
+      { id: 'm-1', workspace_id: 'ws-1', user_id: 'u1', role: 'owner', created_at: '2026-01-01' },
+    ];
+
+    const purchases: Purchase[] = [
+      {
+        id: 'pur-person',
+        workspace_id: 'ws-1',
+        description: 'Móveis pagos por pessoa',
+        total_amount: 1000,
+        installment_count: 5,
+        paid_by_person_id: 'p-payer',
+        split_type: 'equal',
+        splits: [
+          { person_id: 'p-payer', amount: 500 },
+          { person_id: 'p-friend', amount: 500 },
+        ],
+        purchase_date: '2026-09-01',
+        created_at: '2026-09-01T10:00:00Z',
+      },
+    ];
+
+    const settlements: Settlement[] = [
+      {
+        id: 'set-person',
+        workspace_id: 'ws-1',
+        from_person_id: 'p-friend',
+        to_person_id: 'p-payer',
+        amount: 200,
+        settlement_date: '2026-09-05',
+        created_at: '2026-09-05T10:00:00Z',
+      },
+    ];
+
+    const { balances, pairwiseDebts } = calculateMemberNetBalances([], settlements, members, 'ws-1', purchases);
+
+    const bPayer = balances.find((b) => b.participant_id === 'p-payer');
+    const bFriend = balances.find((b) => b.participant_id === 'p-friend');
+
+    expect(bPayer?.net_balance).toBe(300); // 500 - 200 settled
+    expect(bFriend?.net_balance).toBe(-300); // -500 + 200 settled
+
+    expect(pairwiseDebts).toEqual([
+      { from_member_id: 'p-friend', to_member_id: 'p-payer', amount: 300 },
+    ]);
+  });
+
+  it('deve registrar participantes externos como Pessoa externa quando ausentes da lista de pessoas', () => {
+    const transactions = [
+      {
+        id: 'tx-ext',
+        workspace_id: 'ws-1',
+        description: 'Jantar com desconhecidos',
+        amount: 100,
+        transaction_date: '2026-09-01',
+        paid_by_person_id: 'p-desconhecido-1',
+        type: 'expense' as const,
+        status: 'paid' as const,
+        split_type: 'equal' as const,
+        splits: [
+          { person_id: 'p-desconhecido-1', amount: 50 },
+          { person_id: 'p-desconhecido-2', amount: 50 },
+        ],
+        due_date: '2026-09-01',
+        created_at: '2026-09-01T10:00:00Z',
+      },
+    ];
+
+    const settlements: Settlement[] = [
+      {
+        id: 'set-ext',
+        workspace_id: 'ws-1',
+        from_person_id: 'p-desconhecido-3',
+        to_person_id: 'p-desconhecido-4',
+        amount: 20,
+        settlement_date: '2026-09-02',
+        created_at: '2026-09-02T10:00:00Z',
+      },
+    ];
+
+    const { balances } = calculateMemberNetBalances(transactions, settlements, members, 'ws-1', [], []);
+
+    expect(balances.some((b) => b.participant_id === 'p-desconhecido-1' && b.name === 'Pessoa externa')).toBe(true);
+    expect(balances.some((b) => b.participant_id === 'p-desconhecido-2' && b.name === 'Pessoa externa')).toBe(true);
+    expect(balances.some((b) => b.participant_id === 'p-desconhecido-3' && b.name === 'Pessoa externa')).toBe(true);
+    expect(balances.some((b) => b.participant_id === 'p-desconhecido-4' && b.name === 'Pessoa externa')).toBe(true);
+  });
+
+  it('deve calcular divisão individual e validar acerto com dívidas consolidadas', () => {
+    const single = calculateExpenseSplits(100, 'individual', [{ id: 'm-1', name: 'Rodrigo', type: 'member' }], 'm-1');
+    expect(single.length).toBe(1);
+    expect(single[0].amount).toBe(100);
+
+    const pairwise: PairwiseDebt[] = [
+      { from_member_id: 'm-2', to_member_id: 'm-1', amount: 50 },
+    ];
+    Object.defineProperties(pairwise[0], {
+      from_id: { value: 'm-2' },
+      to_id: { value: 'm-1' },
+    });
+
+    expect(() => validateSettlement('m-2', 'm-1', 50, members, 'ws-1', pairwise)).not.toThrow();
+    expect(() => validateSettlement('m-2', 'm-1', 60, members, 'ws-1', pairwise)).toThrow(
+      /excede a dívida pendente/
+    );
+  });
+
+  it('deve lidar com compras parceladas sem pagador identificado ou com splits vazios ou sem ID', () => {
+    const purchaseWithoutSplits: Purchase = {
+      id: 'pur-empty',
+      workspace_id: 'ws-1',
+      description: 'Compra sem splits',
+      total_amount: 100,
+      installment_count: 2,
+      purchase_date: '2026-09-01',
+      paid_by_member_id: 'usr-1',
+      splits: undefined,
+      created_at: '2026-09-01',
+    };
+
+    const txWithoutPayer: Transaction = {
+      id: 'tx-no-payer',
+      workspace_id: 'ws-empty',
+      description: 'Tx sem pagador',
+      amount: 50,
+      type: 'expense',
+      status: 'pending',
+      transaction_date: '2026-09-01',
+      due_date: '2026-09-01',
+      splits: [{ person_id: 'p-1', amount: 50 }],
+      created_at: '2026-09-01',
+    };
+
+    const purchaseWithoutPayer: Purchase = {
+      id: 'pur-no-payer',
+      workspace_id: 'ws-empty',
+      description: 'Compra sem pagador',
+      total_amount: 50,
+      installment_count: 1,
+      purchase_date: '2026-09-01',
+      paid_by_member_id: undefined,
+      paid_by_person_id: undefined,
+      splits: [{ person_id: 'p-1', amount: 50 }],
+      created_at: '2026-09-01',
+    };
+
+    const purchaseWithInvalidSplit: Purchase = {
+      id: 'pur-invalid-split',
+      workspace_id: 'ws-1',
+      description: 'Compra split inválido',
+      total_amount: 80,
+      installment_count: 1,
+      purchase_date: '2026-09-01',
+      paid_by_member_id: 'usr-1',
+      splits: [
+        { amount: 40 } as any,
+        { member_id: 'usr-2', amount: 40 },
+      ],
+      created_at: '2026-09-01',
+    };
+
+    const res1 = calculateMemberNetBalances([txWithoutPayer], [], [], 'ws-empty', [purchaseWithoutPayer], []);
+    expect(res1.balances.length).toBeGreaterThan(0);
+
+    const res2 = calculateMemberNetBalances([], [], members, 'ws-1', [purchaseWithoutSplits, purchaseWithInvalidSplit], []);
+    expect(res2.balances.length).toBeGreaterThan(0);
+  });
+
+  it('deve exercitar cs.person_id e participantMap em custom splits e nova pessoa em compra', () => {
+    const splitsCustom = calculateExpenseSplits(
+      100,
+      'custom',
+      [
+        { id: 'p-1', name: 'Carlos', type: 'person' },
+        { id: 'm-1', name: 'Rodrigo', type: 'member' },
+      ],
+      'm-1',
+      [
+        { person_id: 'p-1', amount: 40 },
+        { member_id: 'm-1', amount: 60 },
+      ]
+    );
+    expect(splitsCustom).toHaveLength(2);
+    expect(splitsCustom[0].person_id).toBe('p-1');
+    expect(splitsCustom[1].member_id).toBe('m-1');
+
+    const purWithNewPerson: Purchase = {
+      id: 'pur-new-person',
+      workspace_id: 'ws-1',
+      description: 'Compra com nova pessoa',
+      total_amount: 100,
+      installment_count: 2,
+      purchase_date: '2026-09-01',
+      paid_by_member_id: 'usr-1',
+      splits: [{ person_id: 'p-brand-new', amount: 100 }],
+      created_at: '2026-09-01',
+    };
+    const resNew = calculateMemberNetBalances([], [], members, 'ws-1', [purWithNewPerson], []);
+    expect(resNew.balances.some((b) => b.participant_id === 'p-brand-new')).toBe(true);
+  });
+
+  it('deve cobrir cs.id em custom splits e compra com splits indefinidos em calculateMemberNetBalances', () => {
+    const splitsViaId = calculateExpenseSplits(
+      100,
+      'custom',
+      [
+        { id: 'm-1', name: 'Rodrigo', type: 'member' },
+        { id: 'm-2', name: 'Ana', type: 'member' },
+      ],
+      'm-1',
+      [
+        { id: 'm-1', amount: 50 },
+        { id: 'm-2', amount: 50 },
+      ] as any
+    );
+    expect(splitsViaId).toHaveLength(2);
+    expect(splitsViaId[0].member_id).toBe('m-1');
+    expect(splitsViaId[1].member_id).toBe('m-2');
+
+    const purWithoutSplits: Purchase = {
+      id: 'pur-no-splits',
+      workspace_id: 'ws-1',
+      description: 'Compra sem splits',
+      total_amount: 100,
+      installment_count: 1,
+      purchase_date: '2026-09-01',
+      paid_by_member_id: 'usr-1',
+      splits: undefined,
+      created_at: '2026-09-01',
+    };
+    const res = calculateMemberNetBalances([], [], members, 'ws-1', [purWithoutSplits], []);
+    expect(res.balances.length).toBeGreaterThan(0);
+  });
+
+  it('deve cobrir getType com is_member: false, person_id e payerMemberId como objeto sem type', () => {
+    const rawParticipants = [
+      { id: 'p-legacy-1', is_member: false },
+      { id: 'p-legacy-2', person_id: 'p-legacy-2' },
+      { id: 'm-legacy-3' },
+    ];
+    const splits = calculateExpenseSplits(
+      90,
+      'equal',
+      rawParticipants as any,
+      { id: 'p-legacy-1' } as any
+    );
+    expect(splits).toHaveLength(3);
+    expect(splits[0].person_id).toBe('p-legacy-1');
+    expect(splits[1].person_id).toBe('p-legacy-2');
+    expect(splits[2].member_id).toBe('m-legacy-3');
+  });
+
+  it('deve desempatar credores e devedores com mesmo saldo de forma determinística por ID', () => {
+    const customMembers: WorkspaceMember[] = [
+      { id: 'cred-b', workspace_id: 'ws-1', user_id: 'u-cb', role: 'member', created_at: '2026-01-01' },
+      { id: 'cred-a', workspace_id: 'ws-1', user_id: 'u-ca', role: 'member', created_at: '2026-01-01' },
+      { id: 'deb-b', workspace_id: 'ws-1', user_id: 'u-db', role: 'member', created_at: '2026-01-01' },
+      { id: 'deb-a', workspace_id: 'ws-1', user_id: 'u-da', role: 'member', created_at: '2026-01-01' },
+    ];
+
+    // Transações onde cred-b e cred-a pagam 100 cada para deb-b e deb-a
+    const txs: Transaction[] = [
+      {
+        id: 'tx-1',
+        workspace_id: 'ws-1',
+        description: 'Cred B paga para Deb B',
+        amount: 100,
+        type: 'expense',
+        status: 'paid',
+        due_date: '2026-09-01',
+        transaction_date: '2026-09-01',
+        paid_by_member_id: 'cred-b',
+        split_type: 'custom',
+        splits: [
+          { member_id: 'deb-b', amount: 100, percentage: 100 },
+        ],
+        created_at: '2026-09-01',
+      },
+      {
+        id: 'tx-2',
+        workspace_id: 'ws-1',
+        description: 'Cred A paga para Deb A',
+        amount: 100,
+        type: 'expense',
+        status: 'paid',
+        due_date: '2026-09-01',
+        transaction_date: '2026-09-01',
+        paid_by_member_id: 'cred-a',
+        split_type: 'custom',
+        splits: [
+          { member_id: 'deb-a', amount: 100, percentage: 100 },
+        ],
+        created_at: '2026-09-01',
+      },
+    ];
+
+    const result = calculateMemberNetBalances(txs, [], customMembers, 'ws-1', [], []);
+    // Com desempate por id ASC:
+    // Credores empatados (100 cada): cred-a deve vir antes de cred-b
+    // Devedores empatados (100 cada): deb-a deve vir antes de deb-b
+    expect(result.pairwiseDebts).toHaveLength(2);
+    expect(result.pairwiseDebts[0].to_member_id).toBe('cred-a');
+    expect(result.pairwiseDebts[0].from_member_id).toBe('deb-a');
+  });
+});

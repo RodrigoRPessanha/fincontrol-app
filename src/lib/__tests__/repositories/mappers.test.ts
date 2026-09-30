@@ -38,6 +38,10 @@ import {
   mapWorkspaceMemberRowToDomain,
   mapDomainToWorkspaceMemberInsert,
 } from '../../repositories/mappers';
+import {
+  mapPersonRowToDomain,
+  mapDomainToPersonInsert,
+} from '../../repositories/mappers/person-mapper';
 import { RepositoryError } from '../../repositories/repository-errors';
 
 describe('Repository Errors & PostgREST Code Mapping', () => {
@@ -253,6 +257,7 @@ describe('Transaction & Split Mappers', () => {
       notes: 'Compras do mês',
       created_by: 'usr-1',
       paid_by_member_id: 'mem-1',
+      paid_by_person_id: null,
       split_type: 'custom',
       recurring_transaction_id: null,
       due_date: '2026-04-01',
@@ -269,6 +274,7 @@ describe('Transaction & Split Mappers', () => {
         transaction_id: 'tx-1',
         workspace_id: 'ws-1',
         member_id: 'mem-1',
+        person_id: null,
         amount: 150,
         percentage: 60,
         created_at: '2026-01-01T00:00:00Z',
@@ -279,6 +285,7 @@ describe('Transaction & Split Mappers', () => {
         transaction_id: 'tx-1',
         workspace_id: 'ws-1',
         member_id: 'mem-2',
+        person_id: null,
         amount: 100,
         percentage: 40,
         created_at: '2026-01-01T00:00:00Z',
@@ -322,7 +329,7 @@ describe('Transaction & Split Mappers', () => {
 
     // mapTransactionSplitsToDomain com amount null (linha 19)
     const nullAmountSplits = mapTransactionSplitsToDomain([
-      { id: 's-null', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'mem-1', amount: null as any, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' }
+      { id: 's-null', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'mem-1', person_id: null, amount: null as any, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' }
     ]);
     expect(nullAmountSplits[0].amount).toBe(0);
 
@@ -348,6 +355,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       payment_method_id: null,
       created_by: 'usr-1',
       paid_by_member_id: 'mem-1',
+      paid_by_person_id: null,
       split_type: 'equal',
       metadata: null,
       created_at: '2026-01-01T00:00:00Z',
@@ -360,6 +368,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
         purchase_id: 'pur-1',
         workspace_id: 'ws-1',
         member_id: 'mem-1',
+        person_id: null,
         amount: 1500,
         percentage: 50,
         created_at: '2026-01-01T00:00:00Z',
@@ -411,8 +420,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(instInsertNulls.paid_at).toBeNull();
 
     const splitsWithNullAmount = mapPurchaseSplitsToDomain([
-      { id: 'ps-1', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', amount: null as any, percentage: null, created_at: '2026-01-01' },
-      { id: 'ps-2', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-2', amount: 50, percentage: 50, created_at: '2026-01-01' },
+      { id: 'ps-1', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', person_id: null, amount: null as any, percentage: null, created_at: '2026-01-01' },
+      { id: 'ps-2', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-2', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01' },
     ]);
     expect(splitsWithNullAmount[0].amount).toBe(0);
     expect(splitsWithNullAmount[0].percentage).toBeUndefined();
@@ -425,6 +434,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       workspace_id: 'ws-1',
       from_member_id: 'mem-1',
       to_member_id: 'mem-2',
+      from_person_id: null,
+      to_person_id: null,
       amount: 50,
       settlement_date: '2026-04-01',
       payment_account_id: 'acc-1',
@@ -1037,15 +1048,15 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(txSplitsToInsert[1].percentage).toBe(50);
 
     const txSplitsWithPercentage = mapTransactionSplitsToDomain([
-      { id: 'ts-p', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-1', amount: 50, percentage: 50, created_at: '2026-01-01', updated_at: '2026-01-01' },
-      { id: 'ts-np', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-2', amount: 50, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: 'ts-p', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-1', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: 'ts-np', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'm-2', person_id: null, amount: 50, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' },
     ]);
     expect(txSplitsWithPercentage[0].percentage).toBe(50);
     expect(txSplitsWithPercentage[1].percentage).toBeUndefined();
 
     const pSplitsWithPercentage = mapPurchaseSplitsToDomain([
-      { id: 'ps-p', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-1', amount: 50, percentage: 50, created_at: '2026-01-01', updated_at: '2026-01-01' },
-      { id: 'ps-np', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-2', amount: 50, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: 'ps-p', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-1', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: 'ps-np', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-2', person_id: null, amount: 50, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' },
     ]);
     expect(pSplitsWithPercentage[0].percentage).toBe(50);
     expect(pSplitsWithPercentage[1].percentage).toBeUndefined();
@@ -1064,6 +1075,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
         category_id: null,
         payment_method_id: null,
         paid_by_member_id: null,
+        paid_by_person_id: null,
         split_type: 'individual',
         created_by: null,
         created_at: '2026-01-01',
@@ -1139,5 +1151,163 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     const goal = mapDomainToFinancialGoalInsert({ name: 'G', workspace_id: 'ws-1' } as any);
     expect(goal.target_amount).toBeUndefined();
     expect(goal.current_amount).toBeUndefined();
+  });
+
+  it('maps Person row to domain and domain to insert bidirectional', () => {
+    const row = {
+      id: 'person-1',
+      workspace_id: 'ws-1',
+      name: 'João Silva',
+      archived: false,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+    };
+
+    const domain = mapPersonRowToDomain(row);
+    expect(domain.id).toBe('person-1');
+    expect(domain.name).toBe('João Silva');
+    expect(domain.archived).toBe(false);
+    expect(domain.created_at).toBe('2026-01-01T00:00:00Z');
+    expect(domain.updated_at).toBe('2026-01-02T00:00:00Z');
+
+    const insert = mapDomainToPersonInsert({
+      id: 'person-1',
+      workspace_id: 'ws-1',
+      name: '  João Silva  ',
+      archived: true,
+    });
+    expect(insert.id).toBe('person-1');
+    expect(insert.name).toBe('João Silva');
+    expect(insert.archived).toBe(true);
+
+    const insertDefaultArchived = mapDomainToPersonInsert({
+      workspace_id: 'ws-1',
+      name: 'Maria',
+    } as any);
+    expect(insertDefaultArchived.id).toBeUndefined();
+    expect(insertDefaultArchived.archived).toBe(false);
+  });
+
+  it('maps Settlement row to domain and domain to insert with all nullish and member/person combinations', () => {
+    const sRowWithNulls = mapSettlementRowToDomain({
+      id: 'set-1',
+      workspace_id: 'ws-1',
+      from_member_id: null,
+      to_member_id: null,
+      from_person_id: 'person-1',
+      to_person_id: 'person-2',
+      amount: 150,
+      settlement_date: '2026-04-01',
+      notes: null,
+      payment_account_id: null,
+      created_by: 'user-1',
+      created_at: '2026-04-01',
+      updated_at: '2026-04-01',
+    });
+    expect(sRowWithNulls.from_member_id).toBeNull();
+    expect(sRowWithNulls.to_member_id).toBeNull();
+    expect(sRowWithNulls.from_person_id).toBe('person-1');
+    expect(sRowWithNulls.to_person_id).toBe('person-2');
+
+    const sRowWithMembers = mapSettlementRowToDomain({
+      id: 'set-2',
+      workspace_id: 'ws-1',
+      from_member_id: 'mem-1',
+      to_member_id: 'mem-2',
+      from_person_id: null,
+      to_person_id: null,
+      amount: 200,
+      settlement_date: '2026-04-01',
+      notes: 'Acerto',
+      payment_account_id: 'acc-1',
+      created_by: 'user-1',
+      created_at: '2026-04-01',
+      updated_at: '2026-04-01',
+    });
+    expect(sRowWithMembers.from_member_id).toBe('mem-1');
+    expect(sRowWithMembers.to_member_id).toBe('mem-2');
+
+    const sInsertWithNulls = mapDomainToSettlementInsert({
+      workspace_id: 'ws-1',
+      from_member_id: null,
+      to_member_id: null,
+      from_person_id: 'person-1',
+      to_person_id: 'person-2',
+      amount: 150,
+      settlement_date: '2026-04-01',
+    });
+    expect(sInsertWithNulls.from_member_id).toBeNull();
+    expect(sInsertWithNulls.to_member_id).toBeNull();
+    expect(sInsertWithNulls.notes).toBeNull();
+    expect(sInsertWithNulls.payment_account_id).toBeNull();
+
+    const sInsertWithMembers = mapDomainToSettlementInsert({
+      id: 'set-2',
+      workspace_id: 'ws-1',
+      from_member_id: 'mem-1',
+      to_member_id: 'mem-2',
+      from_person_id: null,
+      to_person_id: null,
+      amount: 200,
+      settlement_date: '2026-04-01',
+      notes: 'Pago',
+      payment_account_id: 'acc-1',
+    });
+    expect(sInsertWithMembers.from_member_id).toBe('mem-1');
+    expect(sInsertWithMembers.to_member_id).toBe('mem-2');
+    expect(sInsertWithMembers.notes).toBe('Pago');
+    expect(sInsertWithMembers.payment_account_id).toBe('acc-1');
+  });
+
+  it('maps transaction and purchase splits with person_id and nullish member_id', () => {
+    const txSplitRows = [
+      {
+        id: 'split-1',
+        workspace_id: 'ws-1',
+        transaction_id: 'tx-1',
+        member_id: null,
+        person_id: 'person-1',
+        amount: 50,
+        percentage: 50,
+        created_at: '2026-04-01',
+      },
+    ];
+    const txSplitsDomain = mapTransactionSplitsToDomain(txSplitRows as any);
+    expect(txSplitsDomain[0].member_id).toBeUndefined();
+    expect(txSplitsDomain[0].person_id).toBe('person-1');
+
+    const txSplitsInsert = mapDomainSplitsToInsert('tx-1', 'ws-1', [
+      {
+        person_id: 'person-1',
+        amount: 50,
+      },
+    ]);
+    expect(txSplitsInsert[0].member_id).toBeNull();
+    expect(txSplitsInsert[0].person_id).toBe('person-1');
+
+    const purSplitRows = [
+      {
+        id: 'split-pur-1',
+        workspace_id: 'ws-1',
+        purchase_id: 'pur-1',
+        member_id: null,
+        person_id: 'person-1',
+        amount: 75,
+        percentage: 50,
+        created_at: '2026-04-01',
+      },
+    ];
+    const purSplitsDomain = mapPurchaseSplitsToDomain(purSplitRows as any);
+    expect(purSplitsDomain[0].member_id).toBeUndefined();
+    expect(purSplitsDomain[0].person_id).toBe('person-1');
+
+    const purSplitsInsert = mapDomainPurchaseSplitsToInsert('pur-1', 'ws-1', [
+      {
+        person_id: 'person-1',
+        amount: 75,
+      },
+    ]);
+    expect(purSplitsInsert[0].member_id).toBeNull();
+    expect(purSplitsInsert[0].person_id).toBe('person-1');
   });
 });

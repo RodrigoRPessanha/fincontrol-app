@@ -691,4 +691,14 @@ describe('FinanceProvider - Pagamentos e Aritmética Monetária', () => {
         expect(billAfter?.status).toBe('paid');
       }
     });
+
+    it('recordPayment: lança erro quando nenhuma obrigação é informada', async () => {
+      const { getCtx } = await mountProvider();
+      expect(() => {
+        getCtx().recordPayment({
+          amount: 50,
+          payment_date: '2026-08-01',
+        } as any);
+      }).toThrow('Informe exatamente uma obrigação de destino para o pagamento.');
+    });
 });

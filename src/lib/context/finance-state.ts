@@ -8,6 +8,7 @@ import {
   Installment,
   Payment,
   PaymentMethod,
+  Person,
   Purchase,
   RecurringTransaction,
   Settlement,
@@ -25,6 +26,7 @@ export interface FinanceState {
   activeWorkspaceId: string;
   allWorkspaces: Workspace[];
   allWorkspaceMembers: WorkspaceMember[];
+  allPeople: Person[];
   allAccounts: Account[];
   allCreditCards: CreditCard[];
   allCreditCardBills: CreditCardBill[];
@@ -99,6 +101,7 @@ export interface FinanceContextType {
     payment_method_id?: string;
     paid_installments_count?: number;
     paid_by_member_id?: string;
+    paid_by_person_id?: string;
     split_type?: SplitType;
     splits?: TransactionSplit[];
   }) => Purchase;
@@ -130,14 +133,22 @@ export interface FinanceContextType {
 
   settlements: Settlement[];
   recordSettlement: (data: {
-    from_member_id: string;
-    to_member_id: string;
+    from_member_id?: string | null;
+    to_member_id?: string | null;
+    from_person_id?: string | null;
+    to_person_id?: string | null;
     amount: number;
     settlement_date?: string;
     notes?: string;
     payment_account_id?: string;
   }) => Settlement;
   deleteSettlement: (id: string) => void;
+
+  people: Person[];
+  allWorkspacePeople: Person[];
+  addPerson: (nameOrData: string | { name: string; workspace_id?: string }) => Person;
+  updatePerson: (id: string, data: { name?: string; archived?: boolean }) => void;
+  deletePerson: (id: string) => void;
 
   recurring: RecurringTransaction[];
   addRecurring: (data: Omit<RecurringTransaction, 'id' | 'workspace_id' | 'created_at'>) => RecurringTransaction;
