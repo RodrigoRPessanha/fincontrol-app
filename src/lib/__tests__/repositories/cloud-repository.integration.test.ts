@@ -745,7 +745,7 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
         ...purchase,
         total_amount: 20,
       })
-    ).rejects.toThrow(/inferior ao valor j[áa] pago nela/i);
+    ).rejects.toThrow(/total menor que o valor j[áa] pago/i);
 
     // 4. Confirma que a compra e a fatura não foram corrompidas
     const billsUnchanged = await repo.getCreditCardBills(card.id);
