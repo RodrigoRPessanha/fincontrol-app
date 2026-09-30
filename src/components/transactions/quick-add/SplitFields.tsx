@@ -126,6 +126,30 @@ export function SplitFields({
     return { previewSplits: splits, previewError: err };
   }, [type, splitType, currentAmount, activeParticipants, customSplits, effectivePayerId, effectivePayerType]);
 
+  const selectedPayerLabel = useMemo(() => {
+    const member = workspaceMembers.find((m) => m.id === effectivePayerId);
+    if (member) {
+      const name = member.user?.name || member.user?.email?.split('@')[0] || `Membro ${member.id.substring(0, 4)}`;
+      return `${name}${member.role === 'owner' ? ' (Owner)' : ''}`;
+    }
+    const person = people.find((p) => p.id === effectivePayerId);
+    if (person) {
+      return `${person.name} (Pessoa)`;
+    }
+    return 'Quem pagou';
+  }, [workspaceMembers, people, effectivePayerId]);
+
+  const selectedSplitLabel = useMemo(() => {
+    if (splitType === 'individual') return 'Sem divisão (100% pagador)';
+    if (splitType === 'equal') {
+      return activeParticipants.length === 2
+        ? 'Dividir igualmente (50/50)'
+        : 'Dividir igualmente (entre todos)';
+    }
+    if (splitType === 'full_other') return '100% de outra pessoa';
+    return 'Personalizado (definir valores)';
+  }, [splitType, activeParticipants.length]);
+
   // Se não for despesa, rateio não se aplica (return após todos os hooks)
   if (type !== 'expense') return null;
 
@@ -308,7 +332,7 @@ export function SplitFields({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Quem pagou? */}
-            <div>
+            <div className="min-w-0">
               <label className="block text-[11px] font-semibold text-teal-900 dark:text-teal-300">
                 Quem pagou?
               </label>
@@ -325,39 +349,58 @@ export function SplitFields({
                     onPaidByPersonIdChange?.('');
                   }
                 }}
-                className="mt-1 w-full rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
+                className="mt-1 w-full truncate rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
+                title={selectedPayerLabel}
               >
-                {workspaceMembers.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`} {m.role === 'owner' ? '(Owner)' : ''}
-                  </option>
-                ))}
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} (Pessoa)
-                  </option>
-                ))}
+                {workspaceMembers.map((m) => {
+                  const label = `${m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`}${m.role === 'owner' ? ' (Owner)' : ''}`;
+                  return (
+                    <option key={m.id} value={m.id} title={label}>
+                      {label}
+                    </option>
+                  );
+                })}
+                {people.map((p) => {
+                  const label = `${p.name} (Pessoa)`;
+                  return (
+                    <option key={p.id} value={p.id} title={label}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
             {/* Como dividir? */}
-            <div>
+            <div className="min-w-0">
               <label className="block text-[11px] font-semibold text-teal-900 dark:text-teal-300">
                 Regra de Divisão
               </label>
               <select
                 value={splitType}
                 onChange={(e) => onSplitTypeChange(e.target.value as SplitType)}
-                className="mt-1 w-full rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
+                className="mt-1 w-full truncate rounded-xl border border-teal-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none dark:border-teal-800 dark:bg-slate-900 dark:text-white"
+                title={selectedSplitLabel}
               >
-                <option value="individual">Sem divisão (100% de quem pagou)</option>
-                <option value="equal">
+                <option value="individual" title="Sem rateio (100% de quem pagou)">Sem divisão (100% pagador)</option>
+                <option
+                  value="equal"
+                  title={
+                    activeParticipants.length === 2
+                      ? 'Dividir igualmente (50/50)'
+                      : 'Dividir igualmente (entre todos)'
+                  }
+                >
                   {activeParticipants.length === 2
                     ? 'Dividir igualmente (50/50)'
                     : 'Dividir igualmente (entre todos)'}
                 </option>
-                <option value="full_other">100% de outra pessoa (compra em nome de outro)</option>
-                <option value="custom">Personalizado (definir valores)</option>
+                <option value="full_other" title="100% de outra pessoa (compra em nome de outro)">
+                  100% de outra pessoa
+                </option>
+                <option value="custom" title="Personalizado (definir valores)">
+                  Personalizado (definir valores)
+                </option>
               </select>
             </div>
           </div>

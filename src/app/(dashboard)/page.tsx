@@ -30,6 +30,7 @@ import { BillInspectorModal } from '@/components/accounts/BillInspectorModal';
 import { CreditCardBill, Installment, Purchase, Transaction } from '@/lib/types';
 import Link from 'next/link';
 import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 export default function DashboardPage() {
   const {
@@ -181,7 +182,10 @@ export default function DashboardPage() {
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Ambiente ativo: <strong className="text-slate-700 dark:text-slate-200">{activeWorkspace.name}</strong> •{' '}
-            {format(new Date(), "MMMM 'de' yyyy")}
+            {(() => {
+              const str = format(new Date(), "MMMM 'de' yyyy", { locale: ptBR });
+              return str.charAt(0).toUpperCase() + str.slice(1);
+            })()}
           </p>
         </div>
 

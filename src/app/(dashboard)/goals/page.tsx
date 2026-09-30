@@ -134,90 +134,111 @@ export default function GoalsPage() {
         </button>
       </div>
 
-      {/* Grid de Metas */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {goals.map((goal) => {
-          const currentCents = toCents(goal.current_amount || 0);
-          const targetCents = toCents(goal.target_amount);
-          const percent = Math.min(100, Math.round((currentCents / (targetCents || 1)) * 100));
-          const remaining = fromCents(Math.max(0, targetCents - currentCents));
-          const isCompleted = currentCents >= targetCents;
+      {/* Grid de Metas ou Estado Vazio */}
+      {goals.length === 0 ? (
+        <div className="rounded-3xl bg-white p-12 text-center shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 mb-4">
+            <Target className="h-8 w-8" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+            Nenhuma meta cadastrada
+          </h3>
+          <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+            Crie sua primeira meta financeira para acompanhar o progresso de suas reservas, viagens e objetivos patrimoniais.
+          </p>
+          <button
+            onClick={() => setIsNewGoalOpen(true)}
+            className="mt-5 inline-flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500"
+          >
+            <Plus className="h-4 w-4 stroke-[2.5]" />
+            <span>Criar Primeira Meta</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {goals.map((goal) => {
+            const currentCents = toCents(goal.current_amount || 0);
+            const targetCents = toCents(goal.target_amount);
+            const percent = Math.min(100, Math.round((currentCents / (targetCents || 1)) * 100));
+            const remaining = fromCents(Math.max(0, targetCents - currentCents));
+            const isCompleted = currentCents >= targetCents;
 
-          return (
-            <div
-              key={goal.id}
-              className="flex flex-col justify-between rounded-3xl bg-white p-6 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 transition hover:shadow-md"
-            >
-              <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="flex h-10 w-10 items-center justify-center rounded-2xl text-white font-bold shadow-md"
-                      style={{ backgroundColor: goal.color }}
-                    >
-                      <Target className="h-5 w-5" />
+            return (
+              <div
+                key={goal.id}
+                className="flex flex-col justify-between rounded-3xl bg-white p-6 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 transition hover:shadow-md"
+              >
+                <div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="flex h-10 w-10 items-center justify-center rounded-2xl text-white font-bold shadow-md"
+                        style={{ backgroundColor: goal.color }}
+                      >
+                        <Target className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">{goal.name}</h3>
+                        {goal.target_date && (
+                          <span className="text-[11px] text-slate-400">
+                            Prazo: {formatDate(goal.target_date)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Barra de Progresso */}
+                  <div className="mt-4 space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <span>{percent}% alcançado</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        {isCompleted ? 'Meta Concluída! 🎉' : `Faltam ${formatCurrency(remaining)}`}
+                      </span>
+                    </div>
+                    <div className="h-3.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Valores Acumulados */}
+                  <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-50 p-3 text-xs dark:bg-slate-800/40">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-semibold uppercase">Acumulado:</span>
+                      <p className="font-extrabold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(goal.current_amount)}
+                      </p>
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">{goal.name}</h3>
-                      {goal.target_date && (
-                        <span className="text-[11px] text-slate-400">
-                          Prazo: {formatDate(goal.target_date)}
-                        </span>
-                      )}
+                      <span className="text-[10px] text-slate-400 font-semibold uppercase">Meta Final:</span>
+                      <p className="font-extrabold text-slate-900 dark:text-white">
+                        {formatCurrency(goal.target_amount)}
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Barra de Progresso */}
-                <div className="mt-4 space-y-1.5">
-                  <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                    <span>{percent}% alcançado</span>
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      {isCompleted ? 'Meta Concluída! 🎉' : `Faltam ${formatCurrency(remaining)}`}
-                    </span>
-                  </div>
-                  <div className="h-3.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Valores Acumulados */}
-                <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-50 p-3 text-xs dark:bg-slate-800/40">
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-semibold uppercase">Acumulado:</span>
-                    <p className="font-extrabold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(goal.current_amount)}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-semibold uppercase">Meta Final:</span>
-                    <p className="font-extrabold text-slate-900 dark:text-white">
-                      {formatCurrency(goal.target_amount)}
-                    </p>
-                  </div>
+                {/* Botão de Depositar Fundos */}
+                <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                  <button
+                    onClick={() => {
+                      setSelectedGoal(goal);
+                      setIsDepositOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
+                  >
+                    <DollarSign className="h-4 w-4" />
+                    <span>Guardar Dinheiro nesta Meta</span>
+                  </button>
                 </div>
               </div>
-
-              {/* Botão de Depositar Fundos */}
-              <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-                <button
-                  onClick={() => {
-                    setSelectedGoal(goal);
-                    setIsDepositOpen(true);
-                  }}
-                  className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
-                >
-                  <DollarSign className="h-4 w-4" />
-                  <span>Guardar Dinheiro nesta Meta</span>
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Modal Nova Meta */}
       {isNewGoalOpen && (

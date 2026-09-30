@@ -15,6 +15,7 @@ import { formatCurrency } from '@/lib/utils';
 import { toCents, fromCents } from '@/lib/financial-engine';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 export default function BudgetsPage() {
   const { budgets, categories, transactions, purchases, installments, setBudget } = useFinance();
@@ -115,7 +116,13 @@ export default function BudgetsPage() {
           <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
             {formatCurrency(totalPlanned)}
           </div>
-          <p className="mt-1 text-[11px] text-slate-400">Teto de gastos para {format(new Date(), 'MMMM')}</p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Teto de gastos para{' '}
+            {(() => {
+              const m = format(new Date(), 'MMMM', { locale: ptBR });
+              return m.charAt(0).toUpperCase() + m.slice(1);
+            })()}
+          </p>
         </div>
 
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
