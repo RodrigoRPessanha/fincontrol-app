@@ -86,7 +86,7 @@ export default function WorkspacesPage() {
           {/* Opção 1: Completo */}
           <div
             onClick={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
-            className={`cursor-pointer rounded-2xl border p-4.5 transition ${
+            className={`cursor-pointer rounded-2xl border p-5 transition ${
               activeWorkspace.tracking_mode !== 'expense_tracker'
                 ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20 dark:border-emerald-600'
                 : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40'
@@ -112,7 +112,7 @@ export default function WorkspacesPage() {
           {/* Opção 2: Apenas Despesas & Rateio */}
           <div
             onClick={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
-            className={`cursor-pointer rounded-2xl border p-4.5 transition ${
+            className={`cursor-pointer rounded-2xl border p-5 transition ${
               activeWorkspace.tracking_mode === 'expense_tracker'
                 ? 'border-teal-500 bg-teal-50/40 dark:bg-teal-950/20 dark:border-teal-600'
                 : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40'

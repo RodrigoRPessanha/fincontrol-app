@@ -312,7 +312,31 @@ export default function RecurringPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {recurring.map((rec) => {
+              {recurring.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 mb-3">
+                        <Repeat className="h-6 w-6" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        Nenhuma transação recorrente cadastrada
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 max-w-xs">
+                        Automatize o controle de assinaturas, aluguel, salários e contas mensais fixas.
+                      </p>
+                      <button
+                        onClick={() => setIsNewRecOpen(true)}
+                        className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-500"
+                      >
+                        <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
+                        <span>Cadastrar Primeira Recorrência</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                recurring.map((rec) => {
                 const cat = resolveCategory(allWorkspaceCategories, rec.category_id);
                 const card = allWorkspaceCreditCards.find((c) => c.id === rec.credit_card_id);
                 const acc = allWorkspaceAccounts.find((a) => a.id === rec.account_id);
@@ -422,8 +446,9 @@ export default function RecurringPage() {
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
+              })
+            )}
+          </tbody>
           </table>
         </div>
       </div>

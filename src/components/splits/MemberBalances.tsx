@@ -35,7 +35,15 @@ export function MemberBalances({
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div
+        className={`mt-4 grid gap-4 ${
+          count === 1
+            ? 'grid-cols-1'
+            : count === 2
+            ? 'grid-cols-1 md:grid-cols-2'
+            : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+        }`}
+      >
         {balances.map((b) => {
           const isCreditor = b.net_balance > 0;
           const isDebtor = b.net_balance < 0;
@@ -45,7 +53,7 @@ export function MemberBalances({
           return (
             <div
               key={participantId}
-              className={`rounded-2xl border p-4.5 transition ${
+              className={`rounded-2xl border p-5 transition ${
                 isCreditor
                   ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-950/20'
                   : isDebtor
@@ -53,19 +61,19 @@ export function MemberBalances({
                   : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-800/40'
               }`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="break-words text-sm font-bold text-slate-900 dark:text-white">
                     {memberName}
                   </span>
                   {b.participant_type === 'person' && (
-                    <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                    <span className="shrink-0 rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                       Pessoa
                     </span>
                   )}
                 </div>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                     isCreditor
                       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
                       : isDebtor

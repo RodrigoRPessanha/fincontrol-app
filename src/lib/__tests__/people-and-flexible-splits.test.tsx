@@ -1112,6 +1112,33 @@ describe('People & Flexible Splits UI Tests', () => {
         root.unmount();
       });
     });
+
+    it('renderiza corretamente com 3 participantes usando grid-cols-3', async () => {
+      const container = (globalThis as any).document.createElement('div');
+      const root = createRoot(container);
+
+      await act(async () => {
+        root.render(
+          <MemberBalances
+            balances={[
+              { member_id: 'm-1', name: 'Ana', total_paid: 100, total_share: 50, net_balance: 50, participant_type: 'member' } as any,
+              { member_id: 'm-2', name: 'Beto', total_paid: 50, total_share: 50, net_balance: 0, participant_type: 'member' } as any,
+              { member_id: 'm-3', name: 'Caio', total_paid: 0, total_share: 50, net_balance: -50, participant_type: 'member' } as any,
+            ]}
+            currentMembers={singleMember}
+            getMemberName={(id) => id || ''}
+          />
+        );
+      });
+
+      expect(findNode(container, (n) => getReactProps(n)?.children === 'Ana')).toBeDefined();
+      expect(findNode(container, (n) => getReactProps(n)?.children === 'Beto')).toBeDefined();
+      expect(findNode(container, (n) => getReactProps(n)?.children === 'Caio')).toBeDefined();
+
+      await act(async () => {
+        root.unmount();
+      });
+    });
   });
 
   describe('Person Actions and Validation Helpers Edge Cases', () => {
