@@ -11,7 +11,7 @@ export function mapPersonRowToDomain(row: PersonRow): Person {
     name: row.name,
     archived: Boolean(row.archived),
     created_at: row.created_at,
-    updated_at: row.updated_at ?? undefined,
+    updated_at: row.updated_at,
   };
 }
 

@@ -1170,9 +1170,6 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(domain.created_at).toBe('2026-01-01T00:00:00Z');
     expect(domain.updated_at).toBe('2026-01-02T00:00:00Z');
 
-    const domainWithoutUpdated = mapPersonRowToDomain({ ...row, updated_at: null });
-    expect(domainWithoutUpdated.updated_at).toBeUndefined();
-
     const insert = mapDomainToPersonInsert({
       id: 'person-1',
       workspace_id: 'ws-1',

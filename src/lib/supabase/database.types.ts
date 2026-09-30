@@ -567,7 +567,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
-          updated_at: string | null
+          updated_at: string
           workspace_id: string
         }
         Insert: {
@@ -1479,6 +1479,10 @@ export type Database = {
         Args: { p_purchase_id: string; p_workspace_id: string }
         Returns: boolean
       }
+      fn_delete_settlement: {
+        Args: { p_settlement_id: string; p_workspace_id?: string }
+        Returns: boolean
+      }
       fn_delete_transaction: {
         Args: { p_transaction_id: string; p_workspace_id: string }
         Returns: boolean
@@ -1513,13 +1517,6 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: string
-      }
-      fn_delete_settlement: {
-        Args: {
-          p_settlement_id: string
-          p_workspace_id?: string
-        }
-        Returns: boolean
       }
       fn_record_settlement: {
         Args: {
