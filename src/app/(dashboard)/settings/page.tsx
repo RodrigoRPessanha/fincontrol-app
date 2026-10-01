@@ -2,17 +2,13 @@
 
 import React, { useState } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
-import { useTheme, Theme } from '@/lib/context/theme-context';
+import { useTheme } from '@/lib/context/theme-context';
 import {
   Settings,
   Tag,
   CreditCard,
-  Database,
   Plus,
-  Copy,
   Check,
-  Code,
-  Shield,
   FolderTree,
   Sun,
   Moon,
@@ -25,7 +21,7 @@ export default function SettingsPage() {
   const { categories, paymentMethods, addCategory, addPaymentMethod } = useFinance();
   const { theme, setTheme, resolvedTheme } = useTheme();
 
-  const [activeTab, setActiveTab] = useState<'categories' | 'payments' | 'appearance' | 'supabase'>('categories');
+  const [activeTab, setActiveTab] = useState<'categories' | 'payments' | 'appearance'>('categories');
 
   // Category creation
   const [catName, setCatName] = useState('');
@@ -40,7 +36,6 @@ export default function SettingsPage() {
   const [pmType, setPmType] = useState<any>('pix');
   const [isNewPmOpen, setIsNewPmOpen] = useState(false);
 
-  const [copiedSQL, setCopiedSQL] = useState(false);
 
   const handleCreateCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,15 +69,6 @@ export default function SettingsPage() {
     setIsNewPmOpen(false);
   };
 
-  const sqlSample = `-- Script de migração Supabase disponível em supabase/migrations/001_initial_schema.sql
--- Execute este script no SQL Editor do seu projeto Supabase para criar todas as 16 tabelas, RLS e RPCs.`;
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(sqlSample);
-    setCopiedSQL(true);
-    setTimeout(() => setCopiedSQL(false), 2000);
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -92,7 +78,7 @@ export default function SettingsPage() {
             Configurações do Sistema
           </h2>
           <p className="text-xs text-slate-500">
-            Personalize categorias, subcategorias, métodos de pagamento e integração com Supabase.
+            Personalize categorias, subcategorias, métodos de pagamento e aparência.
           </p>
         </div>
       </div>
@@ -135,17 +121,6 @@ export default function SettingsPage() {
           <span>Aparência & Tema</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('supabase')}
-          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
-            activeTab === 'supabase'
-              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-          }`}
-        >
-          <Database className="h-4 w-4" />
-          <span>Supabase Backend & SQL</span>
-        </button>
       </div>
 
       {/* Tab 1: Categorias */}
@@ -332,49 +307,6 @@ export default function SettingsPage() {
               <span className="capitalize font-bold text-emerald-600 dark:text-emerald-400">
                 {theme === 'system' ? `Sistema (${resolvedTheme === 'dark' ? 'Escuro' : 'Claro'})` : theme === 'dark' ? 'Escuro' : 'Claro'}
               </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 4: Supabase Backend & Schema */}
-      {activeTab === 'supabase' && (
-        <div className="space-y-4">
-          <div className="rounded-3xl bg-white p-6 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
-                <Database className="h-5 w-5 text-emerald-600" />
-                <span>Script de Migração SQL Completo (PostgreSQL + RLS + RPCs)</span>
-              </div>
-              <button
-                onClick={copyToClipboard}
-                className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-              >
-                {copiedSQL ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                <span>{copiedSQL ? 'Copiado!' : 'Copiar Caminho'}</span>
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3 text-xs text-slate-600 dark:text-slate-300">
-              <p>
-                Os scripts de migração sequenciais contendo todas as <strong>16 tabelas</strong>, políticas <strong>RLS</strong>, <strong>funções atômicas RPC</strong> e regras de endurecimento estão salvos em:
-              </p>
-              <div className="space-y-1 rounded-2xl bg-slate-900 p-4 font-mono text-xs text-emerald-400 overflow-x-auto">
-                <div>1. supabase/migrations/001_initial_schema.sql (Schema Base)</div>
-                <div>2. supabase/migrations/002_v5_hardening.sql (Hardening e Integridade)</div>
-                <div>3. supabase/migrations/003_v7_hardening.sql (Parcelas Já Pagas)</div>
-                <div>4. supabase/migrations/004_v9_rpc_and_schema_alignment.sql (RPCs Alinhadas)</div>
-                <div>5. supabase/migrations/005_v10_hardening.sql (Segurança e Triggers Estruturais)</div>
-              </div>
-
-              <div className="pt-2">
-                <h5 className="font-bold text-slate-900 dark:text-white">Para conectar seu Supabase real:</h5>
-                <ol className="mt-2 list-decimal list-inside space-y-1.5 text-slate-500">
-                  <li>Acesse seu painel no <strong>supabase.com</strong>.</li>
-                  <li>Abra o <strong>SQL Editor</strong> e execute as migrations <code>001</code> a <code>005</code> em ordem sequencial.</li>
-                  <li>Preencha seu <code>NEXT_PUBLIC_SUPABASE_URL</code> e <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> no arquivo <code>.env.local</code>.</li>
-                </ol>
-              </div>
             </div>
           </div>
         </div>
