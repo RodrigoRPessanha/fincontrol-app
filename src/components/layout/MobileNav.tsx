@@ -19,6 +19,7 @@ import {
   Users,
   Settings,
   Scale,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFinance } from '@/lib/context/finance-context';
@@ -34,6 +35,7 @@ const drawerLinks = [
   { href: '/reports', label: 'Relatórios', icon: BarChart3 },
   { href: '/workspaces', label: 'Membros & Acesso', icon: Users },
   { href: '/settings', label: 'Configurações', icon: Settings },
+  { href: '/ajuda', label: 'Central de ajuda', icon: BookOpen },
 ];
 
 export function MobileNav() {
@@ -138,6 +140,9 @@ export function MobileNav() {
                     <Link
                       key={link.href}
                       href={link.href}
+                      target={link.href === '/ajuda' ? '_blank' : undefined}
+                      rel={link.href === '/ajuda' ? 'noopener noreferrer' : undefined}
+                      aria-label={link.href === '/ajuda' ? 'Central de ajuda (nova aba)' : undefined}
                       onClick={() => setIsDrawerOpen(false)}
                       className={cn(
                         'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition',

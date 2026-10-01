@@ -1,5 +1,7 @@
 'use client';
 
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useFinance } from '@/lib/context/finance-context';
@@ -80,6 +82,7 @@ export default function GoalsPage() {
   if (isExpenseTracker) {
     return (
       <div className="space-y-6">
+        <ContextualHelp slug="metas" label="Como criar metas e registrar aportes" />
         <div className="rounded-3xl bg-white p-8 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 text-center max-w-2xl mx-auto my-8">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 mb-4">
             <Target className="h-8 w-8" />
@@ -114,6 +117,7 @@ export default function GoalsPage() {
 
   return (
     <div className="space-y-6">
+      <ContextualHelp slug="metas" label="Como criar metas e registrar aportes" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

@@ -79,3 +79,44 @@ body {
 .dark ::-webkit-scrollbar-thumb {
   background: #334155;
 }
+
+/* A ajuda rola dentro do viewport, independentemente da altura do layout global. */
+.help-scroll-region :where(a, button, input, select, summary):focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 3px;
+}
+
+.dark .help-scroll-region :where(a, button, input, select, summary):focus-visible {
+  outline-color: #34d399;
+}
+
+.help-scroll-region {
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+}
+
+.help-scroll-region::-webkit-scrollbar {
+  width: 10px;
+}
+
+.help-scroll-region::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.help-scroll-region::-webkit-scrollbar-thumb {
+  background: #64748b;
+}
+
+.dark .help-scroll-region::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .help-scroll-region {
+    scrollbar-color: #64748b #e2e8f0;
+  }
+
+  .dark .help-scroll-region {
+    scrollbar-color: #64748b #0f172a;
+  }
+}

@@ -8,6 +8,12 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  // Ajuda editorial pública: limite exato, sem liberar rotas financeiras.
+  const pathname = request.nextUrl.pathname;
+  if (pathname === '/ajuda' || pathname.startsWith('/ajuda/')) {
+    return supabaseResponse;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
@@ -55,7 +61,6 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const pathname = request.nextUrl.pathname;
   const isAuthRoute = pathname.startsWith('/auth');
 
   // Helper para preservar cookies renovados durante redirecionamentos

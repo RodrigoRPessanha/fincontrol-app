@@ -1,5 +1,7 @@
 'use client';
 
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
 import React, { useState } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -145,6 +147,10 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap gap-x-6">
+        <ContextualHelp slug="contas-e-cartoes" label="Como cadastrar contas e cartões" />
+        <ContextualHelp slug="pagar-faturas" label="Como conferir e pagar faturas" />
+      </div>
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
