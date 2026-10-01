@@ -146,11 +146,14 @@ export function Header() {
 
           {/* Quick Add Button */}
           <button
+            type="button"
+            aria-label="Nova Transação"
+            data-testid="header-quick-add-btn"
             onClick={() => setIsQuickAddOpen(true)}
-            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-500 active:scale-95"
+            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-500 active:scale-95 cursor-pointer touch-manipulation"
           >
-            <Plus className="h-4 w-4 stroke-[2.5]" />
-            <span className="hidden sm:inline">Nova Transação</span>
+            <Plus className="h-4 w-4 stroke-[2.5] pointer-events-none" />
+            <span className="hidden sm:inline pointer-events-none">Nova Transação</span>
           </button>
 
           {/* Theme Switcher Button */}

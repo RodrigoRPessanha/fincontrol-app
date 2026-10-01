@@ -79,10 +79,13 @@ export function MobileNav() {
 
         {/* Center Floating Action Button */}
         <button
+          type="button"
+          aria-label="Nova Transação"
+          data-testid="mobile-quick-add-btn"
           onClick={() => setIsQuickAddOpen(true)}
-          className="-mt-5 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 active:scale-90"
+          className="-mt-5 relative z-50 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 active:scale-90 cursor-pointer touch-manipulation select-none"
         >
-          <Plus className="h-6 w-6 stroke-[2.5]" />
+          <Plus className="h-6 w-6 stroke-[2.5] pointer-events-none" />
         </button>
 
         <Link
@@ -99,26 +102,31 @@ export function MobileNav() {
         </Link>
 
         <button
+          type="button"
+          aria-label="Abrir Menu"
+          data-testid="mobile-menu-btn"
           onClick={() => setIsDrawerOpen(true)}
-          className="flex flex-col items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400"
+          className="flex flex-col items-center gap-1 p-1 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 cursor-pointer touch-manipulation select-none"
         >
-          <Menu className="h-5 w-5" />
-          <span>Menu</span>
+          <Menu className="h-5 w-5 pointer-events-none" />
+          <span className="pointer-events-none">Menu</span>
         </button>
       </nav>
 
       {/* Slide-out Menu Drawer */}
       {isDrawerOpen && (
         <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm lg:hidden">
-          <div className="ml-auto flex h-full w-4/5 max-w-sm flex-col justify-between bg-white p-6 shadow-2xl dark:bg-slate-900">
+          <div className="ml-auto flex h-full w-4/5 max-w-sm flex-col justify-between bg-white p-6 shadow-2xl dark:bg-slate-900 overflow-y-auto">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
                 <h3 className="font-bold text-slate-900 dark:text-white">Mais Módulos</h3>
                 <button
+                  type="button"
+                  aria-label="Fechar Menu"
                   onClick={() => setIsDrawerOpen(false)}
-                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer touch-manipulation"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-5 w-5 pointer-events-none" />
                 </button>
               </div>
 

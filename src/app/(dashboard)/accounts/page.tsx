@@ -163,7 +163,7 @@ export default function AccountsPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           {!isExpenseTracker && (
             <button
               onClick={() => setIsTransferOpen(true)}
@@ -197,10 +197,10 @@ export default function AccountsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab('accounts')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'accounts'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -212,7 +212,7 @@ export default function AccountsPage() {
 
         <button
           onClick={() => setActiveTab('cards')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'cards'
               ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -224,7 +224,7 @@ export default function AccountsPage() {
 
         <button
           onClick={() => setActiveTab('bills')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'bills'
               ? 'border-blue-600 text-blue-600 dark:text-blue-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -237,7 +237,7 @@ export default function AccountsPage() {
         {!isExpenseTracker && (
           <button
             onClick={() => setActiveTab('transfers')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+            className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
               activeTab === 'transfers'
                 ? 'border-purple-600 text-purple-600 dark:text-purple-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -407,8 +407,8 @@ export default function AccountsPage() {
       {/* Conteúdo da Tab 3: Faturas */}
       {activeTab === 'bills' && (
         <div className="overflow-hidden rounded-3xl bg-white shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+          <div className="overflow-x-auto w-full max-w-full touch-pan-x overscroll-x-contain">
+            <table className="w-full min-w-[700px] text-left text-xs">
               <thead className="border-b border-slate-100 bg-slate-50/70 uppercase tracking-wider text-slate-400 dark:border-slate-800 dark:bg-slate-800/40">
                 <tr>
                   <th className="py-3.5 pl-6 pr-3">Cartão & Mês</th>
@@ -504,8 +504,8 @@ export default function AccountsPage() {
               Nenhuma transferência registrada neste workspace.
             </div>
           ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-xs">
+            <div className="mt-4 overflow-x-auto w-full max-w-full touch-pan-x overscroll-x-contain">
+              <table className="w-full min-w-[550px] text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-400 dark:border-slate-800">
                     <th className="pb-3 font-semibold">Data</th>

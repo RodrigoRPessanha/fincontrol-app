@@ -217,7 +217,7 @@ function TransactionsContent() {
           <span className="text-slate-400">
             {filteredTransactions.length} registros encontrados
           </span>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <span className="text-emerald-600 dark:text-emerald-400">
               Receitas: {formatCurrency(totalIncome)}
             </span>
@@ -233,8 +233,8 @@ function TransactionsContent() {
 
       {/* Tabela de Transações */}
       <div className="overflow-hidden rounded-3xl bg-white shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto w-full max-w-full touch-pan-x overscroll-x-contain">
+          <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-slate-100 bg-slate-50/70 uppercase tracking-wider text-slate-400 dark:border-slate-800 dark:bg-slate-800/40">
               <tr>
                 <th className="py-3.5 pl-6 pr-3">Descrição & Categoria</th>
