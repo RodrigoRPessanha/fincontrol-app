@@ -98,10 +98,10 @@ export default function SettingsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab('categories')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'categories'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -113,7 +113,7 @@ export default function SettingsPage() {
 
         <button
           onClick={() => setActiveTab('payments')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'payments'
               ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -125,7 +125,7 @@ export default function SettingsPage() {
 
         <button
           onClick={() => setActiveTab('appearance')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'appearance'
               ? 'border-amber-500 text-amber-600 dark:text-amber-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -137,7 +137,7 @@ export default function SettingsPage() {
 
         <button
           onClick={() => setActiveTab('supabase')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'supabase'
               ? 'border-blue-600 text-blue-600 dark:text-blue-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
