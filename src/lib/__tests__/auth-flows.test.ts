@@ -123,6 +123,14 @@ describe('Auth Flows & Security Redirections (Revisão Etapa 4)', () => {
   });
 
   describe('Proxy - Refreshed Cookie Preservation & Auth Redirects', () => {
+    it.each([null, { id: 'usr-help' }])('keeps public help accessible with session %j without financial authentication work', async (user) => {
+      mockGetUser.mockResolvedValue({ data: { user } });
+      const response = await updateSession(new NextRequest('http://localhost:3000/ajuda/parcelamentos'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
+      expect(mockGetUser).not.toHaveBeenCalled();
+    });
+
     it('preserves refreshed session cookies when returning a redirect response', async () => {
       // User is unauthenticated on protected route
       mockGetUser.mockResolvedValue({ data: { user: null } });

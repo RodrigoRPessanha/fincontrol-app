@@ -1,5 +1,7 @@
 'use client';
 
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
 import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useFinance } from '@/lib/context/finance-context';
@@ -138,6 +140,7 @@ function TransactionsContent() {
 
   return (
     <div className="space-y-6">
+      <ContextualHelp slug="registrar-transacoes" label="Como registrar despesas e acompanhar pagamentos" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

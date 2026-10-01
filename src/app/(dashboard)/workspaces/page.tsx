@@ -16,6 +16,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { WorkspaceRole } from '@/lib/types';
+import { ContextualHelp } from '@/components/help/ContextualHelp';
 
 export default function WorkspacesPage() {
   const {
@@ -46,6 +47,11 @@ export default function WorkspacesPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap gap-x-6">
+        <ContextualHelp slug="workspaces" label="Como criar e trocar de workspace" />
+        <ContextualHelp slug="modos-de-operacao" label="Qual modo de operação escolher" />
+        <ContextualHelp slug="membros-e-permissoes" label="Como dar acesso e escolher permissões" />
+      </div>
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

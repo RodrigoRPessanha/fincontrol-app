@@ -124,6 +124,7 @@ function LoginForm() {
         </form>
 
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800 text-center">
+          <Link href="/ajuda" className="mb-3 inline-block py-2 text-sm font-semibold text-emerald-600 underline underline-offset-4 dark:text-emerald-400">Conhecer o FinControl · Central de ajuda</Link>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Não tem uma conta?{' '}
             <Link

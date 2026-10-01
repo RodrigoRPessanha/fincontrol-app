@@ -76,6 +76,34 @@ describe('Supabase SSR Clients and Proxy', () => {
   });
 
   describe('Proxy Session Updater (proxy.ts)', () => {
+    it.each(['/ajuda', '/ajuda/dividir-despesas'])('keeps %s public without Supabase credentials', async (path) => {
+      process.env.NEXT_PUBLIC_DATA_MODE = 'supabase';
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const res = await updateSession(new NextRequest(`http://localhost:3000${path}`));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('location')).toBeNull();
+    });
+
+    it.each(['/ajuda-financeira', '/transactions', '/splits'])('does not bypass configuration protection for %s', async (path) => {
+      process.env.NEXT_PUBLIC_DATA_MODE = 'supabase';
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const res = await updateSession(new NextRequest(`http://localhost:3000${path}`));
+      expect(res.status).toBe(500);
+    });
+
+    it.each(['/ajuda-financeira', '/transactions', '/splits'])('still redirects anonymous users on %s with Supabase configured', async (path) => {
+      process.env.NEXT_PUBLIC_DATA_MODE = 'supabase';
+      process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test-project.supabase.co';
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'sb_pub_test_123';
+      const res = await updateSession(new NextRequest(`http://localhost:3000${path}`));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toContain('/auth/login?redirectTo=');
+    });
+
     it('passes through request when in DATA_MODE=local', async () => {
       process.env.NEXT_PUBLIC_DATA_MODE = 'local';
       const req = new NextRequest('http://localhost:3000/dashboard');

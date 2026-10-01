@@ -17,6 +17,7 @@ import { SharedExpensesList } from '@/components/splits/SharedExpensesList';
 import { SettlementHistory } from '@/components/splits/SettlementHistory';
 import { SettlementModal } from '@/components/splits/SettlementModal';
 import { PeopleManager } from '@/components/splits/PeopleManager';
+import { ContextualHelp } from '@/components/help/ContextualHelp';
 
 export default function SplitsPage() {
   const {
@@ -197,6 +198,7 @@ export default function SplitsPage() {
 
   return (
     <div className="space-y-6 pb-12">
+      <ContextualHelp slug="dividir-despesas" label="Como dividir despesas e registrar acertos" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
