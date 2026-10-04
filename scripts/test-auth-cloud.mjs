@@ -1,55 +1,20 @@
+import { loadCloudEnvironment, assertStagingTarget, getStagingServiceRoleKey, runSupabaseCli, STAGING_PROJECT_REF } from './cloud-test-safety.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { execSync } from 'child_process';
 import { parseSupabaseQueryOutput } from './parse-supabase-query-output.mjs';
 import fs from 'fs';
 import path from 'path';
 
-// Carrega variáveis de .env.local
-const envPath = path.resolve(process.cwd(), '.env.local');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  for (const line of envContent.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const idx = trimmed.indexOf('=');
-      const key = trimmed.slice(0, idx).trim();
-      const val = trimmed.slice(idx + 1).trim();
-      if (!process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  }
-}
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !anonKey) {
-  console.error('ERRO: NEXT_PUBLIC_SUPABASE_URL e chave pública do Supabase são obrigatórios.');
+const cloudEnv = loadCloudEnvironment();
+try { assertStagingTarget(cloudEnv, { requireApi: true }); } catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
+const supabaseUrl = cloudEnv.NEXT_PUBLIC_SUPABASE_URL;
+const anonKey = cloudEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || cloudEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const stagingOrigin = 'https://fincontrol-app-git-staging-rodrigos-projects-a1635617.vercel.app';
 
 // Obtém a service_role key em memória diretamente da CLI autenticada (sem gravar em arquivo nem expor em logs)
-function getServiceRoleKey() {
-  try {
-    const isWindows = process.platform === 'win32';
-    const cmd = isWindows
-      ? 'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json'
-      : 'npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json';
-    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    const keys = JSON.parse(out);
-    const sr = keys.find((k) => k.name === 'service_role' || k.tags?.includes('service_role'));
-    if (!sr?.api_key) {
-      throw new Error('Chave service_role não encontrada no projeto fincontrol-staging.');
-    }
-    return sr.api_key;
-  } catch (err) {
-    console.error('ERRO: Falha ao obter credencial administrativa via Supabase CLI:', err.message);
-    return null;
-  }
-}
+function getServiceRoleKey() { return getStagingServiceRoleKey(cloudEnv); }
 
 // Helper para consultas estritamente READ-ONLY (SELECT) no banco remoto
 function runReadOnlySql(sql) {
@@ -63,11 +28,7 @@ function runReadOnlySql(sql) {
   );
   fs.writeFileSync(tmpFile, sql, 'utf8');
   try {
-    const isWindows = process.platform === 'win32';
-    const cmd = isWindows
-      ? `cmd /c npx supabase db query --linked --output-format json --file "${tmpFile}"`
-      : `npx supabase db query --linked --output-format json --file "${tmpFile}"`;
-    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const out = runSupabaseCli(['db', 'query', '--linked', '--project-ref', STAGING_PROJECT_REF, '--output-format', 'json', '--file', tmpFile], { env: cloudEnv });
     return parseSupabaseQueryOutput(out);
   } finally {
     if (fs.existsSync(tmpFile)) {
@@ -121,7 +82,7 @@ async function runAuthGate() {
       type: 'signup',
       email: testEmail,
       password: initialPassword,
-      options: { data: { name: 'Gate Test User' } },
+      options: { data: { name: 'Gate Test User' }, redirectTo: stagingOrigin + '/auth/callback' },
     });
 
     if (linkError || !linkData.user?.id) {
@@ -129,6 +90,7 @@ async function runAuthGate() {
     }
 
     userId = linkData.user.id;
+    if (linkData.properties?.redirect_to !== stagingOrigin + '/auth/callback') throw new Error('Redirect de confirmação não corresponde ao frontend staging.');
     const confirmationTokenHash = linkData.properties?.hashed_token;
 
     if (!confirmationTokenHash) {
@@ -207,23 +169,25 @@ async function runAuthGate() {
     }
     console.log('   OK: Sessão finalizada com sucesso (getUser retorna nulo / sessão encerrada).');
 
-    // 8. Recuperação de Senha por Link Oficial, Callback e Redefinição (Zero SMTP)
+    // 8. Recovery token, allowed redirect and password update through the API.
     console.log('\n8. Testando Fluxo de Recuperação por Link Oficial e Redefinição...');
     const { data: recLinkData, error: recLinkError } = await adminClient.auth.admin.generateLink({
       type: 'recovery',
       email: testEmail,
+      options: { redirectTo: stagingOrigin + '/auth/callback?type=recovery' },
     });
     if (recLinkError) {
       throw new Error(`Falha ao gerar link de recuperação via admin: ${recLinkError.message}`);
     }
 
     const recoveryTokenHash = recLinkData.properties?.hashed_token;
+    if (recLinkData.properties?.redirect_to !== stagingOrigin + '/auth/callback?type=recovery') throw new Error('Redirect de recuperação não corresponde ao frontend staging.');
     if (!recoveryTokenHash) {
       throw new Error('Falha: link de recuperação não retornou hashed_token.');
     }
     console.log('   OK: Link de recuperação e token_hash emitidos criptograficamente pelo GoTrue Cloud (0 e-mails enviados).');
 
-    // Simula o callback consumindo o token de recuperação (contrato da rota /auth/callback?type=recovery)
+    // Verify the OTP API contract; the SSR PKCE callback/UI requires its own browser test.
     const recoveryClient = createClient(supabaseUrl, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -282,8 +246,8 @@ async function runAuthGate() {
     console.log('   OK: Usuário de teste removido do staging via Admin API (0 registros restantes).');
 
     console.log('\n================================================================');
-    console.log('  STATUS DO GATE: FLUXO COMPLETO HOMOLOGADO NO SUPABASE CLOUD! ✅');
-    console.log('  Zero e-mails SMTP disparados | Zero risco de bounces | Zero SQL DML');
+    console.log('  API DE AUTH E REDIRECTS HOMOLOGADOS NO SUPABASE CLOUD! ✅');
+    console.log('  Sem SMTP; callback SSR/PKCE e interface têm homologação própria.');
     console.log('================================================================');
   } catch (err) {
     console.error('\n❌ ERRO NO TESTE DE AUTH CLOUD:', err.message);
@@ -296,4 +260,4 @@ async function runAuthGate() {
   }
 }
 
-runAuthGate();
+runAuthGate().catch(error => { console.error(error.message); process.exitCode = 1; });

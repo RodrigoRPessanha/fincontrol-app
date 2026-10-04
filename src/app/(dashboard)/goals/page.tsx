@@ -2,7 +2,7 @@
 
 import { ContextualHelp } from '@/components/help/ContextualHelp';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -21,15 +21,16 @@ import {
   Settings,
   AlertCircle,
 } from 'lucide-react';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { parseMoneyField, formatCurrency, formatDate } from '@/lib/utils';
 import { toCents, fromCents } from '@/lib/financial-engine';
 import { FinancialGoal } from '@/lib/types';
 
 export default function GoalsPage() {
-  const { goals, accounts, addGoal, depositGoal, activeWorkspace } = useFinance();
+  const { goals, accounts, addGoal, depositGoalAsync, activeWorkspace, isWorkspaceReadOnly } = useFinance();
 
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
+  const [formError, setFormError] = useState<string | null>(null);
   const [isNewGoalOpen, setIsNewGoalOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<FinancialGoal | null>(null);
@@ -41,47 +42,71 @@ export default function GoalsPage() {
   const [goalIcon, setGoalIcon] = useState('shield-check');
   const [goalColor, setGoalColor] = useState('#10b981');
 
+  const depositPending = useRef(false);
+  const depositAttempt = useRef<{ signature: string; key: string } | null>(null);
+  const [isDepositing, setIsDepositing] = useState(false);
+
   // Deposit state
   const [depositAmountStr, setDepositAmountStr] = useState('');
   const [depositAccountId, setDepositAccountId] = useState('');
 
   const handleCreateGoal = (e: React.FormEvent) => {
     e.preventDefault();
-    const targetAmt = parseFloat(targetAmountStr.replace(/\./g, '').replace(',', '.')) || 0;
-    if (!goalName.trim() || targetAmt <= 0) return;
+    setFormError(null);
+    try {
+      const targetAmt = parseMoneyField(targetAmountStr, 'Valor da meta');
+      if (!goalName.trim() || targetAmt <= 0) return;
 
-    addGoal({
-      name: goalName.trim(),
-      target_amount: targetAmt,
-      current_amount: 0,
-      target_date: targetDate || undefined,
-      status: 'in_progress',
-      color: goalColor,
-      icon: goalIcon,
-    });
+      addGoal({
+        name: goalName.trim(),
+        target_amount: targetAmt,
+        current_amount: 0,
+        target_date: targetDate || undefined,
+        status: 'in_progress',
+        color: goalColor,
+        icon: goalIcon,
+      });
 
-    setGoalName('');
-    setTargetAmountStr('');
-    setTargetDate('');
-    setIsNewGoalOpen(false);
+      setGoalName('');
+      setTargetAmountStr('');
+      setTargetDate('');
+      setIsNewGoalOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    }
   };
 
-  const handleDeposit = (e: React.FormEvent) => {
+  const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedGoal || !depositAccountId) return;
-    const amt = parseFloat(depositAmountStr.replace(/\./g, '').replace(',', '.')) || 0;
-    if (amt <= 0) return;
+    if (depositPending.current) return;
+    setFormError(null);
+    try {
+      if (!selectedGoal || !depositAccountId) return;
+      const amt = parseMoneyField(depositAmountStr, 'Aporte');
+      if (amt <= 0) return;
 
-    depositGoal(selectedGoal.id, amt, depositAccountId);
-    setDepositAmountStr('');
-    setDepositAccountId('');
-    setIsDepositOpen(false);
-    setSelectedGoal(null);
+      const signature = JSON.stringify([selectedGoal.id, depositAccountId, amt]);
+      if (depositAttempt.current?.signature !== signature) depositAttempt.current = { signature, key: crypto.randomUUID() };
+      depositPending.current = true;
+      setIsDepositing(true);
+      await depositGoalAsync(selectedGoal.id, amt, depositAccountId, depositAttempt.current.key);
+      depositAttempt.current = null;
+      setDepositAmountStr('');
+      setDepositAccountId('');
+      setIsDepositOpen(false);
+      setSelectedGoal(null);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    } finally {
+      depositPending.current = false;
+      setIsDepositing(false);
+    }
   };
 
   if (isExpenseTracker) {
     return (
       <div className="space-y-6">
+      {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
         <ContextualHelp slug="metas" label="Como criar metas e registrar aportes" />
         <div className="rounded-3xl bg-white p-8 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 text-center max-w-2xl mx-auto my-8">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 mb-4">
@@ -117,6 +142,7 @@ export default function GoalsPage() {
 
   return (
     <div className="space-y-6">
+      {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
       <ContextualHelp slug="metas" label="Como criar metas e registrar aportes" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -129,13 +155,13 @@ export default function GoalsPage() {
           </p>
         </div>
 
-        <button
+        {!isWorkspaceReadOnly && <button
           onClick={() => setIsNewGoalOpen(true)}
           className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 self-start sm:self-auto"
         >
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>Criar Nova Meta</span>
-        </button>
+        </button>}
       </div>
 
       {/* Grid de Metas ou Estado Vazio */}
@@ -150,13 +176,13 @@ export default function GoalsPage() {
           <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
             Crie sua primeira meta financeira para acompanhar o progresso de suas reservas, viagens e objetivos patrimoniais.
           </p>
-          <button
+          {!isWorkspaceReadOnly && <button
             onClick={() => setIsNewGoalOpen(true)}
             className="mt-5 inline-flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500"
           >
             <Plus className="h-4 w-4 stroke-[2.5]" />
             <span>Criar Primeira Meta</span>
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -226,10 +252,12 @@ export default function GoalsPage() {
                 </div>
 
                 {/* Botão de Depositar Fundos */}
-                <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                {!isWorkspaceReadOnly && <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
                   <button
                     onClick={() => {
                       setSelectedGoal(goal);
+                      depositAttempt.current = null;
+                      setFormError(null);
                       setIsDepositOpen(true);
                     }}
                     className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
@@ -237,7 +265,7 @@ export default function GoalsPage() {
                     <DollarSign className="h-4 w-4" />
                     <span>Guardar Dinheiro nesta Meta</span>
                   </button>
-                </div>
+                </div>}
               </div>
             );
           })}
@@ -245,11 +273,12 @@ export default function GoalsPage() {
       )}
 
       {/* Modal Nova Meta */}
-      {isNewGoalOpen && (
+      {isNewGoalOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Criar Meta Financeira</h3>
             <form onSubmit={handleCreateGoal} className="mt-4 space-y-3">
+            {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-500">Nome da Meta</label>
                 <input
@@ -305,13 +334,14 @@ export default function GoalsPage() {
       )}
 
       {/* Modal Depositar na Meta */}
-      {isDepositOpen && selectedGoal && (
+      {isDepositOpen && selectedGoal && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Guardar Dinheiro na Meta</h3>
             <p className="text-xs text-slate-500">{selectedGoal.name}</p>
 
             <form onSubmit={handleDeposit} className="mt-4 space-y-3">
+            {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-500">Conta de Origem</label>
                 <select
@@ -344,13 +374,14 @@ export default function GoalsPage() {
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
+                  disabled={isDepositing}
                   onClick={() => setIsDepositOpen(false)}
                   className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="submit" disabled={isDepositing} aria-busy={isDepositing}
                   className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500"
                 >
                   Confirmar Aporte

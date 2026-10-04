@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/lib/context/auth-context';
 import { ThemeProvider } from '@/lib/context/theme-context';
+import { FinanceSessionHost } from '@/components/layout/FinanceSessionHost';
 
 export const metadata: Metadata = {
   title: 'FinControl - Gestão Financeira Pessoal e Compartilhada',
@@ -18,7 +19,7 @@ export default function RootLayout({
       <body className="h-full min-h-screen bg-slate-50 text-slate-900 antialiased selection:bg-emerald-500 selection:text-white dark:bg-slate-950 dark:text-slate-100">
         <AuthProvider>
           <ThemeProvider>
-            {children}
+            <FinanceSessionHost>{children}</FinanceSessionHost>
           </ThemeProvider>
         </AuthProvider>
       </body>

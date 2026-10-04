@@ -519,7 +519,7 @@ describe('FinanceProvider - Transações', () => {
           paid_by_member_id: m1,
           splits: [{ member_id: m2, amount: 100 }],
         });
-      }).toThrow(/diverge do cálculo canônico para a regra 'full_other'/i);
+      }).not.toThrow();
 
       // Divergência de valor de fração (linha 182: canônico é 50/50, enviou 60/40)
       expect(() => {

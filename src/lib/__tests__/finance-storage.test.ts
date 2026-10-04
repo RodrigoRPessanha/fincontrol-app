@@ -328,7 +328,7 @@ describe('finance-storage: resiliência, isolamento e schema versionado (V37 / P
       storage.setItem(STORAGE_KEYS.schemaVersion, '2');
       storage.setItem(STORAGE_KEYS.accounts, JSON.stringify([{ id: 'acc-futura-original' }]));
 
-      saveFinanceSnapshot(storage, getInitialFinanceState());
+      expect(() => saveFinanceSnapshot(storage, getInitialFinanceState())).toThrow(/versão futura/);
 
       // Versão permanece 2 (não foi rebaixada para 1)
       expect(storage.getItem(STORAGE_KEYS.schemaVersion)).toBe('2');
@@ -374,12 +374,13 @@ describe('finance-storage: resiliência, isolamento e schema versionado (V37 / P
     it('captura e loga erro se storage.setItem falhar (ex: QuotaExceededError)', () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const quotaStorage = {
+        getItem: () => null,
         setItem: () => {
           throw new Error('QuotaExceededError');
         },
       } as unknown as Storage;
 
-      expect(() => saveFinanceSnapshot(quotaStorage, getInitialFinanceState())).not.toThrow();
+      expect(() => saveFinanceSnapshot(quotaStorage, getInitialFinanceState())).toThrow('QuotaExceededError');
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('Erro ao persistir dados locais no storage:'),
         expect.any(Error)

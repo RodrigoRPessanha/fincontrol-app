@@ -1,13 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 import pg from 'pg';
 import { parseSupabaseQueryOutput } from './parse-supabase-query-output.mjs';
+import { loadCloudEnvironment, assertStagingTarget, runSupabaseCli, STAGING_PROJECT_REF } from './cloud-test-safety.mjs';
 
 const { Client } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const cloudEnv = loadCloudEnvironment();
+try { assertStagingTarget(cloudEnv); } catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+Object.assign(process.env, cloudEnv);
 
 // Obter configuração de conexão segura exclusivamente via variáveis de ambiente
 function getDatabaseConfig() {
@@ -152,17 +158,8 @@ async function runTestWithPgClient(filePath, dbConfig, declaredPlan) {
 // Execução via Supabase Cloud CLI vinculada (--linked) com validação estrita de diagnósticos e contagem real
 function runTestWithCliLinked(filePath, declaredPlan) {
   const fileName = path.basename(filePath);
-  const isWindows = process.platform === 'win32';
-  const cmd = isWindows
-    ? `cmd /c npx supabase db query --linked --output-format json --file "${filePath}"`
-    : `npx supabase db query --linked --output-format json --file "${filePath}"`;
-
   try {
-    const rawOutput = execSync(cmd, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60000
-    });
+    const rawOutput = runSupabaseCli(['db', 'query', '--linked', '--project-ref', STAGING_PROJECT_REF, '--output-format', 'json', '--file', filePath], { env: cloudEnv });
 
     const failures = [];
 

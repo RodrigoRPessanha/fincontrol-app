@@ -3,6 +3,7 @@
 import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/context/auth-context';
+import { getAuthErrorMessage } from '@/lib/auth-errors';
 import { ShieldCheck, Mail, ArrowRight, Loader2, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react';
 
 function ForgotPasswordForm() {
@@ -22,15 +23,14 @@ function ForgotPasswordForm() {
     try {
       const { error } = await resetPassword(email);
       if (error) {
-        setErrorMsg(error.message);
+        setErrorMsg(getAuthErrorMessage(error, 'Falha ao solicitar redefinição.'));
       } else {
         setSuccessMsg(
           'Se houver uma conta associada a este e-mail, enviamos instruções para redefinição de senha.'
         );
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Falha ao solicitar redefinição.';
-      setErrorMsg(msg);
+      setErrorMsg(getAuthErrorMessage(err, 'Falha ao solicitar redefinição.'));
     } finally {
       setIsSubmitting(false);
     }

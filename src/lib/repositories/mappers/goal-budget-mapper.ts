@@ -1,6 +1,6 @@
 import { Database } from '../../supabase/database.types';
 import { Budget, FinancialGoal } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type BudgetRow = Database['public']['Tables']['budgets']['Row'];
 type BudgetInsert = Database['public']['Tables']['budgets']['Insert'];
@@ -14,7 +14,7 @@ export function mapBudgetRowToDomain(row: BudgetRow): Budget {
     category_id: row.category_id,
     month: row.month,
     year: row.year,
-    planned_amount: roundCurrency(Number(row.planned_amount ?? 0)),
+    planned_amount: readMoney(row.planned_amount),
   };
 }
 
@@ -27,7 +27,7 @@ export function mapDomainToBudgetInsert(
     category_id: domain.category_id,
     month: domain.month,
     year: domain.year,
-    planned_amount: domain.planned_amount !== undefined ? roundCurrency(domain.planned_amount) : (undefined as any),
+    planned_amount: domain.planned_amount !== undefined ? normalizeMoney(domain.planned_amount, 'Valor monetário', 'nonnegative') : (undefined as any),
   };
 }
 
@@ -36,8 +36,8 @@ export function mapFinancialGoalRowToDomain(row: GoalRow): FinancialGoal {
     id: row.id,
     workspace_id: row.workspace_id,
     name: row.name,
-    target_amount: roundCurrency(Number(row.target_amount ?? 0)),
-    current_amount: roundCurrency(Number(row.current_amount ?? 0)),
+    target_amount: readMoney(row.target_amount),
+    current_amount: readMoney(row.current_amount),
     target_date: row.target_date,
     status: (row.status as 'in_progress' | 'completed' | 'paused') ?? 'in_progress',
     color: row.color ?? '#10b981',
@@ -53,8 +53,8 @@ export function mapDomainToFinancialGoalInsert(
     id: domain.id,
     workspace_id: domain.workspace_id,
     name: domain.name,
-    target_amount: domain.target_amount !== undefined ? roundCurrency(domain.target_amount) : (undefined as any),
-    current_amount: domain.current_amount !== undefined ? roundCurrency(domain.current_amount) : (undefined as any),
+    target_amount: domain.target_amount !== undefined ? normalizeMoney(domain.target_amount, 'Valor monetário', 'positive') : (undefined as any),
+    current_amount: domain.current_amount !== undefined ? normalizeMoney(domain.current_amount, 'Valor monetário', 'nonnegative') : (undefined as any),
     target_date: domain.target_date ?? null,
     status: domain.status,
     color: domain.color,

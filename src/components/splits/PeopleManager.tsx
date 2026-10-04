@@ -7,6 +7,7 @@ import { Users, UserPlus, Edit2, Trash2, Check, X, AlertCircle, Archive, Archive
 
 export interface PeopleManagerProps {
   people: Person[];
+  readOnly?: boolean;
   onAddPerson: (data: { name: string }) => Promise<Person | null | undefined> | Person | null | undefined;
   onUpdatePerson: (id: string, data: { name?: string; archived?: boolean }) => Promise<void> | void;
   onDeletePerson: (id: string) => Promise<void> | void;
@@ -14,6 +15,7 @@ export interface PeopleManagerProps {
 
 export function PeopleManager({
   people,
+  readOnly = false,
   onAddPerson,
   onUpdatePerson,
   onDeletePerson,
@@ -116,7 +118,7 @@ export function PeopleManager({
       )}
 
       {/* Input para adicionar nova pessoa */}
-      <div className="mt-4 flex gap-2">
+      {!readOnly && <div className="mt-4 flex gap-2">
         <input
           type="text"
           placeholder="Nome da pessoa (ex: Maria, Lucas, Carlos)..."
@@ -139,7 +141,7 @@ export function PeopleManager({
           <UserPlus className="h-3.5 w-3.5" />
           Adicionar
         </button>
-      </div>
+      </div>}
 
       {/* Lista de pessoas salvas */}
       {people.length === 0 ? (
@@ -156,7 +158,7 @@ export function PeopleManager({
                 key={person.id}
                 className="py-3 flex items-center justify-between gap-3 text-xs"
               >
-                {isEditing ? (
+                {!readOnly && isEditing ? (
                   <div className="flex flex-1 items-center gap-2">
                     <input
                       type="text"
@@ -206,7 +208,7 @@ export function PeopleManager({
                   </div>
                 )}
 
-                {!isEditing && (
+                {!readOnly && !isEditing && (
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"

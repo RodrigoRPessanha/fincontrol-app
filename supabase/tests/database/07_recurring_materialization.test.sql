@@ -88,14 +88,14 @@ INSERT INTO public.accounts (id, workspace_id, name, type, initial_balance, curr
 SELECT acc_id, ws_id, 'Conta Ativa', 'checking', 1000.00, 1000.00, TRUE FROM rec_vars;
 
 INSERT INTO public.accounts (id, workspace_id, name, type, initial_balance, current_balance, active)
-SELECT inactive_acc_id, ws_id, 'Conta Inativa', 'checking', 0.00, 0.00, FALSE FROM rec_vars;
+SELECT inactive_acc_id, ws_id, 'Conta Inativa', 'checking', 0.00, 0.00, TRUE FROM rec_vars;
 
 -- Inserir categorias (ativa e inativa)
 INSERT INTO public.categories (id, workspace_id, name, type, active, color, icon)
 SELECT cat_id, ws_id, 'Categoria Ativa', 'expense', TRUE, '#10b981', 'tag' FROM rec_vars;
 
 INSERT INTO public.categories (id, workspace_id, name, type, active, color, icon)
-SELECT inactive_cat_id, ws_id, 'Categoria Inativa', 'expense', FALSE, '#ef4444', 'tag' FROM rec_vars;
+SELECT inactive_cat_id, ws_id, 'Categoria Inativa', 'expense', TRUE, '#ef4444', 'tag' FROM rec_vars;
 
 -- Inserir cartões de crédito: padrão (fechamento 10, vencimento 20), mesmo dia (10 e 10), mês seguinte (25 e 5)
 INSERT INTO public.credit_cards (id, workspace_id, name, credit_limit, closing_day, due_day, active)
@@ -137,6 +137,9 @@ INSERT INTO public.recurring_transactions (id, workspace_id, description, amount
 SELECT rec_income_card_id, ws_id, 'Receita em Cartão Inválida', 300.00, 'income', 'monthly', '2026-01-01', '2026-01-01', card_id, TRUE, TRUE FROM rec_vars;
 
 -- Autenticar como Owner do workspace
+-- Cadastro com entidades válidas, depois inativadas: histórico deve ser suspenso.
+UPDATE public.accounts SET active = false WHERE id = (SELECT inactive_acc_id FROM rec_vars);
+UPDATE public.categories SET active = false WHERE id = (SELECT inactive_cat_id FROM rec_vars);
 SET LOCAL "request.jwt.claim.sub" = '70000000-0000-0000-0000-000000000001';
 SET LOCAL role = 'authenticated';
 

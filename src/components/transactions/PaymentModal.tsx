@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import { X, CheckCircle2, DollarSign, Calendar, Wallet, AlertCircle } from 'lucide-react';
 import { formatCurrency, parseCurrencyInput } from '@/lib/utils';
@@ -24,6 +25,7 @@ interface PaymentModalProps {
 
 export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
   const {
+    isWorkspaceReadOnly,
     accounts,
     activeWorkspace,
     recordPayment,
@@ -32,6 +34,8 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
     payCreditCardBillAsync,
   } = useFinance();
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
+  const attempt = useOperationAttempt(activeWorkspace?.id ?? '', `payment:${target?.type}:${target?.id}`);
+  const pending = useRef(false);
 
   const [amountStr, setAmountStr] = useState('');
   const [accountId, setAccountId] = useState('');
@@ -40,7 +44,7 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen || !target) return null;
+  if (!isOpen || !target || isWorkspaceReadOnly) return null;
 
   const totalCents = toCents(target.totalAmount);
   const paidCents = toCents(target.paidAmount || 0);
@@ -60,15 +64,18 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit || isSubmitting) return;
+    if (!canSubmit || pending.current) return;
     setSubmitError(null);
     setIsSubmitting(true);
+    pending.current = true;
 
     try {
+      const operationKey = await attempt.getKey([target.id, accountId, currentAmount, paymentDate, notes]);
       if (target.type === 'bill') {
-        await payCreditCardBillAsync(target.id, accountId || undefined, currentAmount, paymentDate, notes || undefined);
+        await payCreditCardBillAsync(target.id, accountId || undefined, currentAmount, paymentDate, notes || undefined, operationKey);
       } else {
         await recordPaymentAsync({
+          operation_key: operationKey,
           transaction_id: target.type === 'transaction' ? target.id : undefined,
           installment_id: target.type === 'installment' ? target.id : undefined,
           account_id: accountId || undefined,
@@ -77,11 +84,13 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
           notes: notes || undefined,
         });
       }
+      attempt.complete();
       onClose();
     } catch (err: any) {
       setSubmitError(err?.message || 'Falha ao registrar pagamento.');
     } finally {
       setIsSubmitting(false);
+      pending.current = false;
     }
   };
 

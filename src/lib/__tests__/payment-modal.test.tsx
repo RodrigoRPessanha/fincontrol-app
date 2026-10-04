@@ -466,7 +466,8 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       'acc-1',
       1000.50,
       expect.any(String),
-      undefined
+      undefined,
+      expect.any(String)
     );
     root3.unmount();
   });
@@ -700,7 +701,8 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       'acc-2',
       150.0,
       expect.any(String),
-      undefined
+      undefined,
+      expect.any(String)
     );
     root2.unmount();
   });
@@ -896,7 +898,8 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
         undefined,
         450.0,
         expect.any(String),
-        undefined
+        undefined,
+        expect.any(String)
       );
       expect(mockOnClose).toHaveBeenCalledTimes(1);
 
@@ -1016,6 +1019,9 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       act(() => {
         getReactProps(form).onSubmit({ preventDefault: () => {} });
       });
+      for (let i = 0; i < 100 && mockRecordPayment.mock.calls.length === 0; i++) {
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2)); });
+      }
       expect(mockRecordPayment).toHaveBeenCalledTimes(1);
 
       // Conclui a persistência

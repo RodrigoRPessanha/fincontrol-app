@@ -44,6 +44,17 @@ import {
 } from '../../repositories/mappers/person-mapper';
 import { RepositoryError } from '../../repositories/repository-errors';
 
+describe('Integridade monetária na leitura de dados remotos', () => {
+  it.each(['NaN', 'Infinity', null, undefined, '100abc', 1e30])('recusa saldo remoto inválido %s em vez de apresentar zero', (amount) => {
+    const row = { id: 'fixture', workspace_id: 'ws', name: 'Fixture', initial_balance: 0, current_balance: amount } as any;
+    expect(() => mapAccountRowToDomain(row)).toThrow();
+  });
+  it('não mascara valor inválido no agregado dos pagamentos', () => {
+    const row = { amount: 100, status: 'pending' } as any;
+    expect(() => mapTransactionRowToDomain(({ operation_key: null, ...row }), [], [{ amount: 'NaN' }])).toThrow();
+  });
+});
+
 describe('Repository Errors & PostgREST Code Mapping', () => {
   it('instantiates RepositoryError with default values', () => {
     const err = new RepositoryError('Erro simples');
@@ -293,7 +304,7 @@ describe('Transaction & Split Mappers', () => {
       },
     ];
 
-    const domain = mapTransactionRowToDomain(txRow, splitRows);
+    const domain = mapTransactionRowToDomain(({ operation_key: null, ...txRow }), splitRows);
     expect(domain.splits?.length).toBe(2);
     expect(domain.splits?.[0].percentage).toBe(60);
 
@@ -308,33 +319,36 @@ describe('Transaction & Split Mappers', () => {
     expect(directSplits.length).toBe(2);
 
     // mapTransactionRowToDomain com array de pagamentos
-    const domainWithPayments = mapTransactionRowToDomain(txRow, splitRows, [
+    const domainWithPayments = mapTransactionRowToDomain(({ operation_key: null, ...txRow }), splitRows, [
       { amount: 50 },
       { amount: 25 },
-      { amount: null },
+      { amount: 0 },
     ]);
     expect(domainWithPayments.paid_amount).toBe(75);
 
     // mapTransactionRowToDomain com payments como número
-    const domainWithNum = mapTransactionRowToDomain(txRow, splitRows, 150);
+    const domainWithNum = mapTransactionRowToDomain(({ operation_key: null, ...txRow }), splitRows, 150);
     expect(domainWithNum.paid_amount).toBe(150);
 
     // mapTransactionRowToDomain com payments vazio e status pago
-    const domainPaidEmpty = mapTransactionRowToDomain({ ...txRow, status: 'paid' }, splitRows, []);
+    const domainPaidEmpty = mapTransactionRowToDomain({
+      operation_key: null, ...txRow, status: 'paid' }, splitRows, []);
     expect(domainPaidEmpty.paid_amount).toBe(250);
 
     // mapTransactionRowToDomain com payments vazio e status pendente
-    const domainPendingEmpty = mapTransactionRowToDomain({ ...txRow, status: 'pending' }, splitRows, []);
+    const domainPendingEmpty = mapTransactionRowToDomain({
+      operation_key: null, ...txRow, status: 'pending' }, splitRows, []);
     expect(domainPendingEmpty.paid_amount).toBe(0);
 
     // mapTransactionSplitsToDomain com amount null (linha 19)
     const nullAmountSplits = mapTransactionSplitsToDomain([
-      { id: 's-null', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'mem-1', person_id: null, amount: null as any, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' }
+      { id: 's-null', transaction_id: 'tx-1', workspace_id: 'ws-1', member_id: 'mem-1', person_id: null, amount: 0, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' }
     ]);
     expect(nullAmountSplits[0].amount).toBe(0);
 
     // mapTransactionRowToDomain com row.amount null e status paid (linha 49)
-    const paidNullAmount = mapTransactionRowToDomain({ ...txRow, amount: null as any, status: 'paid' }, splitRows, []);
+    const paidNullAmount = mapTransactionRowToDomain({
+      operation_key: null, ...txRow, amount: 0, status: 'paid' }, splitRows, []);
     expect(paidNullAmount.paid_amount).toBe(0);
   });
 });
@@ -376,7 +390,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       },
     ];
 
-    const purchase = mapPurchaseRowToDomain(purchaseRow, pSplitRows);
+    const purchase = mapPurchaseRowToDomain(({ operation_key: null, ...purchaseRow }), pSplitRows);
     expect(purchase.total_amount).toBe(3000);
     expect(purchase.splits?.length).toBe(1);
 
@@ -420,7 +434,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(instInsertNulls.paid_at).toBeNull();
 
     const splitsWithNullAmount = mapPurchaseSplitsToDomain([
-      { id: 'ps-1', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', person_id: null, amount: null as any, percentage: null, created_at: '2026-01-01' },
+      { id: 'ps-1', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', person_id: null, amount: 0, percentage: null, created_at: '2026-01-01' },
       { id: 'ps-2', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-2', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01' },
     ]);
     expect(splitsWithNullAmount[0].amount).toBe(0);
@@ -444,7 +458,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     };
-    const settlement = mapSettlementRowToDomain(sRow);
+    const settlement = mapSettlementRowToDomain(({ operation_key: null, ...sRow }));
     expect(settlement.amount).toBe(50);
     const sInsert = mapDomainToSettlementInsert(settlement);
     expect(sInsert.from_member_id).toBe('mem-1');
@@ -464,7 +478,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       created_by: 'usr-1',
       created_at: '2026-01-01T00:00:00Z',
     };
-    const payment = mapPaymentRowToDomain(payRow);
+    const payment = mapPaymentRowToDomain(({ operation_key: null, ...payRow }));
     expect(payment.amount).toBe(100);
     const payInsert = mapDomainToPaymentInsert(payment);
     expect(payInsert.affects_balance).toBe(true);
@@ -482,7 +496,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     };
-    const transfer = mapTransferRowToDomain(transRow);
+    const transfer = mapTransferRowToDomain(({ operation_key: null, ...transRow }));
     expect(transfer.amount).toBe(200);
     const trInsert = mapDomainToTransferInsert(transfer);
     expect(trInsert.to_account_id).toBe('acc-2');
@@ -600,7 +614,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       name: 'Cartao Null',
       institution: null,
       last_four_digits: null,
-      credit_limit: null as any,
+      credit_limit: 0,
       closing_day: 1,
       due_day: 10,
       linked_payment_account_id: null,
@@ -622,8 +636,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       reference_month: '2026-04',
       closing_date: '2026-04-01',
       due_date: '2026-04-10',
-      total_amount: null as any,
-      paid_amount: null as any,
+      total_amount: 0,
+      paid_amount: 0,
       status: null as any,
       paid_at: null,
       created_at: '2026-01-01',
@@ -640,8 +654,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       name: 'Conta Null',
       institution: null,
       type: null as any,
-      current_balance: null as any,
-      initial_balance: null as any,
+      current_balance: 0,
+      initial_balance: 0,
       color: null,
       active: null,
       created_at: '2026-01-01',
@@ -672,7 +686,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       id: 'rec-null',
       workspace_id: 'ws-1',
       description: 'Rec Null',
-      amount: null as any,
+      amount: 0,
       type: null as any,
       category_id: null,
       account_id: null,
@@ -695,11 +709,11 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(recFallback.active).toBe(true);
 
     // Transaction fallbacks
-    const txFallback = mapTransactionRowToDomain({
+    const txFallback = mapTransactionRowToDomain(({ operation_key: null, ...{
       id: 'tx-null',
       workspace_id: 'ws-1',
       description: 'Tx Null',
-      amount: null as any,
+      amount: 0,
       transaction_date: '2026-04-01',
       due_date: null as any,
       type: null as any,
@@ -717,18 +731,18 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       paid_at: null,
       metadata: null,
       created_at: '2026-01-01',
-    } as any);
+    } as any }));
     expect(txFallback.amount).toBe(0);
     expect(txFallback.type).toBe('expense');
     expect(txFallback.status).toBe('pending');
     expect(txFallback.split_type).toBeUndefined();
 
     // Purchase fallbacks
-    const pFallback = mapPurchaseRowToDomain({
+    const pFallback = mapPurchaseRowToDomain(({ operation_key: null, ...{
       id: 'p-null',
       workspace_id: 'ws-1',
       description: 'P Null',
-      total_amount: null as any,
+      total_amount: 0,
       installment_count: 1,
       paid_installments_count: null,
       purchase_date: '2026-04-01',
@@ -741,7 +755,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       split_type: null,
       metadata: null,
       created_at: '2026-01-01',
-    } as any);
+    } as any }));
     expect(pFallback.total_amount).toBe(0);
     expect(pFallback.installment_count).toBe(1);
     expect(pFallback.paid_installments_count).toBe(0);
@@ -752,11 +766,11 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       id: 'i-null',
       purchase_id: 'p-null',
       installment_number: 1,
-      amount: null as any,
+      amount: 0,
       due_date: '2026-05-01',
       credit_card_bill_id: null,
       status: null as any,
-      paid_amount: null,
+      paid_amount: 0,
       paid_at: null,
       created_at: '2026-01-01',
     } as any);
@@ -769,8 +783,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       id: 'g-null',
       workspace_id: 'ws-1',
       name: 'Goal Null',
-      target_amount: null as any,
-      current_amount: null as any,
+      target_amount: 0,
+      current_amount: 0,
       target_date: null,
       status: null as any,
       color: null,
@@ -784,18 +798,18 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(goalFallback.icon).toBe('target');
 
     // Transfer fallbacks
-    const trFallback = mapTransferRowToDomain({
+    const trFallback = mapTransferRowToDomain(({ operation_key: null, ...{
       id: 'tr-null',
       workspace_id: 'ws-1',
       from_account_id: 'a-1',
       to_account_id: 'a-2',
-      amount: null as any,
+      amount: 0,
       transfer_date: '2026-04-01',
       notes: null,
       idempotency_key: null,
       created_by: null,
       created_at: '2026-01-01',
-    } as any);
+    } as any }));
     expect(trFallback.amount).toBe(0);
   });
 
@@ -855,17 +869,17 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(trInsert.created_by).toBeNull();
 
     // 3. Settlements
-    const settlementRowNull = mapSettlementRowToDomain({
+    const settlementRowNull = mapSettlementRowToDomain(({ operation_key: null, ...{
       id: 's-null',
       workspace_id: 'ws-1',
       from_member_id: 'm-1',
       to_member_id: 'm-2',
-      amount: null as any,
+      amount: 0,
       settlement_date: '2026-04-01',
       notes: null,
       payment_account_id: null,
       created_at: '2026-01-01',
-    } as any);
+    } as any }));
     expect(settlementRowNull.amount).toBe(0);
 
     const settlementInsert = mapDomainToSettlementInsert({
@@ -887,7 +901,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       category_id: 'cat-1',
       month: 4,
       year: 2026,
-      planned_amount: null as any,
+      planned_amount: 0,
       created_at: '2026-01-01',
     });
     expect(budgetRowNull.planned_amount).toBe(0);
@@ -927,8 +941,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       reference_month: '2026-04',
       closing_date: '2026-04-01',
       due_date: '2026-04-10',
-      total_amount: null as any,
-      paid_amount: null as any,
+      total_amount: 0,
+      paid_amount: 0,
       status: null as any,
       paid_at: null,
       created_at: '2026-01-01',
@@ -940,9 +954,10 @@ describe('Purchase, Installment & Settlement Mappers', () => {
 
     // 6. Payments
     const payRowNull = mapPaymentRowToDomain({
+      operation_key: null,
       id: 'pay-null',
       workspace_id: 'ws-1',
-      amount: null as any,
+      amount: 0,
       payment_date: '2026-04-01',
       transaction_id: null,
       installment_id: null,
@@ -1063,6 +1078,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
 
     const pWithInstallments = mapPurchaseRowToDomain(
       {
+      operation_key: null,
         id: 'p-insts',
         workspace_id: 'ws-1',
         description: 'With Insts',
@@ -1190,6 +1206,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
 
   it('maps Settlement row to domain and domain to insert with all nullish and member/person combinations', () => {
     const sRowWithNulls = mapSettlementRowToDomain({
+      operation_key: null,
       id: 'set-1',
       workspace_id: 'ws-1',
       from_member_id: null,
@@ -1210,6 +1227,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(sRowWithNulls.to_person_id).toBe('person-2');
 
     const sRowWithMembers = mapSettlementRowToDomain({
+      operation_key: null,
       id: 'set-2',
       workspace_id: 'ws-1',
       from_member_id: 'mem-1',

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import {
   X,
@@ -9,7 +10,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { formatCurrency, parseCurrencyInput } from '@/lib/utils';
-import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits } from '@/lib/financial-engine';
+import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits, resolveSplitParticipants } from '@/lib/financial-engine';
 import { SplitType, TransactionSplit } from '@/lib/types';
 import { format } from 'date-fns';
 import { TransactionFields } from './quick-add/TransactionFields';
@@ -25,6 +26,7 @@ interface QuickAddModalProps {
 export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
   const {
     activeWorkspace,
+    isWorkspaceReadOnly,
     categories,
     paymentMethods,
     accounts,
@@ -32,11 +34,14 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     workspaceMembers,
     people = [],
     addPerson,
-    addTransaction,
-    createInstallmentPurchase,
-    createTransfer,
+    addTransactionAsync,
+    createInstallmentPurchaseAsync,
+    createTransferAsync,
   } = useFinance();
 
+  const pending = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const attempt = useOperationAttempt(activeWorkspace.id, 'quick-add');
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>('expense');
@@ -150,8 +155,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     onClose();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pending.current) return;
     setErrorMessage(null);
     if (numAmount <= 0) {
       setErrorMessage('O valor da transação deve ser maior que zero.');
@@ -164,7 +170,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           setErrorMessage('Selecione contas de origem e destino distintas.');
           return;
         }
-        createTransfer(fromAccountId, toAccountId, numAmount, transactionDate, notes);
+        pending.current = true;
+        setIsSubmitting(true);
+        await createTransferAsync(fromAccountId, toAccountId, numAmount, transactionDate, notes, await attempt.getKey([fromAccountId, toAccountId, numAmount, transactionDate, notes]));
+        attempt.complete();
         resetAndClose();
         return;
       }
@@ -180,33 +189,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
 
       const isPayerPerson = Boolean(paidByPersonId || people.some((p) => p.id === effectivePayerId));
 
-      const allAvailableParticipants = [
-        ...workspaceMembers.map((m) => ({
-          id: m.id,
-          name: m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`,
-          type: 'member' as const,
-        })),
-        ...(people || []).map((p) => ({
-          id: p.id,
-          name: p.name,
-          type: 'person' as const,
-        })),
-      ];
-
-      let activeParticipants = allAvailableParticipants;
-      if (selectedParticipantIds.length > 0) {
-        activeParticipants = allAvailableParticipants.filter((p) => selectedParticipantIds.includes(p.id));
-        if (effectivePayerId && !activeParticipants.some((p) => p.id === effectivePayerId)) {
-          const payerPart = allAvailableParticipants.find((p) => p.id === effectivePayerId);
-          if (payerPart) activeParticipants.push(payerPart);
-        }
-      } else if (workspaceMembers.length > 1 && (!people || people.length === 0)) {
-        activeParticipants = workspaceMembers.map((m) => ({
-          id: m.id,
-          name: m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`,
-          type: 'member' as const,
-        }));
-      }
+      const activeParticipants = resolveSplitParticipants(workspaceMembers, people, selectedParticipantIds, effectivePayerId);
 
       const isSplitActive = type === 'expense' && splitType !== 'individual' && activeParticipants.length > 1 && !!effectivePayerId;
       const effectiveSplitType = isSplitActive ? splitType : 'individual';
@@ -232,9 +215,11 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
         );
       }
 
+      pending.current = true;
+      setIsSubmitting(true);
       if (isCreditCardSelected && installmentCount > 1 && selectedCard) {
         // Compra Parcelada Atômica com suporte a parcelas já pagas
-        createInstallmentPurchase({
+        const payload = {
           description: description.trim() || 'Compra Parcelada',
           total_amount: numAmount,
           installment_count: installmentCount,
@@ -248,10 +233,11 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
           split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
           splits: resolvedSplits,
-        });
+        };
+        await createInstallmentPurchaseAsync({ ...payload, operation_key: await attempt.getKey(payload) });
       } else {
         // Transação Avulsa
-        addTransaction({
+        const payload = {
           description: description.trim() || (type === 'expense' ? 'Despesa' : 'Receita'),
           amount: numAmount,
           type: type,
@@ -261,23 +247,28 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           account_id: accountId || selectedPaymentMethod?.linked_account_id || undefined,
           transaction_date: transactionDate,
           due_date: isCreditCardSelected && billPreview ? billPreview.dueDate : dueDate,
-          status: isAlreadyPaid ? 'paid' : 'pending',
+          status: isAlreadyPaid ? ('paid' as const) : ('pending' as const),
           paid_at: isAlreadyPaid ? new Date().toISOString() : null,
           notes: notes || undefined,
           paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
           paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
           split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
           splits: resolvedSplits,
-        });
+        };
+        await addTransactionAsync({ ...payload, operation_key: await attempt.getKey(payload) });
       }
 
+      attempt.complete();
       resetAndClose();
     } catch (err: any) {
       setErrorMessage(err.message || 'Erro ao processar o registro financeiro.');
+    } finally {
+      pending.current = false;
+      setIsSubmitting(false);
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || isWorkspaceReadOnly) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
@@ -449,11 +440,8 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
               selectedParticipantIds={selectedParticipantIds}
               onToggleParticipant={(id) => {
                 setSelectedParticipantIds((prev) => {
-                  const allIds = [
-                    ...workspaceMembers.map((m) => m.id),
-                    ...people.map((p) => p.id),
-                  ];
-                  const current = prev.length > 0 ? prev : allIds;
+                  const payerId = paidByPersonId || paidByMemberId || workspaceMembers[0]?.id || people[0]?.id || '';
+                  const current = resolveSplitParticipants(workspaceMembers, people, prev, payerId).map((p) => p.id);
                   if (current.includes(id)) {
                     if (current.length <= 1) return current;
                     return current.filter((item) => item !== id);
@@ -539,7 +527,12 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
                           {a.name} ({formatCurrency(a.current_balance)})
                         </option>
                       ))}
-                    </select>
+                      </select>
+                      {isCreditCardSelected && (
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Esta conta não será debitada agora. A despesa de cartão será paga pela fatura.
+                        </p>
+                      )}
                   </div>
                 )}
 
@@ -570,7 +563,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
               Cancelar
             </button>
             <button
-              type="submit"
+              type="submit" disabled={isSubmitting} aria-busy={isSubmitting}
               className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 active:scale-95"
             >
               Salvar Registro

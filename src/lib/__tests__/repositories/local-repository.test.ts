@@ -1352,8 +1352,7 @@ describe('LocalFinanceRepository', () => {
     };
     const throwingRepo = new LocalFinanceRepository(throwingStorage);
     const existingWs = (await throwingRepo.getWorkspaces())[0];
-    const snap = await throwingRepo.loadSnapshot(existingWs.id);
-    expect(snap.activeWorkspaceId).toBe(existingWs.id);
+    await expect(throwingRepo.loadSnapshot(existingWs.id)).rejects.toThrow('QuotaExceeded');
 
     // 9. Default constructor without storage argument and memory storage key coverage
     const defaultRepo = new LocalFinanceRepository();

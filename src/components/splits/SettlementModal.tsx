@@ -23,6 +23,7 @@ export interface SettlementModalProps {
   currentMembers: WorkspaceMember[];
   people?: Person[];
   selectedPairDebt: PairwiseDebt | null;
+  isSubmitting?: boolean;
   onSubmit: (e: React.FormEvent) => void;
 }
 
@@ -44,6 +45,7 @@ export function SettlementModal({
   people = [],
   selectedPairDebt,
   onSubmit,
+  isSubmitting = false,
 }: SettlementModalProps) {
   if (!isOpen) return null;
 
@@ -199,7 +201,7 @@ export function SettlementModal({
             </button>
             <button
               type="submit"
-              disabled={!selectedPairDebt || selectedPairDebt.amount <= 0}
+              disabled={isSubmitting} aria-busy={isSubmitting}
               className="rounded-xl bg-teal-600 px-5 py-2 text-xs font-bold text-white shadow-md shadow-teal-600/25 transition hover:bg-teal-500 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Confirmar Acerto

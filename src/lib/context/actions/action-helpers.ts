@@ -89,7 +89,8 @@ export function validateTransactionSplits(
   paidByMemberId?: string | null,
   splits?: TransactionSplit[],
   splitType?: SplitType | null,
-  paidByPersonId?: string | null
+  paidByPersonId?: string | null,
+  historical?: { paid_by_person_id?: string | null; splits?: TransactionSplit[] }
 ): void {
   const state = deps.getState();
   const wsMembers = state.allWorkspaceMembers.filter((m) => m.workspace_id === targetWsId);
@@ -107,6 +108,10 @@ export function validateTransactionSplits(
 
   if (paidByPersonId && !personIds.has(paidByPersonId)) {
     throw new Error('A pessoa pagadora informada não pertence ao workspace ativo.');
+  }
+  if (paidByPersonId && wsPeople.find((p) => p.id === paidByPersonId)?.archived &&
+      paidByPersonId !== historical?.paid_by_person_id) {
+    throw new Error('Pessoa arquivada não pode receber nova associação como pagadora.');
   }
 
   const effectiveSplitType: SplitType = splitType || 'individual';
@@ -146,6 +151,10 @@ export function validateTransactionSplits(
     if (hasPerson && !personIds.has(split.person_id!)) {
       throw new Error('Pessoa informada no rateio não pertence ao workspace ativo.');
     }
+    if (hasPerson && wsPeople.find((p) => p.id === split.person_id)?.archived &&
+        !historical?.splits?.some((previous) => previous.person_id === split.person_id)) {
+      throw new Error('Pessoa arquivada não pode receber nova associação no rateio.');
+    }
 
     if (seen.has(participantKey)) {
       throw new Error('Membros duplicados identificados no rateio.');
@@ -180,7 +189,8 @@ export function validateTransactionSplits(
   if (!hasAnyPerson) {
     if (effectiveSplitType === 'equal') {
       const effectivePayer = paidByMemberId || wsMembers[0]?.id;
-      const canonical = calculateExpenseSplits(totalAmount, 'equal', wsMembers, effectivePayer);
+      const selectedMembers = wsMembers.filter((m) => splits.some((split) => split.member_id === m.id));
+      const canonical = calculateExpenseSplits(totalAmount, 'equal', selectedMembers, effectivePayer);
 
       if (splits.length !== canonical.length) {
         throw new Error(
@@ -198,7 +208,8 @@ export function validateTransactionSplits(
       }
     } else if (effectiveSplitType === 'full_other') {
       const effectivePayer = paidByMemberId || wsMembers[0]?.id;
-      const canonical = calculateExpenseSplits(totalAmount, 'full_other', wsMembers, effectivePayer);
+      const selectedMembers = wsMembers.filter((m) => m.id === effectivePayer || splits.some((split) => split.member_id === m.id));
+      const canonical = calculateExpenseSplits(totalAmount, 'full_other', selectedMembers, effectivePayer);
 
       if (splits.length !== canonical.length) {
         throw new Error(

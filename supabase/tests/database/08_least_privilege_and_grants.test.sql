@@ -74,8 +74,8 @@ SELECT ok(
     'authenticated pode executar SELECT em profiles'
 );
 SELECT ok(
-    has_table_privilege('authenticated', 'public.profiles', 'update'),
-    'authenticated pode executar UPDATE em profiles'
+    has_column_privilege('authenticated', 'public.profiles', 'name', 'update'),
+    'authenticated pode editar apresentação do perfil, sem UPDATE irrestrito'
 );
 SELECT ok(
     NOT has_table_privilege('authenticated', 'public.profiles', 'insert'),

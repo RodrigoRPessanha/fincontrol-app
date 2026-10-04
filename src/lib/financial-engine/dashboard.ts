@@ -267,7 +267,7 @@ export function calculateDashboardSummary(
       }
     }
 
-    if (tx.status === 'pending' || tx.status === 'partially_paid') {
+    if (tx.status === 'pending' || tx.status === 'partially_paid' || tx.status === 'overdue') {
       const remainingCents = Math.max(0, toCents(tx.amount) - toCents(tx.paid_amount || 0));
       if (tx.due_date && tx.due_date < todayStr) {
         overdueCount += 1;
@@ -288,7 +288,7 @@ export function calculateDashboardSummary(
       plannedExpenseCents += toCents(inst.amount);
     }
 
-    if (inst.status === 'pending' || inst.status === 'partially_paid') {
+    if (inst.status === 'pending' || inst.status === 'partially_paid' || inst.status === 'overdue') {
       const remainingCents = Math.max(0, toCents(inst.amount) - toCents(inst.paid_amount || 0));
       if (inst.due_date && inst.due_date < todayStr) {
         overdueCount += 1;

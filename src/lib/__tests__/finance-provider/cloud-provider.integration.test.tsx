@@ -1,3 +1,4 @@
+import { loadCloudEnvironment, getStagingServiceRoleKey } from '../../../../scripts/cloud-test-safety.mjs';
 import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 
@@ -5,52 +6,17 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 import { FinanceProvider, useFinance } from '../../context/finance-context';
 import { AuthContext, AuthContextType } from '../../context/auth-context';
 import { SupabaseFinanceRepository } from '../../repositories/supabase-finance-repository';
 import { Database } from '../../supabase/database.types';
 import { Purchase } from '../../types';
+import { QuickAddModal } from '../../../components/transactions/QuickAddModal';
 
 const isCloudEnabled = process.env.TEST_CLOUD === 'true';
 
-function getEnvConfig() {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  const env: Record<string, string> = { ...process.env } as Record<string, string>;
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-        const idx = trimmed.indexOf('=');
-        const k = trimmed.slice(0, idx).trim();
-        const v = trimmed.slice(idx + 1).trim();
-        if (!env[k]) env[k] = v;
-      }
-    }
-  }
-  return env;
-}
-
-function getServiceRoleKey(): string | null {
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return process.env.SUPABASE_SERVICE_ROLE_KEY;
-  }
-  try {
-    const isWindows = process.platform === 'win32';
-    const cmd = isWindows
-      ? 'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json'
-      : 'npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json';
-    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    const keys = JSON.parse(out);
-    const sr = keys.find((k: any) => k.name === 'service_role' || k.tags?.includes('service_role'));
-    return sr?.api_key ?? null;
-  } catch {
-    return null;
-  }
-}
+const getEnvConfig = loadCloudEnvironment;
+function getServiceRoleKey() { return getStagingServiceRoleKey(getEnvConfig()); }
 
 import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 
@@ -181,25 +147,24 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
       }
     }
 
-    if (adminClient && testUser1Id) {
-      await adminClient.from('workspaces').delete().eq('owner_id', testUser1Id);
+    const cleanupErrors: Error[] = [];
+    for (const id of [testUser1Id, testUser2Id].filter(Boolean)) {
+      try {
+        const removed = await adminClient.from('workspaces').delete().eq('owner_id', id);
+        if (removed.error) throw removed.error;
+        const deleted = await adminClient.auth.admin.deleteUser(id);
+        if (deleted.error) throw deleted.error;
+      } catch (error) { cleanupErrors.push(error as Error); }
     }
-    if (testWorkspaceId && adminClient) {
-      await adminClient.from('workspaces').delete().eq('id', testWorkspaceId);
-    }
-    if (testUser1Id && adminClient) {
-      await adminClient.auth.admin.deleteUser(testUser1Id);
-    }
-    if (testUser2Id && adminClient) {
-      await adminClient.auth.admin.deleteUser(testUser2Id);
-    }
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Falha na limpeza das fixtures Cloud.');
   }, 20000);
 
   async function mountCloudProvider(
     repo: SupabaseFinanceRepository,
     userId: string,
     email: string,
-    initialWorkspaceId?: string
+    initialWorkspaceId?: string,
+    children?: React.ReactNode
   ) {
     let currentCtx!: ReturnType<typeof useFinance>;
     function Consumer() {
@@ -232,24 +197,117 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
             initialWorkspaceId={initialWorkspaceId || testWorkspaceId}
           >
             <Consumer />
+            {children}
           </FinanceProvider>
         </AuthContext.Provider>
       );
     });
 
     // Aguarda hidratação inicial do repositório remoto
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 200; i++) {
       if (currentCtx?.isLoaded && !currentCtx?.isLoading) break;
       await act(async () => {
         await new Promise((r) => setTimeout(r, 50));
       });
     }
 
+    expect(currentCtx?.error).toBeNull();
+    expect(currentCtx?.isLoaded && !currentCtx?.isLoading).toBe(true);
     return {
       getCtx: () => currentCtx,
       root,
+      container,
     };
   }
+
+  it('A2: goal deposit persists both sides, survives reload and handles concurrent/repeated keys', async () => {
+    const goal = await repo1.saveGoal({ workspace_id: testWorkspaceId, name: 'A2 deposit fixture', target_amount: 1000, current_amount: 0, status: 'in_progress', color: '#000000', icon: 'target' });
+    const balance = (await repo1.getAccounts(testWorkspaceId)).find((a) => a.id === testAccountId)!.current_balance;
+    const browser = await mountCloudProvider(repo1, testUser1Id, testUser1Email);
+    await act(async () => {
+      const one = browser.getCtx().depositGoalAsync(goal.id, 100, testAccountId, 'a2-provider-100');
+      const duplicate = browser.getCtx().depositGoalAsync(goal.id, 100, testAccountId, 'a2-provider-100');
+      await Promise.all([one, duplicate]);
+    });
+    await act(async () => { await browser.getCtx().refreshData(); });
+    expect(browser.getCtx().accounts.find((a) => a.id === testAccountId)?.current_balance).toBe(balance - 100);
+    expect(browser.getCtx().goals.find((g) => g.id === goal.id)?.current_amount).toBe(100);
+    await Promise.all([
+      repo1.recordGoalDeposit(testWorkspaceId, goal.id, testAccountId, 10.075, 'a2-concurrent-1'),
+      repo2.recordGoalDeposit(testWorkspaceId, goal.id, testAccountId, 20, 'a2-concurrent-2'),
+      repo1.recordGoalDeposit(testWorkspaceId, goal.id, testAccountId, 10.075, 'a2-concurrent-1'),
+    ]);
+    expect((await repo1.getAccounts(testWorkspaceId)).find((a) => a.id === testAccountId)?.current_balance).toBeCloseTo(balance - 130.08, 2);
+    expect((await repo1.getGoals(testWorkspaceId)).find((g) => g.id === goal.id)?.current_amount).toBe(130.08);
+    await expect(repo1.recordGoalDeposit(testWorkspaceId, goal.id, testAccountId, 999, 'a2-concurrent-1')).rejects.toThrow(/dados diferentes/);
+  });
+
+  it('A2: public authenticated NaN injection leaves account and financial rows unchanged', async () => {
+    const before = (await repo1.getAccounts(testWorkspaceId)).find((a) => a.id === testAccountId)!.current_balance;
+    const beforeTransactions = (await repo1.getTransactions(testWorkspaceId)).length;
+    const { error } = await userClient1.rpc('fn_create_transaction_with_splits', {
+      p_workspace_id: testWorkspaceId, p_description: 'A2 invalid NaN', p_amount: 'NaN' as any,
+      p_status: 'paid', p_account_id: testAccountId,
+    });
+    expect(error).not.toBeNull();
+    expect((await repo1.getAccounts(testWorkspaceId)).find((a) => a.id === testAccountId)?.current_balance).toBe(before);
+    expect((await repo1.getTransactions(testWorkspaceId)).length).toBe(beforeTransactions);
+  });
+
+  it('A2: provider one-off card expense reloads in its bill and can be paid and removed', async () => {
+    const card = await repo1.saveCreditCard({ workspace_id: testWorkspaceId, name: 'A2 card fixture', credit_limit: 1000, closing_day: 25, due_day: 5, institution: 'Fixture', color: '#000000', active: true });
+    const browser = await mountCloudProvider(repo1, testUser1Id, testUser1Email);
+    const beforeBalance = browser.getCtx().accounts.find((a) => a.id === testAccountId)!.current_balance;
+    await act(async () => {
+      browser.getCtx().addTransaction({ description: 'A2 one-off', amount: 25, type: 'expense', status: 'pending', transaction_date: '2026-09-26', due_date: '2026-09-26', credit_card_id: card.id, account_id: testAccountId });
+    });
+    for (let i = 0; i < 100 && browser.getCtx().isSaving; i++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    await act(async () => { await browser.getCtx().refreshData(); });
+    const tx = browser.getCtx().transactions.find((t) => t.description === 'A2 one-off')!;
+    const bill = browser.getCtx().creditCardBills.find((b) => b.id === tx.credit_card_bill_id)!;
+    expect(bill.reference_month).toBe('2026-10');
+    expect(bill.total_amount).toBe(25);
+    expect(tx.due_date).toBe('2026-11-05');
+    expect(tx.account_id).toBe(testAccountId);
+    expect(browser.getCtx().accounts.find((a) => a.id === testAccountId)?.current_balance).toBe(beforeBalance);
+    await act(async () => {
+      await browser.getCtx().recordPaymentAsync({ credit_card_bill_id: bill.id, amount: 25, account_id: testAccountId, payment_date: '2026-11-05' });
+      await browser.getCtx().refreshData();
+    });
+    expect(browser.getCtx().transactions.find((t) => t.id === tx.id)?.status).toBe('paid');
+    const payment = (await repo1.getPayments(testWorkspaceId)).find((p) => p.credit_card_bill_id === bill.id)!;
+    await repo1.deletePayment(payment.id);
+    await repo1.deleteTransaction(tx.id);
+    expect((await repo1.getCreditCardBills(card.id)).find((b) => b.id === bill.id)?.total_amount).toBe(0);
+  });
+
+  it('A2-R1: QuickAdd→provider→Cloud persists card with explicit/linked context account and no debit', async () => {
+    const card = await repo1.saveCreditCard({ workspace_id: testWorkspaceId, name: 'QuickAdd context fixture', credit_limit: 1000, closing_day: 25, due_day: 5, institution: 'Fixture', color: '#000000', active: true });
+    const method = await repo1.savePaymentMethod({ workspace_id: testWorkspaceId, name: 'QuickAdd context method', type: 'credit_card', credit_card_id: card.id, linked_account_id: testAccountId, active: true });
+    const props = (n: any): any => { const k = Object.keys(n).find((key) => key.startsWith('__reactProps$')); return k ? n[k] : {}; };
+    const nodes = (n: any): any[] => [n, ...(n.childNodes ?? []).flatMap(nodes)];
+    const text = (n: any): string => n.nodeType === 3 ? n.nodeValue ?? '' : n.textContent || (n.childNodes ?? []).map(text).join('');
+    const browser = await mountCloudProvider(repo1, testUser1Id, testUser1Email, testWorkspaceId, <QuickAddModal isOpen onClose={() => {}} />);
+    const before = browser.getCtx().accounts.find((a) => a.id === testAccountId)!.current_balance;
+    const container = browser.container;
+    await act(async () => props(nodes(container).find((n) => n.tagName === 'BUTTON' && text(n).includes('Mais opções'))).onClick());
+    const account = nodes(container).find((n) => n.tagName === 'SELECT' && nodes(n).some((o) => o.tagName === 'OPTION' && props(o).value === testAccountId));
+    await act(async () => props(account).onChange({ target: { value: testAccountId } }));
+    const paymentMethod = nodes(container).find((n) => n.tagName === 'SELECT' && nodes(n).some((o) => o.tagName === 'OPTION' && props(o).value === method.id));
+    await act(async () => {
+      props(paymentMethod).onChange({ target: { value: method.id } });
+      props(nodes(container).find((n) => n.tagName === 'INPUT' && props(n).placeholder === '0,00')).onChange({ target: { value: '25' } });
+    });
+    await act(async () => props(nodes(container).find((n) => n.tagName === 'FORM')).onSubmit({ preventDefault() {} }));
+    for (let i = 0; i < 200 && browser.getCtx().isSaving; i++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    await act(async () => { await browser.getCtx().refreshData(); });
+    const tx = browser.getCtx().transactions.find((t) => t.credit_card_id === card.id)!;
+    expect(tx).toBeDefined();
+    expect(tx.account_id).toBe(testAccountId);
+    expect(browser.getCtx().creditCardBills.find((b) => b.id === tx.credit_card_bill_id)?.total_amount).toBe(25);
+    expect(browser.getCtx().accounts.find((a) => a.id === testAccountId)?.current_balance).toBe(before);
+    expect(browser.getCtx().error).toBeNull();
+  });
 
   it('1. hidrata simultaneamente dois navegadores no Staging sem dados mock locais', async () => {
     const browser1 = await mountCloudProvider(repo1, testUser1Id, testUser1Email);
@@ -826,6 +884,8 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
       const env = getEnvConfig();
       const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
       const anonKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !anonKey) throw new Error('Configuração de staging ausente.');
 
       const userClient3 = createClient<Database>(supabaseUrl, anonKey, {
         auth: { persistSession: false, autoRefreshToken: false },

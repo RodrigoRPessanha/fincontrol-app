@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SupabaseFinanceRepository } from '../../repositories/supabase-finance-repository';
 import { RepositoryError } from '../../repositories/repository-errors';
+import { isOperationReplay } from '../../repositories/operation-result';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 function createMockSupabaseClient() {
@@ -25,6 +26,56 @@ function createMockSupabaseClient() {
 }
 
 describe('SupabaseFinanceRepository', () => {
+  it.each(['deleted', 'absent', 'concurrent', 'denied', 'lookup-error', 'delete-error', 'confirmation-error'])('confirms recurring deletion outcome: %s', async (kind) => {
+    const { client } = createMockSupabaseClient();
+    const lookup = (data: unknown, error: unknown = null) => ({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data, error }) });
+    const initial = lookup(kind === 'absent' ? null : { id: 'rec-1' }, kind === 'lookup-error' ? { message: 'Lookup failed' } : null);
+    const deletion = { delete: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), select: vi.fn().mockResolvedValue({ data: kind === 'deleted' ? [{ id: 'rec-1' }] : [], error: kind === 'delete-error' ? { code: '42501', message: 'Delete failed' } : null }) };
+    const remaining = lookup(kind === 'denied' ? { id: 'rec-1' } : null, kind === 'confirmation-error' ? { message: 'Confirmation failed' } : null);
+    (client.from as any).mockReturnValueOnce(initial).mockReturnValueOnce(deletion).mockReturnValueOnce(remaining);
+    const repo = new SupabaseFinanceRepository(client);
+    if (kind === 'denied') await expect(repo.deleteRecurring('rec-1')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    else if (kind.endsWith('error')) await expect(repo.deleteRecurring('rec-1')).rejects.toThrow(/failed/i);
+    else await expect(repo.deleteRecurring('rec-1')).resolves.toBeUndefined();
+  });
+  it('marks a recovered payment and propagates receipt lookup errors before writing', async () => {
+    const { client, queryBuilder } = createMockSupabaseClient();
+    queryBuilder.maybeSingle.mockResolvedValue({ data: { result_id: 'payment-1' }, error: null });
+    queryBuilder.single.mockResolvedValue({ data: { id: 'payment-1', workspace_id: 'ws-1', operation_key: 'key', amount: 30, transaction_id: 'tx-1', payment_date: '2050-10-01' }, error: null });
+    (client.rpc as any).mockResolvedValue({ data: 'payment-1', error: null });
+    const repo = new SupabaseFinanceRepository(client);
+    const payment = await repo.savePayment({ workspace_id: 'ws-1', operation_key: 'key', transaction_id: 'tx-1', amount: 30, payment_date: '2050-10-01' });
+    expect(isOperationReplay(payment)).toBe(true);
+    expect(isOperationReplay(null)).toBe(false);
+    expect(isOperationReplay(undefined)).toBe(false);
+    queryBuilder.maybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'Receipt unavailable' } });
+    await expect(repo.savePayment({ workspace_id: 'ws-1', operation_key: 'key', transaction_id: 'tx-1', amount: 30, payment_date: '2050-10-01' })).rejects.toThrow('Receipt unavailable');
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+  });
+  it.each(['payment', 'purchase', 'transaction', 'transfer', 'settlement'])('routes keyed %s creation through the atomic receipt RPC', async (kind) => {
+    const { client, queryBuilder } = createMockSupabaseClient();
+    const row: any = { id: 'result', operation_key: 'attempt-1', workspace_id: 'ws-1', amount: 50, total_amount: 120, paid_amount: 0, installment_count: 3, purchase_date: '2050-10-01', payment_date: '2050-10-01', transaction_date: '2050-10-01', due_date: '2050-10-01', transfer_date: '2050-10-01', settlement_date: '2050-10-01', status: 'pending', type: 'expense', description: 'Fixture', from_account_id: 'acc-1', to_account_id: 'acc-2' };
+    (client.rpc as any).mockResolvedValue({ data: row.id, error: null });
+    queryBuilder.single.mockResolvedValue({ data: row, error: null });
+    const repo = new SupabaseFinanceRepository(client);
+    const input: any = { ...row, id: undefined };
+    const methods: Record<string, any> = { payment: repo.savePayment.bind(repo), purchase: repo.savePurchase.bind(repo), transaction: repo.saveTransaction.bind(repo), transfer: repo.saveTransfer.bind(repo), settlement: repo.saveSettlement.bind(repo) };
+    input.transaction_id = 'tx-1';
+    const result = await methods[kind](input);
+    expect(client.rpc).toHaveBeenCalledWith('fn_execute_financial_operation', expect.objectContaining({ p_operation_key: 'attempt-1', p_workspace_id: 'ws-1' }));
+    expect(result.operation_key).toBe('attempt-1');
+  });
+  it('persists a goal deposit through one atomic RPC and preserves its retry key', async () => {
+    const { client } = createMockSupabaseClient();
+    const repo = new SupabaseFinanceRepository(client);
+    await repo.recordGoalDeposit('ws-1', 'goal-1', 'acc-1', 100, 'attempt-1');
+    expect(client.rpc).toHaveBeenCalledExactlyOnceWith('fn_record_goal_deposit', {
+      p_workspace_id: 'ws-1', p_goal_id: 'goal-1', p_account_id: 'acc-1', p_amount: 100, p_idempotency_key: 'attempt-1',
+    });
+    expect(client.from).not.toHaveBeenCalled();
+    (client.rpc as any).mockResolvedValueOnce({ error: { code: '23514', message: 'Invalid deposit' } });
+    await expect(repo.recordGoalDeposit('ws-1', 'goal-1', 'acc-1', 100, 'attempt-1')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
   it('loads snapshot in parallel across tables and resolves relations', async () => {
     const { client } = createMockSupabaseClient();
 
@@ -638,8 +689,8 @@ describe('SupabaseFinanceRepository', () => {
     await repo.saveRecurring({ id: 'rec-1', workspace_id: 'ws-1', description: 'Assinatura Up', amount: 60, frequency: 'monthly', type: 'expense', active: true, start_date: '2026-01-01', auto_create: false, next_occurrence: '2026-02-01' });
 
     (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
+      select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
     });
     await expect(repo.deleteRecurring('rec-1')).resolves.toBeUndefined();
 
@@ -1092,8 +1143,8 @@ describe('SupabaseFinanceRepository', () => {
     await expect(repo.getRecurring('ws-1')).rejects.toThrow(RepositoryError);
 
     (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: err }),
+      select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: err }),
     });
     await expect(repo.deleteRecurring('rec-1')).rejects.toThrow(RepositoryError);
 

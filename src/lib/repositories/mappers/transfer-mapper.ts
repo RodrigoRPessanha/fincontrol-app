@@ -1,17 +1,18 @@
 import { Database } from '../../supabase/database.types';
 import { Transfer } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type TransferRow = Database['public']['Tables']['transfers']['Row'];
 type TransferInsert = Database['public']['Tables']['transfers']['Insert'];
 
 export function mapTransferRowToDomain(row: TransferRow): Transfer {
   return {
+    operation_key: row.operation_key ?? undefined,
     id: row.id,
     workspace_id: row.workspace_id,
     from_account_id: row.from_account_id,
     to_account_id: row.to_account_id,
-    amount: roundCurrency(Number(row.amount ?? 0)),
+    amount: readMoney(row.amount),
     transfer_date: row.transfer_date,
     notes: row.notes,
     created_by: row.created_by ?? undefined,
@@ -27,7 +28,7 @@ export function mapDomainToTransferInsert(
     workspace_id: domain.workspace_id,
     from_account_id: domain.from_account_id,
     to_account_id: domain.to_account_id,
-    amount: roundCurrency(domain.amount),
+    amount: normalizeMoney(domain.amount, 'Valor monetário', 'positive'),
     transfer_date: domain.transfer_date,
     notes: domain.notes ?? null,
     created_by: domain.created_by ?? null,

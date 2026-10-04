@@ -20,7 +20,7 @@ export const planningGuides: HelpArticle[] = [
         { name: 'Percentual / alerta', description: 'Compara gasto com o limite cadastrado. Um aviso de excesso não bloqueia o registro da despesa.' },
       ], note: 'Sem orçamento não significa gasto zero. O gasto pode existir mesmo sem limite definido; confira o valor gasto, não somente a barra ou o percentual.' },
       { id: 'duvidas', title: 'Dúvidas comuns', fields: [
-        { name: 'Por que uma despesa pendente já consome o orçamento?', description: 'O orçamento acompanha compromissos registrados, não somente pagamentos efetivados. Para conferir o que já foi quitado, use Relatórios.' },
+        { name: 'Por que uma despesa pendente já consome o orçamento?', description: 'O orçamento acompanha compromissos registrados, não somente pagamentos efetivados. Subcategorias consomem o limite da categoria principal. No resumo, cada gasto entra uma vez; um limite principal positivo já engloba os subtetos e não é somado novamente a eles. Para conferir o que já foi quitado, use Relatórios.' },
         { name: 'A categoria não aparece', description: 'Confira se é uma categoria de despesa ativa do workspace. Cadastros de categorias ficam em Configurações.' },
         { name: 'Posso escolher outro mês nesta tela?', description: 'O formulário atual define limites do mês corrente. Não há seletor de mês em Orçamentos; Relatórios permite consultar outros períodos.' },
       ] },

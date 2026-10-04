@@ -1,12 +1,13 @@
 import { Database } from '../../supabase/database.types';
 import { Payment } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type PaymentRow = Database['public']['Tables']['payments']['Row'];
 type PaymentInsert = Database['public']['Tables']['payments']['Insert'];
 
 export function mapPaymentRowToDomain(row: PaymentRow): Payment {
   return {
+    operation_key: row.operation_key ?? undefined,
     id: row.id,
     workspace_id: row.workspace_id,
     transaction_id: row.transaction_id ?? undefined,
@@ -14,7 +15,7 @@ export function mapPaymentRowToDomain(row: PaymentRow): Payment {
     credit_card_bill_id: row.credit_card_bill_id ?? undefined,
     account_id: row.account_id ?? undefined,
     payment_method_id: row.payment_method_id ?? undefined,
-    amount: roundCurrency(Number(row.amount ?? 0)),
+    amount: readMoney(row.amount),
     payment_date: row.payment_date,
     notes: row.notes,
     created_by: row.created_by ?? undefined,
@@ -34,7 +35,7 @@ export function mapDomainToPaymentInsert(
     credit_card_bill_id: domain.credit_card_bill_id ?? null,
     account_id: domain.account_id ?? null,
     payment_method_id: domain.payment_method_id ?? null,
-    amount: roundCurrency(domain.amount),
+    amount: normalizeMoney(domain.amount, 'Valor monetário', 'positive'),
     payment_date: domain.payment_date,
     notes: domain.notes ?? null,
     created_by: domain.created_by ?? null,

@@ -1,3 +1,4 @@
+import { findOperationReceipt } from './operation-receipts';
 import { format } from 'date-fns';
 import { Settlement } from '../../types';
 import {
@@ -10,6 +11,7 @@ import { FinanceActionDeps } from './types';
 export function recordSettlement(
   deps: FinanceActionDeps,
   data: {
+    operation_key?: string;
     from_member_id?: string | null;
     to_member_id?: string | null;
     from_person_id?: string | null;
@@ -22,6 +24,8 @@ export function recordSettlement(
 ): Settlement {
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allSettlements, targetWsId, data.operation_key, data);
+  if (receipt) return receipt;
   const activeWs = state.allWorkspaces.find((w) => w.id === targetWsId);
   const isExpenseTracker = activeWs?.tracking_mode === 'expense_tracker';
 
@@ -62,6 +66,10 @@ export function recordSettlement(
     throw new Error('Membros devedor e credor devem ser informados para o acerto.');
   }
 
+  if ([effectiveFromPersonId, effectiveToPersonId].some((id) => id && wsPeople.find((p) => p.id === id)?.archived)) {
+    throw new Error('Pessoa arquivada não pode receber nova associação em acerto. Restaure-a antes de registrar.');
+  }
+
   const { pairwiseDebts } = calculateMemberNetBalances(
     state.allTransactions,
     state.allSettlements || [],
@@ -95,6 +103,7 @@ export function recordSettlement(
   );
 
   const newSettlement: Settlement = {
+    operation_key: data.operation_key,
     id: deps.generateId('set'),
     workspace_id: targetWsId,
     from_member_id: effectiveFromMemberId,

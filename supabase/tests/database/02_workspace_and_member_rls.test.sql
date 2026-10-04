@@ -10,6 +10,9 @@ VALUES
     ('11111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'alice@test.com'),
     ('22222222-2222-2222-2222-222222222222', 'authenticated', 'authenticated', 'bob@test.com'),
     ('44444444-4444-4444-4444-444444444444', 'authenticated', 'authenticated', 'charlie@test.com');
+-- Fixtures representam contas que já confirmaram seu endereço no Auth.
+UPDATE auth.users SET email_confirmed_at = now()
+WHERE id IN ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','44444444-4444-4444-4444-444444444444');
 
 -- Obter os workspaces criados automaticamente pelo trigger handle_new_user
 CREATE TEMPORARY TABLE test_vars AS

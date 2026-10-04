@@ -22,7 +22,6 @@ import { FinanceState } from '../context/finance-state';
 import {
   loadFinanceSnapshot,
   saveFinanceSnapshot,
-  STORAGE_KEYS,
 } from '../context/finance-storage';
 import { FinanceRepository } from './finance-repository';
 import { RepositoryError } from './repository-errors';
@@ -85,11 +84,7 @@ export class LocalFinanceRepository implements FinanceRepository {
     const state = this.getState();
     if (workspaceId && state.allWorkspaces.some((w) => w.id === workspaceId)) {
       state.activeWorkspaceId = workspaceId;
-      try {
-        this.storage.setItem(STORAGE_KEYS.activeWorkspaceId, workspaceId);
-      } catch {
-        // Ignora erros de escrita no storage para activeWorkspaceId
-      }
+      this.saveState(state);
     }
     return state;
   }

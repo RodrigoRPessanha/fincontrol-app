@@ -51,6 +51,7 @@ export default function DashboardPage() {
     allWorkspaceCategories,
     viewPerspective,
     setViewPerspective,
+    isWorkspaceReadOnly,
   } = useFinance();
 
   // Modais de Ação
@@ -426,7 +427,7 @@ export default function DashboardPage() {
                       <span className="text-sm font-extrabold text-slate-900 dark:text-white">
                         {formatCurrency(item.amount)}
                       </span>
-                      <button
+                      {!isWorkspaceReadOnly && <button
                         onClick={() =>
                           setPaymentTarget({
                             type: item.type,
@@ -440,7 +441,7 @@ export default function DashboardPage() {
                         className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-500"
                       >
                         Pagar
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 ))
@@ -701,11 +702,11 @@ export default function DashboardPage() {
       </div>
 
       {/* Modais Ativos */}
-      <PaymentModal
+      {!isWorkspaceReadOnly && <PaymentModal
         isOpen={!!paymentTarget}
         onClose={() => setPaymentTarget(null)}
         target={paymentTarget}
-      />
+      />}
 
       <InstallmentDetailModal
         isOpen={!!selectedPurchase}

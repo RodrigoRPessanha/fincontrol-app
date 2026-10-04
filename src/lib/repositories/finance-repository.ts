@@ -97,6 +97,7 @@ export interface FinanceRepository {
   getGoals(workspaceId: string): Promise<FinancialGoal[]>;
   saveGoal(goal: Omit<FinancialGoal, 'id' | 'created_at'> & { id?: string }): Promise<FinancialGoal>;
   deleteGoal(id: string): Promise<void>;
+  recordGoalDeposit?(workspaceId: string, goalId: string, accountId: string, amount: number, idempotencyKey: string): Promise<void>;
 
   // Acertos entre Membros (Settlements)
   getSettlements(workspaceId: string): Promise<Settlement[]>;

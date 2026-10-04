@@ -81,6 +81,10 @@ jobs:
 
       - name: Validate Supabase Credentials
         run: |
+          if [ "$SUPABASE_PROJECT_REF" != "iwesoczokkycjovyknnz" ] || [ "$NEXT_PUBLIC_SUPABASE_URL" != "https://iwesoczokkycjovyknnz.supabase.co" ]; then
+            echo "::error::Cloud tests are restricted to fincontrol-staging."
+            exit 1
+          fi
           for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY; do
             if [ -z "${!name}" ]; then
               echo "::error::$name is required for Supabase Cloud verification."
@@ -98,7 +102,10 @@ jobs:
         run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Link Supabase Project
-        run: npx supabase link --project-ref ${{ env.SUPABASE_PROJECT_REF }}
+        run: |
+          node scripts/check-cloud-target.mjs --before-link
+          npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          node scripts/check-cloud-target.mjs
 
       - name: Verify Migration Parity
         run: |
@@ -130,3 +137,6 @@ jobs:
 
       - name: Cloud Integration Tests (Repository & Provider)
         run: npm run test:repo:cloud
+
+      - name: Cloud Auth Tests (No SMTP)
+        run: npm run test:auth:cloud

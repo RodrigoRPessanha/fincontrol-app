@@ -6,7 +6,7 @@ import {
   TransactionStatus,
   TransactionType,
 } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type TransactionRow = Database['public']['Tables']['transactions']['Row'];
 type TransactionInsert = Database['public']['Tables']['transactions']['Insert'];
@@ -20,7 +20,7 @@ export function mapTransactionSplitsToDomain(rows: TransactionSplitRow[]): Trans
     transaction_id: r.transaction_id,
     member_id: r.member_id ?? undefined,
     person_id: r.person_id ?? undefined,
-    amount: roundCurrency(Number(r.amount ?? 0)),
+    amount: readMoney(r.amount),
     percentage: r.percentage !== null && r.percentage !== undefined ? Number(r.percentage) : undefined,
   }));
 }
@@ -35,7 +35,7 @@ export function mapDomainSplitsToInsert(
     workspace_id: workspaceId,
     member_id: s.member_id ?? null,
     person_id: s.person_id ?? null,
-    amount: roundCurrency(s.amount),
+    amount: normalizeMoney(s.amount, 'Valor monetário', 'nonnegative'),
     percentage: s.percentage !== undefined ? s.percentage : null,
   }));
 }
@@ -47,14 +47,15 @@ export function mapTransactionRowToDomain(
 ): Transaction {
   const paidAmount =
     typeof payments === 'number'
-      ? roundCurrency(payments)
+      ? readMoney(payments)
       : payments && payments.length > 0
-      ? roundCurrency(payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0))
+      ? readMoney(payments.reduce((sum, p) => sum + readMoney(p.amount), 0))
       : row.status === 'paid'
-      ? roundCurrency(Number(row.amount ?? 0))
+      ? readMoney(row.amount)
       : 0;
 
   return {
+    operation_key: row.operation_key ?? undefined,
     id: row.id,
     workspace_id: row.workspace_id,
     account_id: row.account_id ?? undefined,
@@ -68,7 +69,7 @@ export function mapTransactionRowToDomain(
     split_type: (row.split_type as SplitType) ?? undefined,
     splits: splits && splits.length > 0 ? mapTransactionSplitsToDomain(splits) : undefined,
     description: row.description,
-    amount: roundCurrency(Number(row.amount ?? 0)),
+    amount: readMoney(row.amount),
     paid_amount: paidAmount,
     type: (row.type as TransactionType) ?? 'expense',
     transaction_date: row.transaction_date,
@@ -98,7 +99,7 @@ export function mapDomainToTransactionInsert(
     paid_by_person_id: domain.paid_by_person_id ?? null,
     split_type: domain.split_type ?? 'individual',
     description: domain.description,
-    amount: roundCurrency(domain.amount),
+    amount: normalizeMoney(domain.amount, 'Valor monetário', 'positive'),
     type: domain.type,
     transaction_date: domain.transaction_date,
     due_date: domain.due_date,

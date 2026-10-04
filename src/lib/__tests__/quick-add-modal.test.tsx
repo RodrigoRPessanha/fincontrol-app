@@ -11,6 +11,21 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
   const mockCreateInstallmentPurchase = vi.fn();
   const mockCreateTransfer = vi.fn();
   const mockOnClose = vi.fn();
+  it('aguarda persistência e ignora nova submissão durante a tentativa em andamento', async () => {
+    let release!: () => void;
+    mockAddTransaction.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const container = (globalThis as any).document.createElement('div'); const root = createRoot(container);
+    await act(async () => { root.render(<QuickAddModal isOpen onClose={mockOnClose} />); });
+    const amount = findNode(container, (n) => n.tagName === 'INPUT' && getReactProps(n)?.placeholder === '0,00');
+    await act(async () => { getReactProps(amount).onChange({ target: { value: '30' } }); });
+    const form = findNode(container, (n) => n.tagName === 'FORM'); let done!: Promise<void>;
+    await act(async () => { done = getReactProps(form).onSubmit({ preventDefault() {} }); await getReactProps(form).onSubmit({ preventDefault() {} }); });
+    expect(mockAddTransaction).toHaveBeenCalledTimes(1);
+    expect(mockOnClose).not.toHaveBeenCalled();
+    await act(async () => { release(); await done; });
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
 
   const mockWorkspace: Workspace = {
     id: 'ws-1',
@@ -211,8 +226,11 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
       paymentMethods: mockPaymentMethods,
       creditCards: mockCreditCards,
       addTransaction: mockAddTransaction,
+      addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: mockCreateTransfer,
+      createTransferAsync: async (...args: any[]) => mockCreateTransfer(...args),
     } as any);
   });
 
@@ -228,6 +246,32 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it('não abre criação de transação em um workspace somente leitura', async () => {
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      isWorkspaceReadOnly: true,
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      categories: mockCategories,
+      accounts: mockAccounts,
+      paymentMethods: mockPaymentMethods,
+      creditCards: mockCreditCards,
+      people: [],
+      addTransactionAsync: async (data: any) => mockAddTransaction(data),
+      createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
+      createTransferAsync: async (...args: any[]) => mockCreateTransfer(...args),
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(React.createElement(QuickAddModal, { isOpen: true, onClose: mockOnClose }));
+    });
+
+    expect(container.childNodes).toHaveLength(0);
+    expect(mockAddTransaction).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
   });
 
   it('deve fechar modal ao clicar no botão de fechar e no botão cancelar', async () => {
@@ -358,7 +402,8 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
       'acc-2',
       450,
       expect.any(String),
-      ''
+      '',
+      expect.any(String)
     );
     expect(mockOnClose).toHaveBeenCalled();
 
@@ -940,8 +985,11 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
       paymentMethods: mockPaymentMethods,
       creditCards: mockCreditCards,
       addTransaction: mockAddTransaction,
+      addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: mockCreateTransfer,
+      createTransferAsync: async (...args: any[]) => mockCreateTransfer(...args),
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
@@ -1109,8 +1157,11 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
       accounts: mockAccounts as any,
       creditCards: mockCreditCards as any,
       addTransaction: mockAddTransaction,
+      addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: mockCreateTransfer,
+      createTransferAsync: async (...args: any[]) => mockCreateTransfer(...args),
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
@@ -1270,8 +1321,11 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
       paymentMethods: [...mockPaymentMethods, customPm],
       creditCards: mockCreditCards,
       addTransaction: mockAddTransaction,
+      addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+      createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: mockCreateTransfer,
+      createTransferAsync: async (...args: any[]) => mockCreateTransfer(...args),
     } as any);
 
     const container = (globalThis as any).document.createElement('div');

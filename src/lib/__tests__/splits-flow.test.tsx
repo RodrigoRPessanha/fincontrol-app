@@ -189,7 +189,9 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       accounts: mockAccounts as any,
       creditCards: [] as any,
       addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: vi.fn(),
     } as any);
 
@@ -324,6 +326,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -427,6 +430,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: mockSettlements as any,
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -466,6 +470,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -500,6 +505,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -562,6 +568,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: mockPurchases as any,
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -660,6 +667,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -789,6 +797,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: mockSettlements as any,
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -834,6 +843,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -1246,6 +1256,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -1339,6 +1350,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: mockSettlements as any,
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -1456,6 +1468,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -1831,6 +1844,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
       addPerson: mockAddPerson,
       updatePerson: mockUpdatePerson,
@@ -1912,7 +1926,9 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       accounts: mockAccounts as any,
       creditCards: mockCards,
       addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: vi.fn(),
     } as any);
 
@@ -2268,6 +2284,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
       addPerson: mockAddPerson,
       updatePerson: mockUpdatePerson,
@@ -2328,7 +2345,9 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       accounts: mockAccounts as any,
       creditCards: [],
       addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: vi.fn(),
     } as any);
 
@@ -2421,7 +2440,9 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       accounts: mockAccounts as any,
       creditCards: [],
       addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: vi.fn(),
     } as any);
 
@@ -2473,7 +2494,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -2552,6 +2573,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: purchasesWithSplits as any,
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
       addPerson: mockAddPerson,
       updatePerson: mockUpdatePerson,

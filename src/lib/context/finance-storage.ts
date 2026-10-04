@@ -41,6 +41,7 @@ export const STORAGE_VERSION = 1;
 export const CURRENT_STORAGE_VERSION = 1;
 
 export const STORAGE_KEYS = {
+  snapshot: `${STORAGE_PREFIX}snapshot`,
   schemaVersion: `${STORAGE_PREFIX}schema_version`,
   workspaces: `${STORAGE_PREFIX}workspaces`,
   activeWorkspaceId: `${STORAGE_PREFIX}active_ws`,
@@ -185,6 +186,16 @@ export function migrateFinanceSnapshot(
 }
 
 export function loadFinanceSnapshot(storage: Storage): LoadFinanceSnapshotResult {
+  const envelope = storage.getItem(STORAGE_KEYS.snapshot);
+  if (envelope !== null) {
+    const parsed = JSON.parse(envelope) as { version: number; state: FinanceState };
+    if (!parsed?.state || !Number.isInteger(parsed.version) || !Object.keys(getInitialFinanceState()).every((key) =>
+      key === 'activeWorkspaceId' ? typeof parsed.state.activeWorkspaceId === 'string' : Array.isArray(parsed.state[key as keyof FinanceState]))) {
+      throw new Error('Snapshot financeiro local inválido. Dados preservados para recuperação.');
+    }
+    const migration = migrateFinanceSnapshot(parsed.version, parsed.state);
+    return { ...migration.snapshot, snapshot: migration.snapshot, errors: [], version: migration.version, canPersist: parsed.version <= CURRENT_STORAGE_VERSION };
+  }
   const initial = getInitialFinanceState();
   const errors: StorageParseError[] = [];
 
@@ -255,35 +266,44 @@ export function loadFinanceSnapshot(storage: Storage): LoadFinanceSnapshotResult
 
 export function saveFinanceSnapshot(storage: Storage, state: FinanceState): void {
   try {
+    state = { ...state, allPeople: state.allPeople ?? [], allSettlements: state.allSettlements ?? [] };
     const existingVersionRaw = storage.getItem(STORAGE_KEYS.schemaVersion);
     if (existingVersionRaw !== null && existingVersionRaw !== undefined) {
       const existingVersion = parseInt(existingVersionRaw, 10);
       if (!Number.isNaN(existingVersion) && existingVersion > CURRENT_STORAGE_VERSION) {
         console.warn('FinControl: save abortado para proteger schema de versão futura:', existingVersion);
-        return;
+        throw new Error('Schema de versão futura: escrita bloqueada.');
       }
     }
 
-    storage.setItem(STORAGE_KEYS.schemaVersion, String(CURRENT_STORAGE_VERSION));
-    storage.setItem(STORAGE_KEYS.workspaces, JSON.stringify(state.allWorkspaces));
-    storage.setItem(STORAGE_KEYS.activeWorkspaceId, state.activeWorkspaceId);
-    storage.setItem(STORAGE_KEYS.members, JSON.stringify(state.allWorkspaceMembers));
-    storage.setItem(STORAGE_KEYS.people, JSON.stringify(state.allPeople));
-    storage.setItem(STORAGE_KEYS.accounts, JSON.stringify(state.allAccounts));
-    storage.setItem(STORAGE_KEYS.creditCards, JSON.stringify(state.allCreditCards));
-    storage.setItem(STORAGE_KEYS.bills, JSON.stringify(state.allCreditCardBills));
-    storage.setItem(STORAGE_KEYS.paymentMethods, JSON.stringify(state.allPaymentMethods));
-    storage.setItem(STORAGE_KEYS.categories, JSON.stringify(state.allCategories));
-    storage.setItem(STORAGE_KEYS.transactions, JSON.stringify(state.allTransactions));
-    storage.setItem(STORAGE_KEYS.purchases, JSON.stringify(state.allPurchases));
-    storage.setItem(STORAGE_KEYS.installments, JSON.stringify(state.allInstallments));
-    storage.setItem(STORAGE_KEYS.payments, JSON.stringify(state.allPayments));
-    storage.setItem(STORAGE_KEYS.transfers, JSON.stringify(state.allTransfers));
-    storage.setItem(STORAGE_KEYS.recurring, JSON.stringify(state.allRecurring));
-    storage.setItem(STORAGE_KEYS.budgets, JSON.stringify(state.allBudgets));
-    storage.setItem(STORAGE_KEYS.goals, JSON.stringify(state.allGoals));
-    storage.setItem(STORAGE_KEYS.settlements, JSON.stringify(state.allSettlements));
+    const envelope = storage.getItem(STORAGE_KEYS.snapshot);
+    if (envelope && JSON.parse(envelope).version > CURRENT_STORAGE_VERSION) throw new Error('Snapshot de versão futura: escrita bloqueada.');
+    storage.setItem(STORAGE_KEYS.snapshot, JSON.stringify({ version: CURRENT_STORAGE_VERSION, state }));
+    try {
+      storage.setItem(STORAGE_KEYS.schemaVersion, String(CURRENT_STORAGE_VERSION));
+      storage.setItem(STORAGE_KEYS.workspaces, JSON.stringify(state.allWorkspaces));
+      storage.setItem(STORAGE_KEYS.activeWorkspaceId, state.activeWorkspaceId);
+      storage.setItem(STORAGE_KEYS.members, JSON.stringify(state.allWorkspaceMembers));
+      storage.setItem(STORAGE_KEYS.people, JSON.stringify(state.allPeople));
+      storage.setItem(STORAGE_KEYS.accounts, JSON.stringify(state.allAccounts));
+      storage.setItem(STORAGE_KEYS.creditCards, JSON.stringify(state.allCreditCards));
+      storage.setItem(STORAGE_KEYS.bills, JSON.stringify(state.allCreditCardBills));
+      storage.setItem(STORAGE_KEYS.paymentMethods, JSON.stringify(state.allPaymentMethods));
+      storage.setItem(STORAGE_KEYS.categories, JSON.stringify(state.allCategories));
+      storage.setItem(STORAGE_KEYS.transactions, JSON.stringify(state.allTransactions));
+      storage.setItem(STORAGE_KEYS.purchases, JSON.stringify(state.allPurchases));
+      storage.setItem(STORAGE_KEYS.installments, JSON.stringify(state.allInstallments));
+      storage.setItem(STORAGE_KEYS.payments, JSON.stringify(state.allPayments));
+      storage.setItem(STORAGE_KEYS.transfers, JSON.stringify(state.allTransfers));
+      storage.setItem(STORAGE_KEYS.recurring, JSON.stringify(state.allRecurring));
+      storage.setItem(STORAGE_KEYS.budgets, JSON.stringify(state.allBudgets));
+      storage.setItem(STORAGE_KEYS.goals, JSON.stringify(state.allGoals));
+      storage.setItem(STORAGE_KEYS.settlements, JSON.stringify(state.allSettlements));
+    } catch {
+      // Mirrors retain compatibility only; the committed envelope is authoritative.
+    }
   } catch (err) {
     console.error('Erro ao persistir dados locais no storage:', err);
+    throw err;
   }
 }
