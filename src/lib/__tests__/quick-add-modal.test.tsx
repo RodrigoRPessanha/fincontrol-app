@@ -13,13 +13,18 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
   const mockOnClose = vi.fn();
   it('aguarda persistência e ignora nova submissão durante a tentativa em andamento', async () => {
     let release!: () => void;
-    mockAddTransaction.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+    mockAddTransaction.mockImplementationOnce(() => {
+      notifyStarted();
+      return new Promise<void>((resolve) => { release = resolve; });
+    });
     const container = (globalThis as any).document.createElement('div'); const root = createRoot(container);
     await act(async () => { root.render(<QuickAddModal isOpen onClose={mockOnClose} />); });
     const amount = findNode(container, (n) => n.tagName === 'INPUT' && getReactProps(n)?.placeholder === '0,00');
     await act(async () => { getReactProps(amount).onChange({ target: { value: '30' } }); });
     const form = findNode(container, (n) => n.tagName === 'FORM'); let done!: Promise<void>;
-    await act(async () => { done = getReactProps(form).onSubmit({ preventDefault() {} }); await getReactProps(form).onSubmit({ preventDefault() {} }); });
+    await act(async () => { done = getReactProps(form).onSubmit({ preventDefault() {} }); await getReactProps(form).onSubmit({ preventDefault() {} }); await started; });
     expect(mockAddTransaction).toHaveBeenCalledTimes(1);
     expect(mockOnClose).not.toHaveBeenCalled();
     await act(async () => { release(); await done; });
@@ -340,7 +345,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     // Submeter Formulário
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -394,7 +399,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     // Submeter
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockCreateTransfer).toHaveBeenCalledWith(
@@ -440,7 +445,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockCreateTransfer).not.toHaveBeenCalled();
@@ -513,7 +518,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     // Submeter
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(
@@ -584,7 +589,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     // Submeter
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -622,7 +627,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).not.toHaveBeenCalled();
@@ -660,7 +665,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     // Submeter SEM selecionar o cartão
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).not.toHaveBeenCalled();
@@ -707,7 +712,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -765,7 +770,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -808,7 +813,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalled();
@@ -876,7 +881,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(
@@ -1206,7 +1211,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     const fallbackAlert = findNodes(container, (n) => n.textContent?.includes('Erro ao processar o registro financeiro.'));
@@ -1221,7 +1226,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     mockAddTransaction.mockClear();
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -1256,7 +1261,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     mockAddTransaction.mockClear();
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -1286,7 +1291,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
 
     mockAddTransaction.mockClear();
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -1389,7 +1394,7 @@ describe('QuickAddModal Comprehensive UI Tests', () => {
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     mockCreateInstallmentPurchase.mockClear();
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(
