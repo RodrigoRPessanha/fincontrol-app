@@ -6,6 +6,11 @@
 
 # testing
 /coverage
+/output/
+
+# local pre-production review artifacts
+/docs/reviews/
+/docs/plans/v14-pre-production-review.md
 
 # next.js
 /.next/

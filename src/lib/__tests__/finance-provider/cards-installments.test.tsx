@@ -1062,6 +1062,7 @@ describe('FinanceProvider - Cartões e Parcelamento', () => {
         status: 'open',
         created_at: '2026-09-01T00:00:00Z',
       };
+      storageMap.delete('fincontrol_v2_snapshot'); // Reset fixture to the legacy format intentionally.
       storageMap.set('fincontrol_v2_bills', JSON.stringify([billZero]));
 
       const { getCtx: getFreshCtx } = await mountProvider();

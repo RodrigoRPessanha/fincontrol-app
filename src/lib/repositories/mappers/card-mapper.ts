@@ -1,6 +1,6 @@
 import { Database } from '../../supabase/database.types';
 import { BillStatus, CreditCard, CreditCardBill } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type CreditCardRow = Database['public']['Tables']['credit_cards']['Row'];
 type CreditCardInsert = Database['public']['Tables']['credit_cards']['Insert'];
@@ -14,7 +14,7 @@ export function mapCreditCardRowToDomain(row: CreditCardRow): CreditCard {
     name: row.name,
     institution: row.institution ?? 'Instituição',
     last_four_digits: row.last_four_digits ?? undefined,
-    credit_limit: roundCurrency(Number(row.credit_limit ?? 0)),
+    credit_limit: readMoney(row.credit_limit),
     closing_day: row.closing_day,
     due_day: row.due_day,
     linked_payment_account_id: row.linked_payment_account_id ?? undefined,
@@ -33,7 +33,7 @@ export function mapDomainToCreditCardInsert(
     name: domain.name,
     institution: domain.institution,
     last_four_digits: domain.last_four_digits ?? null,
-    credit_limit: domain.credit_limit !== undefined ? roundCurrency(domain.credit_limit) : (undefined as any),
+    credit_limit: domain.credit_limit !== undefined ? normalizeMoney(domain.credit_limit, 'Valor monetário', 'nonnegative') : (undefined as any),
     closing_day: domain.closing_day,
     due_day: domain.due_day,
     linked_payment_account_id: domain.linked_payment_account_id ?? null,
@@ -50,8 +50,8 @@ export function mapCreditCardBillRowToDomain(row: CreditCardBillRow): CreditCard
     reference_month: row.reference_month,
     closing_date: row.closing_date,
     due_date: row.due_date,
-    total_amount: roundCurrency(Number(row.total_amount ?? 0)),
-    paid_amount: roundCurrency(Number(row.paid_amount ?? 0)),
+    total_amount: readMoney(row.total_amount),
+    paid_amount: readMoney(row.paid_amount),
     status: (row.status as BillStatus) ?? 'open',
     paid_at: row.paid_at,
     created_at: row.created_at,
@@ -68,8 +68,8 @@ export function mapDomainToCreditCardBillInsert(
     reference_month: domain.reference_month,
     closing_date: domain.closing_date,
     due_date: domain.due_date,
-    total_amount: roundCurrency(domain.total_amount),
-    paid_amount: roundCurrency(domain.paid_amount),
+    total_amount: normalizeMoney(domain.total_amount, 'Valor monetário', 'nonnegative'),
+    paid_amount: normalizeMoney(domain.paid_amount, 'Valor monetário', 'nonnegative'),
     status: domain.status,
     paid_at: domain.paid_at ?? null,
   };

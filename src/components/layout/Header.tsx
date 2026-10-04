@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useFinance } from '@/lib/context/finance-context';
 import { useAuth } from '@/lib/context/auth-context';
 import { useTheme } from '@/lib/context/theme-context';
@@ -19,6 +20,7 @@ import {
   Sun,
   Moon,
   Laptop,
+  LogOut,
 } from 'lucide-react';
 import { QuickAddModal } from '../transactions/QuickAddModal';
 
@@ -30,14 +32,17 @@ export function Header() {
     createWorkspace,
     viewPerspective,
     setViewPerspective,
+    isWorkspaceReadOnly,
   } = useFinance();
-  const { user } = useAuth();
+  const { user, logout, isLoading: isAuthLoading } = useAuth();
+  const router = useRouter();
   const { theme, resolvedTheme, toggleTheme } = useTheme();
 
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
   const [isNewWsModalOpen, setIsNewWsModalOpen] = useState(false);
   const [newWsName, setNewWsName] = useState('');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const workspaceName = activeWorkspace.name || 'Nenhum workspace';
 
   const handleCreateWs = (e: React.FormEvent) => {
@@ -47,6 +52,17 @@ export function Header() {
     setNewWsName('');
     setIsNewWsModalOpen(false);
     setIsWorkspaceMenuOpen(false);
+  };
+
+  const handleLogout = async () => {
+    if (isAuthLoading) return;
+    setLogoutError(null);
+    try {
+      await logout();
+      router.replace('/auth/login');
+    } catch {
+      setLogoutError('Não foi possível encerrar a sessão. Tente novamente.');
+    }
   };
 
   return (
@@ -145,7 +161,7 @@ export function Header() {
           </div>
 
           {/* Quick Add Button */}
-          <button
+          {!isWorkspaceReadOnly && <button
             type="button"
             aria-label="Nova Transação"
             data-testid="header-quick-add-btn"
@@ -154,7 +170,7 @@ export function Header() {
           >
             <Plus className="h-4 w-4 stroke-[2.5] pointer-events-none" />
             <span className="hidden sm:inline pointer-events-none">Nova Transação</span>
-          </button>
+          </button>}
 
           {/* Theme Switcher Button */}
           <button
@@ -169,14 +185,27 @@ export function Header() {
             )}
           </button>
 
-          {/* Avatar Profile */}
+          {/* Encerrar sessão */}
           <div className="flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-slate-800">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-slate-700 font-semibold text-sm ring-2 ring-emerald-500/20 dark:bg-slate-700 dark:text-slate-200">
-              {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
-            </div>
+            <button
+              type="button"
+              aria-label={`Sair da conta${user?.name ? ` de ${user.name}` : ''}`}
+              title="Sair da conta"
+              disabled={isAuthLoading}
+              onClick={handleLogout}
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 hover:text-rose-600 disabled:cursor-wait disabled:opacity-60 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-rose-400"
+            >
+              <LogOut aria-hidden="true" className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </header>
+
+      {logoutError && (
+        <div role="alert" className="fixed right-4 top-20 z-[60] max-w-sm rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-lg dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">
+          {logoutError}
+        </div>
+      )}
 
       {/* Modal de Novo Workspace */}
       {isNewWsModalOpen && (

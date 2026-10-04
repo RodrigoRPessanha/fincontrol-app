@@ -33,6 +33,22 @@ export interface PairwiseDebt {
   to_person_id?: string | null;
 }
 
+/** Shared selection contract for chips, preview and financial submission. */
+export function resolveSplitParticipants(
+  members: WorkspaceMember[], people: Person[], selectedIds: string[], payerId: string
+): SplitParticipant[] {
+  const available: SplitParticipant[] = [
+    ...members.map((m) => ({ id: m.id, type: 'member' as const, name: m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}` })),
+    ...people.map((p) => ({ id: p.id, type: 'person' as const, name: p.name })),
+  ];
+  const selected = selectedIds.length > 0
+    ? available.filter((p) => selectedIds.includes(p.id))
+    : members.length <= 1 && people.length > 0 ? available : available.filter((p) => p.type === 'member');
+  const payer = available.find((p) => p.id === payerId);
+  if (payer && !selected.some((p) => p.id === payerId)) selected.push(payer);
+  return selected;
+}
+
 /**
  * Calcula a divisão determinística de uma despesa entre participantes (membros e/ou pessoas salvas) sem perda de centavos.
  */

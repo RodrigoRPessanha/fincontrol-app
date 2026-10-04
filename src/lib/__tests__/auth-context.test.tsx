@@ -364,6 +364,24 @@ describe('AuthContext - Complete Authentication Flows', () => {
       expect(mockSignOut).toHaveBeenCalled();
       expect(getCtx().user).toBeNull();
     });
+
+    it('propagates logout errors and restores the loading state', async () => {
+      mockSignOut.mockResolvedValue({ error: { message: 'Falha de rede' } });
+
+      const { getCtx } = await mountAuth();
+      let logoutError: unknown;
+      await act(async () => {
+        try {
+          await getCtx().logout();
+        } catch (error) {
+          logoutError = error;
+        }
+      });
+
+      expect(logoutError).toEqual(new Error('Falha de rede'));
+      expect(getCtx().user).not.toBeNull();
+      expect(getCtx().isLoading).toBe(false);
+    });
   });
 
   describe('useAuth outside provider', () => {

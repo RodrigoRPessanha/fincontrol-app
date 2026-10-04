@@ -18,7 +18,7 @@ import {
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 
 export default function SettingsPage() {
-  const { categories, paymentMethods, addCategory, addPaymentMethod } = useFinance();
+  const { categories, paymentMethods, addCategory, addPaymentMethod, isWorkspaceReadOnly } = useFinance();
   const { theme, setTheme, resolvedTheme } = useTheme();
 
   const [activeTab, setActiveTab] = useState<'categories' | 'payments' | 'appearance'>('categories');
@@ -127,13 +127,13 @@ export default function SettingsPage() {
       {activeTab === 'categories' && (
         <div className="space-y-4">
           <div className="flex justify-end">
-            <button
+            {!isWorkspaceReadOnly && <button
               onClick={() => setIsNewCatOpen(true)}
               className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-500"
             >
               <Plus className="h-4 w-4" />
               <span>Nova Categoria</span>
-            </button>
+            </button>}
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -185,13 +185,13 @@ export default function SettingsPage() {
       {activeTab === 'payments' && (
         <div className="space-y-4">
           <div className="flex justify-end">
-            <button
+            {!isWorkspaceReadOnly && <button
               onClick={() => setIsNewPmOpen(true)}
               className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-indigo-500"
             >
               <Plus className="h-4 w-4" />
               <span>Novo Método</span>
-            </button>
+            </button>}
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -313,7 +313,7 @@ export default function SettingsPage() {
       )}
 
       {/* Modal Nova Categoria */}
-      {isNewCatOpen && (
+      {isNewCatOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Nova Categoria</h3>
@@ -382,7 +382,7 @@ export default function SettingsPage() {
       )}
 
       {/* Modal Novo Método */}
-      {isNewPmOpen && (
+      {isNewPmOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Método de Pagamento</h3>

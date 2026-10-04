@@ -118,3 +118,23 @@ export function roundCurrency(amount: number): number {
 export function compareCurrency(a: number, b: number): number {
   return toCents(a) - toCents(b);
 }
+
+export const MAX_MONEY = 9_999_999_999.99;
+
+/** Fronteira de negócio: valores inválidos nunca são tratados como saldo zero. */
+export function normalizeMoney(value: number, label = 'Valor', rule: 'positive' | 'nonnegative' | 'signed' = 'positive'): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER / 100) {
+    throw new Error(`${label}: informe um valor monetário finito${rule === 'positive' ? ', maior que zero,' : ''} dentro do limite permitido.`);
+  }
+  const cents = toCents(value);
+  if (rule === 'positive' && cents <= 0) throw new Error(`${label} deve ser maior que zero.`);
+  if (!Number.isSafeInteger(cents) || Math.abs(cents) > toCents(MAX_MONEY) || (rule === 'nonnegative' && value < 0)) {
+    throw new Error(`${label}: valor fora do intervalo permitido.`);
+  }
+  return fromCents(cents);
+}
+
+export function readMoney(value: unknown): number {
+  if ((typeof value !== 'number' && typeof value !== 'string') || (typeof value === 'string' && !value.trim())) throw new Error('Dados financeiros inválidos recebidos do banco.');
+  return normalizeMoney(Number(value), 'Dados financeiros recebidos do banco', 'signed');
+}

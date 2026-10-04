@@ -78,3 +78,7 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
 4. Para instruções detalhadas de CI/CD (GitHub Actions), ambientes Staging/Produção e deploy na Vercel, consulte o [DEPLOYMENT.md](./DEPLOYMENT.md).
+
+## Auditoria de dependências
+
+`npm run audit` executa a auditoria npm e verifica a mitigação temporária de `braces`, fixada em commit e integridade. O `npm audit` bruto ainda reporta o advisory da versão 3.0.3; o gate só reconhece essa cadeia quando todos os arquivos corrigidos forem comprovados e bloqueia qualquer outro alerta. Consulte [a documentação da mitigação](./docs/security/braces-mitigation.md) antes de alterar o override ou a política.

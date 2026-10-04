@@ -8,6 +8,7 @@ export function GlobalErrorBanner() {
   const { error, clearError } = useFinance();
 
   if (!error) return null;
+  const workspaceName = (error as Error & { workspace_name?: string }).workspace_name;
 
   return (
     <div
@@ -16,7 +17,7 @@ export function GlobalErrorBanner() {
     >
       <div className="flex items-center gap-2.5 min-w-0">
         <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
-        <span className="truncate">{error.message}</span>
+        <span className="truncate">{workspaceName && `${workspaceName}: `}{error.message}</span>
       </div>
       <button
         onClick={clearError}

@@ -10,6 +10,8 @@ import { LocalFinanceRepository } from '../../repositories/local-finance-reposit
 import * as clientModule from '../../supabase/client';
 import { PaymentModal } from '../../../components/transactions/PaymentModal';
 import { GlobalErrorBanner } from '../../../components/shared/GlobalErrorBanner';
+import GoalsPage from '../../../app/(dashboard)/goals/page';
+import { markOperationReplay } from '../../repositories/operation-result';
 
 function createMockSnapshot(overrides?: Partial<FinanceState>): FinanceState {
   return {
@@ -165,6 +167,12 @@ function createMockSnapshot(overrides?: Partial<FinanceState>): FinanceState {
 
 function createMockRepository(snapshot: FinanceState) {
   const repo: FinanceRepository = {
+    recordGoalDeposit: vi.fn().mockImplementation(async (_ws, goalId, accountId, amount) => {
+      const goal = snapshot.allGoals.find((g) => g.id === goalId)!;
+      const account = snapshot.allAccounts.find((a) => a.id === accountId)!;
+      goal.current_amount += amount;
+      account.current_balance -= amount;
+    }),
     loadSnapshot: vi.fn().mockImplementation(async (wsId: string) => ({
       ...snapshot,
       activeWorkspaceId: wsId,
@@ -319,6 +327,208 @@ import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
   setupFinanceHarness();
   const activeRoots: any[] = [];
+  it('preserves a transaction edit queued behind creation instead of replacing it with the old reply', async () => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.saveTransaction = vi.fn().mockImplementation(async (data) => { if (!data.id) { await gate; return { ...data, id: 'canonical-transaction', created_at: '2026-01-01' }; } return { ...data, created_at: '2026-01-01' }; });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      const created = getCtx().addTransaction({ description: 'Original', amount: 20, type: 'expense', status: 'pending', transaction_date: '2050-10-01', due_date: '2050-10-01' });
+      getCtx().updateTransaction(created.id, { description: 'Edited' });
+    });
+    await act(async () => { release(); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(repo.saveTransaction).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'canonical-transaction', description: 'Edited' }));
+    expect(getCtx().transactions.find((t) => t.id === 'canonical-transaction')?.description).toBe('Edited');
+  });
+  it('persists a duplicated expense with its person payer and typed split references', async () => {
+    const snapshot = createMockSnapshot();
+    snapshot.allPeople = [{ id: 'person-copy', workspace_id: 'ws-1', name: 'Copy fixture', archived: false, created_at: '2026-01-01', updated_at: '2026-01-01' }];
+    snapshot.allTransactions[0] = { ...snapshot.allTransactions[0], amount: 100, status: 'pending', paid_by_member_id: null, paid_by_person_id: 'person-copy', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 50 }, { person_id: 'person-copy', amount: 50 }] };
+    const repo = createMockRepository(snapshot);
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().duplicateTransaction('tx-1'); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(repo.saveTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      paid_by_person_id: 'person-copy', splits: [expect.objectContaining({ member_id: 'wsm-1', amount: 50 }), expect.objectContaining({ person_id: 'person-copy', amount: 50 })],
+    }));
+    expect(getCtx().error).toBeNull();
+  });
+  it.each(['payment', 'bill', 'transfer', 'settlement', 'transaction'])('does not overwrite workspace B when a recovered %s finishes in A', async (kind) => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    snapshot.allTransactions[0] = { ...snapshot.allTransactions[0], amount: 100, paid_amount: 0, status: 'pending', paid_by_member_id: 'wsm-1', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 50 }, { member_id: 'wsm-2', amount: 50 }] };
+    let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
+    const recovered = async (data: any) => { await gate; return markOperationReplay({ ...data, id: 'recovered', created_at: '2026-01-01' }, true); };
+    repo.savePayment = vi.fn().mockImplementation(recovered); repo.saveTransfer = vi.fn().mockImplementation(recovered); repo.saveSettlement = vi.fn().mockImplementation(recovered); repo.saveTransaction = vi.fn().mockImplementation(recovered);
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' }); let done!: Promise<any>;
+    await act(async () => {
+      if (kind === 'transaction') done = getCtx().addTransactionAsync({ description: 'Recovered transaction', amount: 30, type: 'expense', status: 'paid', account_id: 'acc-1', transaction_date: '2050-10-01', due_date: '2050-10-01', operation_key: 'key' });
+      if (kind === 'payment') done = getCtx().recordPaymentAsync({ transaction_id: 'tx-1', account_id: 'acc-1', amount: 20, payment_date: '2050-10-01', operation_key: 'key' });
+      if (kind === 'bill') done = getCtx().payCreditCardBillAsync('bill-1', 'acc-1', 20, '2050-10-01', undefined, 'key');
+      if (kind === 'transfer') done = getCtx().createTransferAsync('acc-1', 'acc-2', 20, '2050-10-01', undefined, 'key');
+      if (kind === 'settlement') done = getCtx().recordSettlementAsync({ from_member_id: 'wsm-2', to_member_id: 'wsm-1', amount: 20, settlement_date: '2050-10-01', operation_key: 'key' });
+      await getCtx().setActiveWorkspaceId('ws-2');
+    });
+    await act(async () => { release(); await done; });
+    expect(getCtx().activeWorkspace.id).toBe('ws-2');
+    expect(repo.loadSnapshot).toHaveBeenLastCalledWith('ws-1');
+  });
+  it.each(['card', 'category', 'goal'])('preserves a %s edit queued behind creation through UUID reconciliation', async (kind) => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
+    const method = kind === 'card' ? 'saveCreditCard' : kind === 'category' ? 'saveCategory' : 'saveGoal';
+    const original = repo[method];
+    repo[method] = vi.fn().mockImplementation(async (data) => {
+      if (!data.id) { await gate; return { ...data, id: 'canonical-created', created_at: '2026-01-01' }; }
+      return original(data as any);
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      if (kind === 'card') { const item = getCtx().addCreditCard({ name: 'Original', institution: 'Fixture', credit_limit: 100, closing_day: 25, due_day: 5, color: '#000000', active: true }); getCtx().updateCreditCard(item.id, { name: 'Edited' }); }
+      if (kind === 'category') { const item = getCtx().addCategory({ name: 'Original', type: 'expense', color: '#000000', icon: 'tag', active: true }); getCtx().updateCategory(item.id, { name: 'Edited' }); }
+      if (kind === 'goal') { const item = getCtx().addGoal({ name: 'Original', target_amount: 100, current_amount: 0, status: 'in_progress', color: '#000000', icon: 'target' }); getCtx().updateGoal(item.id, { name: 'Edited' }); }
+    });
+    await act(async () => { release(); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(repo[method]).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'canonical-created', name: 'Edited' }));
+  });
+  it.each(['payment', 'bill', 'transfer', 'settlement', 'transaction'])('reconciles authoritative shared entities after recovering a %s attempt', async (kind) => {
+    const initial = createMockSnapshot();
+    initial.allTransactions[0] = { ...initial.allTransactions[0], amount: 100, paid_amount: 0, status: 'pending', paid_by_member_id: 'wsm-1', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 50 }, { member_id: 'wsm-2', amount: 50 }] };
+    const fresh = createMockSnapshot();
+    fresh.allAccounts = fresh.allAccounts.map((a) => a.id === 'acc-1' ? { ...a, current_balance: 900, name: 'Other session change' } : a);
+    const repo = createMockRepository(initial);
+    (repo.loadSnapshot as any).mockResolvedValueOnce(initial).mockResolvedValue(fresh);
+    const replay = async (data: any) => markOperationReplay({ ...data, id: 'confirmed-result', created_at: '2026-01-01' }, true);
+    repo.savePayment = vi.fn().mockImplementation(replay);
+    repo.saveTransfer = vi.fn().mockImplementation(replay);
+    repo.saveSettlement = vi.fn().mockImplementation(replay);
+    repo.saveTransaction = vi.fn().mockImplementation(replay);
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      if (kind === 'transaction') await getCtx().addTransactionAsync({ description: 'Recovered transaction', amount: 30, type: 'expense', status: 'paid', account_id: 'acc-1', transaction_date: '2050-10-01', due_date: '2050-10-01', operation_key: 'key' });
+      if (kind === 'payment') await getCtx().recordPaymentAsync({ transaction_id: 'tx-1', account_id: 'acc-1', amount: 30, payment_date: '2050-10-01', operation_key: 'key' });
+      if (kind === 'bill') await getCtx().payCreditCardBillAsync('bill-1', 'acc-1', 30, '2050-10-01', undefined, 'key');
+      if (kind === 'transfer') await getCtx().createTransferAsync('acc-1', 'acc-2', 30, '2050-10-01', undefined, 'key');
+      if (kind === 'settlement') await getCtx().recordSettlementAsync({ from_member_id: 'wsm-2', to_member_id: 'wsm-1', amount: 20, settlement_date: '2050-10-01', operation_key: 'key' });
+    });
+    expect(getCtx().accounts.find((a) => a.id === 'acc-1')).toMatchObject({ current_balance: 900, name: 'Other session change' });
+    expect(repo.loadSnapshot).toHaveBeenCalledTimes(2);
+  });
+  it('resolves an account UUID only when the queued edit runs and keeps the edited name', async () => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const original = repo.saveAccount;
+    repo.saveAccount = vi.fn().mockImplementation(async (data) => {
+      if (!data.id) { await gate; return { ...data, id: 'account-canonical', created_at: '2026-01-01' }; }
+      return original(data);
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      const account = getCtx().addAccount({ name: 'Original', type: 'cash', institution: 'Fixture', initial_balance: 0, current_balance: 0, color: '#000000', active: true });
+      getCtx().updateAccount(account.id, { name: 'Edited' });
+    });
+    await act(async () => { release(); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(repo.saveAccount).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'account-canonical', name: 'Edited' }));
+    expect(getCtx().accounts.find((a) => a.id === 'account-canonical')?.name).toBe('Edited');
+  });
+
+  it('keeps the goal dialog busy during persistence and open with a visible error after rejection', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    let rejectDeposit!: (error: Error) => void;
+    repo.recordGoalDeposit = vi.fn().mockImplementation(() => new Promise<void>((_, reject) => { rejectDeposit = reject; }));
+    const { container } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' }, undefined, <GoalsPage />);
+    const text = (node: any): string => node.nodeType === 3 ? node.nodeValue ?? '' : node.textContent || (node.childNodes ?? []).map(text).join('');
+    const open = findNode(container, (n) => n.tagName === 'BUTTON' && text(n).includes('Guardar Dinheiro nesta Meta'));
+    await act(async () => getReactProps(open).onClick());
+    const form = findNode(container, (n) => n.tagName === 'FORM');
+    await act(async () => {
+      getReactProps(findNode(form, (n) => n.tagName === 'SELECT')).onChange({ target: { value: 'acc-1' } });
+      getReactProps(findNode(form, (n) => n.tagName === 'INPUT' && getReactProps(n)?.placeholder === '0,00')).onChange({ target: { value: '12.34' } });
+    });
+    let submitted!: Promise<void>;
+    await act(async () => {
+      submitted = getReactProps(form).onSubmit({ preventDefault() {} });
+      await getReactProps(form).onSubmit({ preventDefault() {} });
+    });
+    const submit = findNode(form, (n) => n.tagName === 'BUTTON' && getReactProps(n)?.type === 'submit');
+    expect(getReactProps(submit).disabled).toBe(true);
+    expect(repo.recordGoalDeposit).toHaveBeenCalledTimes(1);
+    await act(async () => { rejectDeposit(new Error('Deposit rejected by bank')); await submitted; });
+    expect(findNode(container, (n) => n.tagName === 'FORM')).toBeTruthy();
+    expect(findNodes(container, (n) => getReactProps(n)?.role === 'alert').some((n) => text(n).includes('Deposit rejected by bank'))).toBe(true);
+    expect(getReactProps(findNode(form, (n) => n.tagName === 'BUTTON' && getReactProps(n)?.type === 'submit')).disabled).toBe(false);
+  });
+
+  it('replaces an optimistic card bill with its canonical bill after atomic transaction creation', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.saveTransaction = vi.fn().mockImplementation(async (data) => {
+      const bill = { ...snapshot.allCreditCardBills[0], id: 'canonical-bill', reference_month: '2026-10', closing_date: '2026-10-25', due_date: '2026-11-05', total_amount: data.amount };
+      snapshot.allCreditCardBills.push(bill);
+      const tx = { ...data, id: 'canonical-tx', credit_card_bill_id: bill.id, due_date: bill.due_date, created_at: '2026-01-01' };
+      snapshot.allTransactions.push(tx);
+      return tx;
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    let optimisticBill = '';
+    await act(async () => {
+      const tx = getCtx().addTransaction({ description: 'Card once', credit_card_id: 'card-1', amount: 25, type: 'expense', status: 'pending', transaction_date: '2026-09-26', due_date: '2026-09-26' });
+      optimisticBill = tx.credit_card_bill_id!;
+    });
+    await act(async () => { await getCtx().refreshData(); });
+    expect(getCtx().creditCardBills.some((b) => b.id === optimisticBill)).toBe(false);
+    expect(getCtx().creditCardBills.find((b) => b.id === 'canonical-bill')?.total_amount).toBe(25);
+    expect(getCtx().transactions.find((t) => t.id === 'canonical-tx')?.credit_card_bill_id).toBe('canonical-bill');
+  });
+
+  it('awaits atomic goal debit, deduplicates submissions and refreshes authoritative balances', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const initialGoal = snapshot.allGoals[0].current_amount;
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      const first = getCtx().depositGoalAsync('goal-1', 10.075, 'acc-1', 'same-key');
+      expect(getCtx().depositGoalAsync('goal-1', 10.075, 'acc-1', 'same-key')).toBe(first);
+      expect(() => getCtx().depositGoalAsync('goal-1', 20, 'acc-1', 'same-key')).toThrow(/dados diferentes/);
+      await first;
+    });
+    expect(repo.recordGoalDeposit).toHaveBeenCalledExactlyOnceWith('ws-1', 'goal-1', 'acc-1', 10.08, 'same-key');
+    expect(repo.saveGoal).not.toHaveBeenCalled();
+    expect(repo.saveAccount).not.toHaveBeenCalled();
+    expect(getCtx().accounts.find((a) => a.id === 'acc-1')?.current_balance).toBe(989.92);
+    expect(getCtx().goals.find((g) => g.id === 'goal-1')?.current_amount).toBe(initialGoal + 10.08);
+    await act(async () => { await getCtx().depositGoalAsync('goal-1', 10.075, 'acc-1', 'same-key'); });
+    expect(repo.recordGoalDeposit).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unsupported atomic deposits and allows the same key to retry after failure', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const deposit = repo.recordGoalDeposit;
+    delete repo.recordGoalDeposit;
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      await expect(getCtx().depositGoalAsync('goal-1', 10, 'acc-1', 'retry-key')).rejects.toThrow(/atômicos/);
+    });
+    await act(async () => { await getCtx().refreshData(); });
+    expect(getCtx().accounts.find((a) => a.id === 'acc-1')?.current_balance).toBe(1000);
+    repo.recordGoalDeposit = deposit;
+    await act(async () => { await getCtx().depositGoalAsync('goal-1', 10, 'acc-1', 'retry-key'); });
+    expect(getCtx().accounts.find((a) => a.id === 'acc-1')?.current_balance).toBe(990);
+  });
+
+  it('keeps the void deposit API compatible while reporting remote failure and rejecting foreign accounts', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.recordGoalDeposit = vi.fn().mockRejectedValue(new Error('Deposit rejected'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    expect(() => getCtx().depositGoal('goal-1', 10, 'foreign')).toThrow(/não encontrada/);
+    await act(async () => { getCtx().depositGoal('goal-1', 10, 'acc-1'); });
+    await act(async () => { await getCtx().refreshData(); });
+    expect(getCtx().accounts.find((a) => a.id === 'acc-1')?.current_balance).toBe(1000);
+    expect(repo.saveGoal).not.toHaveBeenCalled();
+  });
 
   afterEach(async () => {
     while (activeRoots.length > 0) {
@@ -436,6 +646,45 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     expect(getCtx().transactions[0].description).toBe('Supermercado Central');
     expect(repo.getWorkspaces).toHaveBeenCalledWith('usr-1');
     expect(repo.loadSnapshot).toHaveBeenCalledWith('ws-1');
+    expect(getCtx().isWorkspaceReadOnly).toBe(false);
+  });
+
+  it('restaura o workspace ativo salvo para o mesmo usuário no modo Supabase', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    localStorage.setItem('fincontrol_active_workspace:usr-1', 'ws-2');
+
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+
+    expect(repo.loadSnapshot).toHaveBeenCalledWith('ws-2');
+    expect(getCtx().activeWorkspace.id).toBe('ws-2');
+    expect(localStorage.getItem('fincontrol_active_workspace:usr-1')).toBe('ws-2');
+  });
+
+  it('ignora a preferência de workspace que o usuário atual não pode acessar', async () => {
+    const snapshot = createMockSnapshot({
+      allWorkspaces: [createMockSnapshot().allWorkspaces[0]],
+    });
+    const repo = createMockRepository(snapshot);
+    localStorage.setItem('fincontrol_active_workspace:usr-1', 'ws-foreign');
+
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+
+    expect(repo.loadSnapshot).toHaveBeenCalledWith('ws-1');
+    expect(getCtx().activeWorkspace.id).toBe('ws-1');
+  });
+
+  it('marca o contexto como somente leitura quando o usuário ativo é Viewer', async () => {
+    const snapshot = createMockSnapshot({
+      allWorkspaceMembers: [
+        { id: 'wsm-viewer', workspace_id: 'ws-1', user_id: 'usr-1', role: 'viewer', created_at: '2026-01-01' },
+      ],
+    });
+    const repo = createMockRepository(snapshot);
+
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+
+    expect(getCtx().isWorkspaceReadOnly).toBe(true);
   });
 
   it('deve aguardar auth se auth estiver em loading', async () => {
@@ -502,7 +751,14 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
 
   it('deve criar workspace padrão automaticamente para novo usuário sem workspaces', async () => {
     const snapshot = createMockSnapshot({
-      allWorkspaces: [],
+      allWorkspaces: [{
+        id: 'ws-remote-created',
+        name: 'Meu Workspace',
+        owner_id: 'usr-new-id',
+        currency: 'BRL',
+        tracking_mode: 'full',
+        created_at: '2026-01-01',
+      }],
     });
     const repo = createMockRepository(snapshot);
     (repo.getWorkspaces as any).mockResolvedValueOnce([]);
@@ -523,6 +779,7 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
       tracking_mode: 'full',
     });
     expect(repo.loadSnapshot).toHaveBeenCalledWith('ws-remote-created');
+    expect(localStorage.getItem('fincontrol_active_workspace:usr-new-id')).toBe('ws-remote-created');
   });
 
   it('deve parar com erro de autenticação no modo Supabase se auth.user for nulo', async () => {
@@ -879,6 +1136,7 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
 
     expect(repo.loadSnapshot).toHaveBeenCalledWith('ws-2');
     expect(getCtx().activeWorkspace.id).toBe('ws-2');
+    expect(localStorage.getItem('fincontrol_active_workspace:usr-1')).toBe('ws-2');
   });
 
   it('deve registrar erro se alternância de workspace falhar', async () => {

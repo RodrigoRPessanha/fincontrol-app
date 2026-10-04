@@ -22,6 +22,7 @@ import {
 } from '../types';
 import { FinanceState } from '../context/finance-state';
 import { FinanceRepository } from './finance-repository';
+import { markOperationReplay } from './operation-result';
 import { RepositoryError } from './repository-errors';
 import { roundCurrency } from '../financial-engine';
 import {
@@ -549,7 +550,20 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     );
   }
 
+  private async createOperation(name: string, payload: Record<string, unknown>, key?: string) {
+    if (!key) return { ...await this.client.rpc(name as any, payload as any), recovered: false };
+    const prior = await this.client.from('financial_operations').select('result_id')
+      .eq('workspace_id', payload.p_workspace_id as string).eq('operation_kind', name).eq('operation_key', key).maybeSingle();
+    if (prior.error) throw RepositoryError.fromPostgrestError(prior.error, 'financial_operations');
+    const response = await this.client.rpc('fn_execute_financial_operation', {
+      p_workspace_id: payload.p_workspace_id as string, p_operation_kind: name,
+      p_operation_key: key, p_payload: payload as Json,
+    });
+    return { ...response, recovered: prior.data !== null };
+  }
+
   async saveTransaction(transaction: Omit<Transaction, 'id' | 'created_at'> & { id?: string }): Promise<Transaction> {
+    let recovered = false;
     let savedRow: DbTables['transactions']['Row'];
 
     if (transaction.id) {
@@ -588,7 +602,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       // Criação 100% atômica via RPC fn_create_transaction_with_splits:
       // grava a transação e seus rateios na mesma transação SQL.
       // Se os rateios violarem soma ou integridade, a transação sofre rollback total.
-      const { data: txId, error: rpcErr } = await this.client.rpc('fn_create_transaction_with_splits', {
+      const { data: txId, error: rpcErr, recovered: replayed } = await this.createOperation('fn_create_transaction_with_splits', {
         p_workspace_id: transaction.workspace_id,
         p_description: transaction.description,
         p_amount: transaction.amount,
@@ -606,8 +620,9 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_paid_by_person_id: (transaction.paid_by_person_id ?? null) as string | null,
         p_split_type: (transaction.split_type ?? null) as string | null,
         p_splits: (transaction.splits ?? []) as unknown as Json,
-      } as any);
+      }, transaction.operation_key);
 
+      recovered = replayed;
       if (rpcErr || !txId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao criar transação atômica com rateios' }, 'transactions');
       }
@@ -621,10 +636,10 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       savedRow = fetchRow;
     }
 
-    return {
+    return markOperationReplay({
       ...mapTransactionRowToDomain(savedRow, undefined, transaction.paid_amount),
       splits: transaction.splits,
-    };
+    }, recovered);
   }
 
   async deleteTransaction(id: string): Promise<void> {
@@ -668,6 +683,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async savePurchase(purchase: Omit<Purchase, 'id' | 'created_at'> & { id?: string }): Promise<Purchase> {
+    let recovered = false;
     let savedRow: DbTables['purchases']['Row'];
 
     if (purchase.id) {
@@ -702,7 +718,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       // Criação 100% atômica via RPC fn_create_purchase_with_splits:
       // gera a compra, suas parcelas e seus rateios em uma única transação SQL.
       // Se qualquer regra falhar, nada é persistido.
-      const { data: purchaseId, error: rpcErr } = await this.client.rpc('fn_create_purchase_with_splits', {
+      const { data: purchaseId, error: rpcErr, recovered: replayed } = await this.createOperation('fn_create_purchase_with_splits', {
         p_workspace_id: purchase.workspace_id,
         p_description: purchase.description,
         p_total_amount: purchase.total_amount,
@@ -717,8 +733,9 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_paid_by_person_id: (purchase.paid_by_person_id ?? null) as string | null,
         p_split_type: (purchase.split_type ?? null) as string | null,
         p_splits: (purchase.splits ?? []) as unknown as Json,
-      } as any);
+      }, purchase.operation_key);
 
+      recovered = replayed;
       if (rpcErr || !purchaseId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao criar compra atômica com rateios' }, 'purchases');
       }
@@ -732,10 +749,10 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       savedRow = fetchRow;
     }
 
-    return {
+    return markOperationReplay({
       ...mapPurchaseRowToDomain(savedRow),
       splits: purchase.splits,
-    };
+    }, recovered);
   }
 
   async deletePurchase(id: string): Promise<void> {
@@ -807,7 +824,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     // e atualiza o status/valor pago da obrigação na mesma transação SQL.
     const hasObligation = Boolean(payment.transaction_id || payment.installment_id || payment.credit_card_bill_id);
     if (hasObligation) {
-      const { data: paymentId, error: rpcErr } = await this.client.rpc('fn_record_payment', {
+      const { data: paymentId, error: rpcErr, recovered } = await this.createOperation('fn_record_payment', {
         p_workspace_id: payment.workspace_id,
         p_account_id: (payment.account_id ?? null) as any,
         p_amount: payment.amount,
@@ -818,7 +835,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         p_payment_method_id: (payment.payment_method_id ?? null) as string | null,
         p_notes: (payment.notes ?? null) as string | null,
         p_affects_balance: payment.affects_balance,
-      } as any);
+      }, payment.operation_key);
 
       if (rpcErr || !paymentId) {
         throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao registrar pagamento atômico' }, 'payments');
@@ -830,7 +847,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
         .eq('id', paymentId)
         .single();
       if (fetchErr) throw RepositoryError.fromPostgrestError(fetchErr, 'payments');
-      return mapPaymentRowToDomain(fetchRow);
+      return markOperationReplay(mapPaymentRowToDomain(fetchRow), recovered);
     }
 
     // No FinControl, todo pagamento deve estar estritamente vinculado a uma obrigação (fatura, parcela ou transação)
@@ -900,7 +917,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
 
     // Criação atômica via RPC fn_create_transfer:
     // debita conta origem, credita conta destino e garante idempotência
-    const { data: transferId, error: rpcErr } = await this.client.rpc('fn_create_transfer', {
+    const { data: transferId, error: rpcErr, recovered } = await this.createOperation('fn_create_transfer', {
       p_workspace_id: transfer.workspace_id,
       p_from_account_id: transfer.from_account_id,
       p_to_account_id: transfer.to_account_id,
@@ -908,7 +925,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       p_transfer_date: transfer.transfer_date,
       p_notes: (transfer.notes ?? null) as string | null,
       p_idempotency_key: (transfer as any).idempotency_key,
-    } as any);
+    }, transfer.operation_key);
 
     if (rpcErr || !transferId) {
       throw RepositoryError.fromPostgrestError(rpcErr ?? { message: 'Falha ao criar transferência atômica' }, 'transfers');
@@ -920,7 +937,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       .eq('id', transferId)
       .single();
     if (fetchErr) throw RepositoryError.fromPostgrestError(fetchErr, 'transfers');
-    return mapTransferRowToDomain(fetchRow);
+    return markOperationReplay(mapTransferRowToDomain(fetchRow), recovered);
   }
 
   async deleteTransfer(id: string): Promise<void> {
@@ -976,8 +993,16 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async deleteRecurring(id: string): Promise<void> {
-    const { error } = await this.client.from('recurring_transactions').delete().eq('id', id);
-    if (error) throw RepositoryError.fromPostgrestError(error, 'recurring_transactions');
+    const visible = await this.client.from('recurring_transactions').select('id').eq('id', id).maybeSingle();
+    if (visible.error) throw RepositoryError.fromPostgrestError(visible.error, 'recurring_transactions');
+    if (!visible.data) return; // Already absent or outside the caller's readable scope.
+    const deleted = await this.client.from('recurring_transactions').delete().eq('id', id).select('id');
+    if (deleted.error) throw RepositoryError.fromPostgrestError(deleted.error, 'recurring_transactions');
+    if (deleted.data?.some((row) => row.id === id)) return;
+    // Another authorized session may have deleted it concurrently; that is also success.
+    const remaining = await this.client.from('recurring_transactions').select('id').eq('id', id).maybeSingle();
+    if (remaining.error) throw RepositoryError.fromPostgrestError(remaining.error, 'recurring_transactions');
+    if (remaining.data) throw new RepositoryError('Você não tem permissão para excluir esta recorrência.', 'FORBIDDEN', undefined, 'recurring_transactions');
   }
 
   // ==========================================
@@ -1017,6 +1042,14 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   async deleteBudget(id: string): Promise<void> {
     const { error } = await this.client.from('budgets').delete().eq('id', id);
     if (error) throw RepositoryError.fromPostgrestError(error, 'budgets');
+  }
+
+  async recordGoalDeposit(workspaceId: string, goalId: string, accountId: string, amount: number, idempotencyKey: string): Promise<void> {
+    const { error } = await this.client.rpc('fn_record_goal_deposit', {
+      p_workspace_id: workspaceId, p_goal_id: goalId, p_account_id: accountId,
+      p_amount: amount, p_idempotency_key: idempotencyKey,
+    });
+    if (error) throw RepositoryError.fromPostgrestError(error, 'goal_deposits');
   }
 
   async getGoals(workspaceId: string): Promise<FinancialGoal[]> {
@@ -1088,7 +1121,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       p_to_person_id: settlement.to_person_id || undefined,
     };
 
-    const { data: settlementId, error } = await this.client.rpc('fn_record_settlement', payload);
+    const { data: settlementId, error, recovered } = await this.createOperation('fn_record_settlement', payload, settlement.operation_key);
     if (error) throw RepositoryError.fromPostgrestError(error, 'settlements');
 
     const { data, error: fetchError } = await this.client
@@ -1098,7 +1131,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       .single();
     if (fetchError) throw RepositoryError.fromPostgrestError(fetchError, 'settlements');
 
-    return mapSettlementRowToDomain(data);
+    return markOperationReplay(mapSettlementRowToDomain(data), recovered);
   }
 
   async deleteSettlement(id: string): Promise<void> {

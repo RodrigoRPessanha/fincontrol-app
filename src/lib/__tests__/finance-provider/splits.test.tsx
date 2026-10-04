@@ -546,7 +546,8 @@ describe('FinanceProvider - Rateios e Acertos', () => {
       expect(trioMembers).toHaveLength(3);
       const [mA, mB, mC] = trioMembers.map((m) => m.id);
 
-      // Prova 7: equal omitindo terceiro membro (A=50, B=50; C omitido) deve ser rejeitado
+      // Prova 7: equal omitindo terceiro membro (A=50, B=50; C omitido) deve ser aceito
+      await act(async () => {
       expect(() => {
         getCtx().addTransaction({
           description: 'Equal omitindo C',
@@ -562,7 +563,7 @@ describe('FinanceProvider - Rateios e Acertos', () => {
           due_date: '2026-09-18',
           status: 'pending',
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'/i);
+      }).not.toThrow();
 
       expect(() => {
         getCtx().createInstallmentPurchase({
@@ -577,9 +578,9 @@ describe('FinanceProvider - Rateios e Acertos', () => {
             { member_id: mB, amount: 50 },
           ],
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'/i);
+      }).not.toThrow();
 
-      // Prova 8: full_other omitindo outro não pagador (A paga, B=100; C omitido) deve ser rejeitado
+      // Prova 8: full_other omitindo outro não pagador (A paga, B=100; C omitido) deve ser aceito
       expect(() => {
         getCtx().addTransaction({
           description: 'Full Other omitindo C',
@@ -594,7 +595,7 @@ describe('FinanceProvider - Rateios e Acertos', () => {
           due_date: '2026-09-18',
           status: 'pending',
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'/i);
+      }).not.toThrow();
 
       expect(() => {
         getCtx().createInstallmentPurchase({
@@ -608,7 +609,12 @@ describe('FinanceProvider - Rateios e Acertos', () => {
             { member_id: mB, amount: 100 },
           ],
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'/i);
+      }).not.toThrow();
+      });
+      expect(getCtx().transactions.find((t) => t.description === 'Equal omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mA, 50], [mB, 50]]);
+      expect(getCtx().purchases.find((p) => p.description === 'Parcelamento Equal omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mA, 50], [mB, 50]]);
+      expect(getCtx().transactions.find((t) => t.description === 'Full Other omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mB, 100]]);
+      expect(getCtx().purchases.find((p) => p.description === 'Parcelamento Full Other omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mB, 100]]);
     });
 
     it('recordSettlement com payment_account_id: valida que conta pertence ao workspace e está ativa', async () => {
@@ -862,7 +868,7 @@ describe('FinanceProvider - Rateios e Acertos', () => {
           transaction_date: '2026-08-01',
           due_date: '2026-08-01',
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'/);
+      }).not.toThrow();
 
       // 3b. splits.length (2) correto e soma correta (100), mas valores divergentes (70/30 vs 50/50 canônico) -> cobre linha 182
       expect(() => {

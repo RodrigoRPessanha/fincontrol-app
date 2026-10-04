@@ -637,6 +637,12 @@ SELECT '44444444-4444-4444-8444-444444444444'::UUID, '22222222-2222-4222-8222-22
 SET LOCAL "request.jwt.claim.sub" = '90000000-0000-0000-0000-000000000001';
 SET LOCAL role = 'authenticated';
 
+-- Este bloco cria novas associações; restaura a pessoa antes de reutilizá-la.
+RESET role;
+UPDATE public.people SET archived=false, name='Carlos Silva (Restaurado)' WHERE id='90000000-0000-0000-0000-000000000010';
+SET LOCAL request.jwt.claim.sub='90000000-0000-0000-0000-000000000001';
+SET LOCAL role='authenticated';
+
 -- 10.1. Atualizar rateio de transação via fn_set_transaction_splits com person_id
 INSERT INTO tap_runs SELECT lives_ok(
     'SELECT fn_set_transaction_splits(

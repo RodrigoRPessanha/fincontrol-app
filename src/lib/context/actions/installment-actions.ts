@@ -1,3 +1,4 @@
+import { findOperationReceipt } from './operation-receipts';
 import {
   Purchase,
   Installment,
@@ -9,6 +10,7 @@ import {
   resolveTransactionAccountId,
   validateTransactionBusinessRules,
   splitInstallments,
+  normalizeMoney,
 } from '../../financial-engine';
 import {
   getOrCreateAndAddItemToBill,
@@ -21,6 +23,7 @@ import { FinanceActionDeps } from './types';
 export function createInstallmentPurchase(
   deps: FinanceActionDeps,
   data: {
+    operation_key?: string;
     description: string;
     total_amount: number;
     installment_count: number;
@@ -36,12 +39,12 @@ export function createInstallmentPurchase(
     splits?: TransactionSplit[];
   }
 ): Purchase {
-  if (typeof data.total_amount !== 'number' || !Number.isFinite(data.total_amount) || data.total_amount <= 0) {
-    throw new Error('O valor total da compra parcelada deve ser maior que zero.');
-  }
+  data = { ...data, total_amount: normalizeMoney(data.total_amount, 'O valor total da compra parcelada') };
 
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allPurchases, targetWsId, data.operation_key, data);
+  if (receipt) return receipt;
   const effectiveAccountId = resolveTransactionAccountId(
     data.payment_method_id,
     data.account_id,

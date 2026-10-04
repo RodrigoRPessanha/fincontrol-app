@@ -351,6 +351,102 @@ export type Database = {
           },
         ]
       }
+      financial_operations: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          operation_key: string
+          operation_kind: string
+          payload: Json
+          result_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          operation_key: string
+          operation_kind: string
+          payload: Json
+          result_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          operation_key?: string
+          operation_kind?: string
+          payload?: Json
+          result_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "financial_operations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      goal_deposits: {
+        Row: {
+          account_id: string
+          amount: number
+          created_at: string
+          created_by: string
+          goal_id: string
+          id: string
+          idempotency_key: string
+          reversed_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          amount: number
+          created_at?: string
+          created_by: string
+          goal_id: string
+          id?: string
+          idempotency_key: string
+          reversed_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          amount?: number
+          created_at?: string
+          created_by?: string
+          goal_id?: string
+          id?: string
+          idempotency_key?: string
+          reversed_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "goal_deposits_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "goal_deposits_goal_id_fkey"
+            columns: ["goal_id"]
+            isOneToOne: false
+            referencedRelation: "financial_goals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "goal_deposits_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       installments: {
         Row: {
           amount: number
@@ -474,6 +570,7 @@ export type Database = {
           id: string
           installment_id: string | null
           notes: string | null
+          operation_key: string | null
           payment_date: string
           payment_method_id: string | null
           transaction_id: string | null
@@ -489,6 +586,7 @@ export type Database = {
           id?: string
           installment_id?: string | null
           notes?: string | null
+          operation_key?: string | null
           payment_date?: string
           payment_method_id?: string | null
           transaction_id?: string | null
@@ -504,6 +602,7 @@ export type Database = {
           id?: string
           installment_id?: string | null
           notes?: string | null
+          operation_key?: string | null
           payment_date?: string
           payment_method_id?: string | null
           transaction_id?: string | null
@@ -698,6 +797,7 @@ export type Database = {
           description: string
           id: string
           installment_count: number
+          operation_key: string | null
           paid_by_member_id: string | null
           paid_by_person_id: string | null
           paid_installments_count: number | null
@@ -717,6 +817,7 @@ export type Database = {
           description: string
           id?: string
           installment_count: number
+          operation_key?: string | null
           paid_by_member_id?: string | null
           paid_by_person_id?: string | null
           paid_installments_count?: number | null
@@ -736,6 +837,7 @@ export type Database = {
           description?: string
           id?: string
           installment_count?: number
+          operation_key?: string | null
           paid_by_member_id?: string | null
           paid_by_person_id?: string | null
           paid_installments_count?: number | null
@@ -916,6 +1018,7 @@ export type Database = {
           from_person_id: string | null
           id: string
           notes: string | null
+          operation_key: string | null
           payment_account_id: string | null
           settlement_date: string
           to_member_id: string | null
@@ -931,6 +1034,7 @@ export type Database = {
           from_person_id?: string | null
           id?: string
           notes?: string | null
+          operation_key?: string | null
           payment_account_id?: string | null
           settlement_date?: string
           to_member_id?: string | null
@@ -946,6 +1050,7 @@ export type Database = {
           from_person_id?: string | null
           id?: string
           notes?: string | null
+          operation_key?: string | null
           payment_account_id?: string | null
           settlement_date?: string
           to_member_id?: string | null
@@ -1083,6 +1188,7 @@ export type Database = {
           due_date: string
           id: string
           notes: string | null
+          operation_key: string | null
           paid_at: string | null
           paid_by_member_id: string | null
           paid_by_person_id: string | null
@@ -1107,6 +1213,7 @@ export type Database = {
           due_date?: string
           id?: string
           notes?: string | null
+          operation_key?: string | null
           paid_at?: string | null
           paid_by_member_id?: string | null
           paid_by_person_id?: string | null
@@ -1131,6 +1238,7 @@ export type Database = {
           due_date?: string
           id?: string
           notes?: string | null
+          operation_key?: string | null
           paid_at?: string | null
           paid_by_member_id?: string | null
           paid_by_person_id?: string | null
@@ -1225,6 +1333,7 @@ export type Database = {
           id: string
           idempotency_key: string | null
           notes: string | null
+          operation_key: string | null
           to_account_id: string
           transfer_date: string
           workspace_id: string
@@ -1237,6 +1346,7 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           notes?: string | null
+          operation_key?: string | null
           to_account_id: string
           transfer_date?: string
           workspace_id: string
@@ -1249,6 +1359,7 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           notes?: string | null
+          operation_key?: string | null
           to_account_id?: string
           transfer_date?: string
           workspace_id?: string
@@ -1491,6 +1602,15 @@ export type Database = {
         Args: { p_transfer_id: string; p_workspace_id: string }
         Returns: boolean
       }
+      fn_execute_financial_operation: {
+        Args: {
+          p_operation_key: string
+          p_operation_kind: string
+          p_payload: Json
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       fn_get_or_create_credit_card_bill: {
         Args: {
           p_credit_card_id: string
@@ -1502,6 +1622,20 @@ export type Database = {
       fn_materialize_recurring_transactions: {
         Args: { p_target_date?: string; p_workspace_id?: string }
         Returns: Json
+      }
+      fn_normalize_money: {
+        Args: { p_rule?: string; p_value: number }
+        Returns: number
+      }
+      fn_record_goal_deposit: {
+        Args: {
+          p_account_id: string
+          p_amount: number
+          p_goal_id: string
+          p_idempotency_key: string
+          p_workspace_id: string
+        }
+        Returns: string
       }
       fn_record_payment: {
         Args: {
@@ -1531,6 +1665,10 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: string
+      }
+      fn_reverse_goal_deposit: {
+        Args: { p_deposit_id: string; p_workspace_id: string }
+        Returns: undefined
       }
       fn_set_purchase_splits: {
         Args: { p_purchase_id: string; p_splits: Json; p_workspace_id: string }

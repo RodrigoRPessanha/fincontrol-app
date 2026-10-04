@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { RecurringTransaction } from '../../types';
 import {
   validateRecurringAmount,
+  normalizeMoney,
   isValidCustomInterval,
   resolveTransactionAccountId,
   validateTransactionBusinessRules,
@@ -46,6 +47,7 @@ export function addRecurring(
   data: Omit<RecurringTransaction, 'id' | 'workspace_id' | 'created_at'>,
   onProcessed?: () => void
 ): RecurringTransaction {
+  data = { ...data, amount: normalizeMoney(data.amount, 'Recorrência') };
   validateRecurringAmount(data.amount);
   if (data.frequency === 'custom') {
     if (!isValidCustomInterval(data.interval_days)) {

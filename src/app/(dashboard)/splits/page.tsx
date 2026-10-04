@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import { calculateMemberNetBalances } from '@/lib/financial-engine';
 import { formatCurrency } from '@/lib/utils';
@@ -24,17 +25,21 @@ export default function SplitsPage() {
     activeWorkspace,
     workspaceMembers,
     people = [],
-    allWorkspacePeople = [],
+    allWorkspacePeople = people,
     transactions,
     purchases,
     settlements,
-    recordSettlement,
+    recordSettlementAsync,
     deleteSettlement,
     addPerson,
     updatePerson,
     deletePerson,
+    isWorkspaceReadOnly,
   } = useFinance();
 
+  const settlementPending = useRef(false);
+  const [isSettling, setIsSettling] = useState(false);
+  const settlementAttempt = useOperationAttempt(activeWorkspace.id, 'settlement');
   // Modal de Liquidação / Registro de Acerto
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
   const [fromMemberId, setFromMemberId] = useState('');
@@ -137,8 +142,9 @@ export default function SplitsPage() {
     setIsSettlementModalOpen(true);
   };
 
-  const handleSaveSettlement = (e: React.FormEvent) => {
+  const handleSaveSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (settlementPending.current) return;
     setSettlementError(null);
     const amount = parseFloat(settlementAmountStr.replace(',', '.')) || 0;
 
@@ -155,27 +161,13 @@ export default function SplitsPage() {
       return;
     }
 
-    const matchingDebt = pairwiseDebts.find(
-      (d) => d.from_member_id === fromMemberId && d.to_member_id === toMemberId
-    );
-    if (!matchingDebt || matchingDebt.amount <= 0) {
-      setSettlementError(`Não há débito pendente de ${getParticipantName(fromMemberId)} para ${getParticipantName(toMemberId)}.`);
-      return;
-    }
-    const maxCents = Math.round(matchingDebt.amount * 100);
-    const amountCents = Math.round(amount * 100);
-    if (amountCents > maxCents) {
-      setSettlementError(
-        `O valor do acerto (${formatCurrency(amount)}) excede a dívida pendente (${formatCurrency(matchingDebt.amount)}).`
-      );
-      return;
-    }
-
-    const isFromPerson = people.some((p) => p.id === fromMemberId);
-    const isToPerson = people.some((p) => p.id === toMemberId);
-
     try {
-      recordSettlement({
+      settlementPending.current = true;
+      setIsSettling(true);
+      const isFromPerson = allWorkspacePeople.some((p) => p.id === fromMemberId);
+      const isToPerson = allWorkspacePeople.some((p) => p.id === toMemberId);
+
+      const payload = {
         from_member_id: isFromPerson ? null : fromMemberId,
         to_member_id: isToPerson ? null : toMemberId,
         from_person_id: isFromPerson ? fromMemberId : null,
@@ -183,13 +175,36 @@ export default function SplitsPage() {
         amount,
         settlement_date: settlementDate,
         notes: settlementNotes.trim() || undefined,
-      });
+      };
+      const operationKey = await settlementAttempt.getKey(payload);
+      const recovered = settlements.some((s) => s.operation_key === operationKey);
+      const matchingDebt = pairwiseDebts.find(
+        (d) => d.from_member_id === fromMemberId && d.to_member_id === toMemberId
+      );
+      if (!recovered && (!matchingDebt || matchingDebt.amount <= 0)) {
+        setSettlementError(`Não há débito pendente de ${getParticipantName(fromMemberId)} para ${getParticipantName(toMemberId)}.`);
+        return;
+      }
+      const maxCents = Math.round((matchingDebt?.amount ?? 0) * 100);
+      const amountCents = Math.round(amount * 100);
+      if (!recovered && amountCents > maxCents) {
+        setSettlementError(
+          `O valor do acerto (${formatCurrency(amount)}) excede a dívida pendente (${formatCurrency(matchingDebt?.amount ?? 0)}).`
+        );
+        return;
+      }
+
+      await recordSettlementAsync({ ...payload, operation_key: operationKey });
+      settlementAttempt.complete();
 
       setIsSettlementModalOpen(false);
       setSuccessMessage(`Acerto de ${formatCurrency(amount)} registrado com sucesso!`);
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err: any) {
       setSettlementError(err.message || 'Erro ao registrar o acerto.');
+    } finally {
+      settlementPending.current = false;
+      setIsSettling(false);
     }
   };
 
@@ -215,7 +230,7 @@ export default function SplitsPage() {
           </p>
         </div>
 
-        <button
+        {!isWorkspaceReadOnly && <button
           onClick={() => {
             setFromMemberId(defaultFromId);
             setToMemberId(defaultToId);
@@ -228,7 +243,7 @@ export default function SplitsPage() {
         >
           <PlusCircle className="h-4 w-4" />
           Registrar Acerto de Contas
-        </button>
+        </button>}
       </div>
 
       {/* Aviso de Participante Único */}
@@ -257,6 +272,7 @@ export default function SplitsPage() {
         pairwiseDebts={pairwiseDebts}
         getMemberName={getParticipantName}
         onOpenSettleDebt={handleOpenSettleDebt}
+        readOnly={isWorkspaceReadOnly}
       />
 
       {/* Seção 2: Balanço Consolidado por Participante */}
@@ -280,12 +296,14 @@ export default function SplitsPage() {
         onAddPerson={addPerson}
         onUpdatePerson={updatePerson}
         onDeletePerson={deletePerson}
+        readOnly={isWorkspaceReadOnly}
       />
 
       {/* Seção 5: Histórico de Acertos / Liquidações Realizadas */}
       <SettlementHistory
         workspaceSettlements={workspaceSettlements}
         getMemberName={getParticipantName}
+        readOnly={isWorkspaceReadOnly}
         onDeleteSettlement={(id) => {
           if (window.confirm('Deseja realmente excluir este registro de acerto? O balanço líquido será recalculado.')) {
             deleteSettlement(id);
@@ -294,7 +312,7 @@ export default function SplitsPage() {
       />
 
       {/* Modal de Registro de Acerto de Contas */}
-      <SettlementModal
+      {!isWorkspaceReadOnly && <SettlementModal
         isOpen={isSettlementModalOpen}
         onClose={() => setIsSettlementModalOpen(false)}
         fromMemberId={fromMemberId}
@@ -312,7 +330,8 @@ export default function SplitsPage() {
         people={people}
         selectedPairDebt={selectedPairDebt}
         onSubmit={handleSaveSettlement}
-      />
+        isSubmitting={isSettling}
+      />}
     </div>
   );
 }

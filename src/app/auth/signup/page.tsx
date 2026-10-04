@@ -3,6 +3,7 @@
 import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/context/auth-context';
+import { getAuthErrorMessage } from '@/lib/auth-errors';
 import { ShieldCheck, Mail, Lock, User, ArrowRight, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 
 function SignupForm() {
@@ -36,15 +37,14 @@ function SignupForm() {
     try {
       const { error } = await signUp(email, password, name);
       if (error) {
-        setErrorMsg(error.message);
+        setErrorMsg(getAuthErrorMessage(error, 'Falha ao registrar conta.'));
       } else {
         setSuccessMsg(
           'Conta criada com sucesso! Verifique sua caixa de entrada para confirmar seu e-mail antes de acessar o sistema.'
         );
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Falha ao registrar conta.';
-      setErrorMsg(msg);
+      setErrorMsg(getAuthErrorMessage(err, 'Falha ao registrar conta.'));
     } finally {
       setIsSubmitting(false);
     }

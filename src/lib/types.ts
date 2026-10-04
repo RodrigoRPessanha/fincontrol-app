@@ -153,6 +153,7 @@ export interface PurchaseSplit {
 }
 
 export interface Settlement {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   from_member_id?: string | null;
@@ -167,6 +168,7 @@ export interface Settlement {
 }
 
 export interface Transaction {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   account_id?: string | null;
@@ -212,6 +214,7 @@ export type UpdateTransactionDTO = {
 };
 
 export interface Payment {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   transaction_id?: string | null;
@@ -228,6 +231,7 @@ export interface Payment {
 }
 
 export interface Purchase {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   account_id?: string | null;
@@ -268,6 +272,7 @@ export interface Installment {
 }
 
 export interface Transfer {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   from_account_id: string;

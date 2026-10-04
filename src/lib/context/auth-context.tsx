@@ -243,19 +243,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     setIsLoading(true);
-    if (dataMode === 'local') {
+    try {
+      if (dataMode === 'local') {
+        localStorage.removeItem('fincontrol_user');
+      } else {
+        const supabase = createClient();
+        if (!supabase) throw new Error('Supabase client não configurado');
+        const { error } = await supabase.auth.signOut();
+        if (error) throw new Error(error.message);
+      }
       setUser(null);
-      localStorage.removeItem('fincontrol_user');
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const supabase = createClient();
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-    setUser(null);
-    setIsLoading(false);
   };
 
   const updateProfile = (data: Partial<UserProfile>) => {

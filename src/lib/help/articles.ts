@@ -104,8 +104,8 @@ export const helpArticles: HelpArticle[] = [
       { id: 'dividir', title: 'Definir a divisão', steps: ['Abra Nova Transação e escolha Despesa.', 'Informe descrição e valor. Em Divisão de Despesa (Rateio), selecione explicitamente os participantes desejados.', 'Confira Quem pagou?; o pagador é incluído entre os participantes.', 'Escolha a regra de divisão e confira a prévia de valores por participante.', 'Salve o registro e abra Divisão de Contas para conferir o balanço.'] },
       { id: 'regras', title: 'Escolher a regra', fields: [
         { name: 'Sem divisão (100% pagador)', description: 'A despesa fica individual, sem gerar rateio compartilhado.' },
-        { name: 'Dividir igualmente', description: 'Reparte o total entre os participantes. Centavos restantes são distribuídos para que a soma seja exatamente o total.' },
-        { name: '100% de outra pessoa', description: 'O pagador fica sem responsabilidade. Com um outro participante, ele assume tudo; com vários outros, o total é dividido igualmente entre eles.' },
+        { name: 'Dividir igualmente', description: 'Reparte o total entre os participantes selecionados, sem incluir automaticamente outros membros do workspace. Centavos restantes são distribuídos para que a soma seja exatamente o total.' },
+        { name: '100% de outra pessoa', description: 'O pagador fica sem responsabilidade. Com um outro participante selecionado, ele assume tudo; com vários outros selecionados, o total é dividido igualmente entre eles.' },
         { name: 'Personalizado (definir valores)', description: 'Informe valores por participante, inclusive zero quando necessário. A soma precisa coincidir com o total da despesa.' },
       ] },
       { id: 'balanco', title: 'Ler o balanço', paragraphs: ['Exemplo: em uma despesa de R$ 100,00 dividida igualmente entre Alex e Bia, com Alex como pagador, cada um responde por R$ 50,00. Antes de outros registros ou acertos, Alex tem R$ 50,00 a receber e Bia tem R$ 50,00 a pagar.'], fields: [

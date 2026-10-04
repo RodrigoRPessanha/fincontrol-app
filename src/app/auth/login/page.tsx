@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/context/auth-context';
 import { getSafeRedirectPath } from '@/lib/utils';
+import { getAuthErrorMessage } from '@/lib/auth-errors';
 import { ShieldCheck, Mail, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 
 function LoginForm() {
@@ -32,8 +33,7 @@ function LoginForm() {
       await login(email, password);
       router.push(redirectTo);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Credenciais inválidas. Verifique seu email e senha.';
-      setErrorMsg(msg);
+      setErrorMsg(getAuthErrorMessage(err, 'Credenciais inválidas. Verifique seu e-mail e senha.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -63,12 +63,13 @@ function LoginForm() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <label htmlFor="login-email" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
               E-mail
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
+                id="login-email"
                 type="email"
                 required
                 value={email}
@@ -81,7 +82,7 @@ function LoginForm() {
 
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <label htmlFor="login-password" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Senha
               </label>
               <Link
@@ -94,6 +95,7 @@ function LoginForm() {
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
+                id="login-password"
                 type="password"
                 required
                 value={password}

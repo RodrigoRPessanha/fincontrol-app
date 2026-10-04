@@ -1,5 +1,6 @@
 import { Budget } from '../../types';
 import { FinanceActionDeps } from './types';
+import { normalizeMoney } from '../../financial-engine';
 
 export function setBudget(
   deps: FinanceActionDeps,
@@ -8,6 +9,7 @@ export function setBudget(
   month: number = deps.now().getMonth() + 1,
   year: number = deps.now().getFullYear()
 ): Budget {
+  plannedAmount = normalizeMoney(plannedAmount, 'Orçamento', 'nonnegative');
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   const prev = state.allBudgets;

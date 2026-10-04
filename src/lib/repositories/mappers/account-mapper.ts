@@ -1,6 +1,6 @@
 import { Database } from '../../supabase/database.types';
 import { Account, AccountType } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type AccountRow = Database['public']['Tables']['accounts']['Row'];
 type AccountInsert = Database['public']['Tables']['accounts']['Insert'];
@@ -12,8 +12,8 @@ export function mapAccountRowToDomain(row: AccountRow): Account {
     name: row.name,
     type: (row.type as AccountType) ?? 'checking',
     institution: row.institution ?? 'Banco',
-    initial_balance: roundCurrency(Number(row.initial_balance ?? 0)),
-    current_balance: roundCurrency(Number(row.current_balance ?? 0)),
+    initial_balance: readMoney(row.initial_balance),
+    current_balance: readMoney(row.current_balance),
     color: row.color ?? '#10b981',
     active: row.active ?? true,
     created_at: row.created_at,
@@ -29,8 +29,8 @@ export function mapDomainToAccountInsert(
     name: domain.name,
     type: domain.type,
     institution: domain.institution,
-    initial_balance: domain.initial_balance !== undefined ? roundCurrency(domain.initial_balance) : (undefined as any),
-    current_balance: domain.current_balance !== undefined ? roundCurrency(domain.current_balance) : (undefined as any),
+    initial_balance: domain.initial_balance !== undefined ? normalizeMoney(domain.initial_balance, 'Valor monetário', 'signed') : (undefined as any),
+    current_balance: domain.current_balance !== undefined ? normalizeMoney(domain.current_balance, 'Valor monetário', 'signed') : (undefined as any),
     color: domain.color,
     active: domain.active,
   };

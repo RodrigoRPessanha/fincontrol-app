@@ -47,6 +47,7 @@ export interface FinanceContextType {
   isLoaded: boolean;
   isLoading: boolean;
   isSaving: boolean;
+  isWorkspaceReadOnly: boolean;
   error: Error | null;
   clearError: () => void;
   refreshData: () => Promise<void>;
@@ -70,8 +71,8 @@ export interface FinanceContextType {
   creditCardBills: CreditCardBill[];
   addCreditCard: (card: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => CreditCard;
   updateCreditCard: (id: string, card: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => void;
-  payCreditCardBill: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string) => Payment;
-  payCreditCardBillAsync: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string) => Promise<Payment>;
+  payCreditCardBill: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string, operationKey?: string) => Payment;
+  payCreditCardBillAsync: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string, operationKey?: string) => Promise<Payment>;
 
   paymentMethods: PaymentMethod[];
   allWorkspacePaymentMethods: PaymentMethod[];
@@ -85,12 +86,14 @@ export interface FinanceContextType {
   transactions: Transaction[];
   addTransaction: (tx: Omit<Transaction, 'id' | 'workspace_id' | 'created_at'>) => Transaction;
   updateTransaction: (id: string, tx: UpdateTransactionDTO) => void;
+  addTransactionAsync: (data: Parameters<FinanceContextType['addTransaction']>[0]) => Promise<Transaction>;
   deleteTransaction: (id: string) => void;
   duplicateTransaction: (id: string) => Transaction | null;
 
   purchases: Purchase[];
   installments: Installment[];
   createInstallmentPurchase: (data: {
+    operation_key?: string;
     description: string;
     total_amount: number;
     installment_count: number;
@@ -106,8 +109,11 @@ export interface FinanceContextType {
     splits?: TransactionSplit[];
   }) => Purchase;
 
+  createInstallmentPurchaseAsync: (data: Parameters<FinanceContextType['createInstallmentPurchase']>[0]) => Promise<Purchase>;
+
   payments: Payment[];
   recordPayment: (data: {
+    operation_key?: string;
     transaction_id?: string;
     installment_id?: string;
     credit_card_bill_id?: string;
@@ -118,6 +124,7 @@ export interface FinanceContextType {
     notes?: string;
   }) => Payment;
   recordPaymentAsync: (data: {
+    operation_key?: string;
     transaction_id?: string;
     installment_id?: string;
     credit_card_bill_id?: string;
@@ -129,10 +136,14 @@ export interface FinanceContextType {
   }) => Promise<Payment>;
 
   transfers: Transfer[];
-  createTransfer: (fromAccountId: string, toAccountId: string, amount: number, date?: string, notes?: string) => Transfer | null;
+  createTransfer: (fromAccountId: string, toAccountId: string, amount: number, date?: string, notes?: string, operationKey?: string) => Transfer | null;
+
+  createTransferAsync: (...args: Parameters<FinanceContextType['createTransfer']>) => Promise<Transfer | null>;
+  recordSettlementAsync: (data: Parameters<FinanceContextType['recordSettlement']>[0]) => Promise<Settlement>;
 
   settlements: Settlement[];
   recordSettlement: (data: {
+    operation_key?: string;
     from_member_id?: string | null;
     to_member_id?: string | null;
     from_person_id?: string | null;
@@ -163,6 +174,7 @@ export interface FinanceContextType {
   addGoal: (goal: Omit<FinancialGoal, 'id' | 'workspace_id' | 'created_at'>) => FinancialGoal;
   updateGoal: (id: string, data: Omit<Partial<FinancialGoal>, 'id' | 'workspace_id' | 'created_at'>) => void;
   depositGoal: (goalId: string, amount: number, accountId: string) => void;
+  depositGoalAsync: (goalId: string, amount: number, accountId: string, idempotencyKey?: string) => Promise<void>;
 
   viewPerspective: 'realized' | 'planned';
   setViewPerspective: (p: 'realized' | 'planned') => void;

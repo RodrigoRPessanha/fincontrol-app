@@ -14,7 +14,7 @@
     "test:db:cloud": "node scripts/test-db-cloud.mjs",
     "test:auth:cloud": "node scripts/test-auth-cloud.mjs",
     "test:repo:cloud": "node scripts/test-repository-cloud.mjs",
-    "audit": "npm audit"
+    "audit": "node scripts/audit-dependencies.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
@@ -51,5 +51,8 @@
   },
   "engines": {
     "node": ">=22.4.0"
+  },
+  "overrides": {
+    "braces": "https://codeload.github.com/FSDevelop/braces/tar.gz/28d440b5dd449dbf1fe6f3506cf94ecca4d02660"
   }
 }

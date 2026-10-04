@@ -40,7 +40,7 @@ const drawerLinks = [
 
 export function MobileNav() {
   const pathname = usePathname();
-  const { activeWorkspace } = useFinance();
+  const { activeWorkspace, isWorkspaceReadOnly } = useFinance();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
 
@@ -80,7 +80,7 @@ export function MobileNav() {
         </Link>
 
         {/* Center Floating Action Button */}
-        <button
+        {!isWorkspaceReadOnly && <button
           type="button"
           aria-label="Nova Transação"
           data-testid="mobile-quick-add-btn"
@@ -88,7 +88,7 @@ export function MobileNav() {
           className="-mt-5 relative z-50 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500 active:scale-90 cursor-pointer touch-manipulation select-none"
         >
           <Plus className="h-6 w-6 stroke-[2.5] pointer-events-none" />
-        </button>
+        </button>}
 
         <Link
           href="/planning"

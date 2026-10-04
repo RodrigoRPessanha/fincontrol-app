@@ -1,6 +1,7 @@
+import { findOperationReceipt } from './operation-receipts';
 import { format } from 'date-fns';
 import { Transfer } from '../../types';
-import { toCents, fromCents } from '../../financial-engine';
+import { toCents, fromCents, normalizeMoney } from '../../financial-engine';
 import { FinanceActionDeps } from './types';
 
 export function createTransfer(
@@ -9,7 +10,8 @@ export function createTransfer(
   toAccountId: string,
   amount: number,
   date: string = format(deps.now(), 'yyyy-MM-dd'),
-  notes?: string
+  notes?: string,
+  operationKey?: string
 ): Transfer {
   if (fromAccountId === toAccountId) {
     throw new Error('A conta de origem e destino devem ser diferentes.');
@@ -20,8 +22,11 @@ export function createTransfer(
     throw new Error('O valor da transferência deve ser de pelo menos R$ 0,01.');
   }
 
+  amount = normalizeMoney(amount, 'Transferência');
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allTransfers, targetWsId, operationKey, { from_account_id: fromAccountId, to_account_id: toAccountId, amount, transfer_date: date });
+  if (receipt) return receipt;
   const activeWs = state.allWorkspaces.find((w) => w.id === targetWsId);
   if (activeWs?.tracking_mode === 'expense_tracker') {
     throw new Error('Transferências entre contas não são permitidas no modo Apenas Despesas.');
@@ -40,6 +45,7 @@ export function createTransfer(
   const userId = deps.getUserId();
 
   const newTransfer: Transfer = {
+    operation_key: operationKey,
     id: deps.generateId('trf'),
     workspace_id: targetWsId,
     from_account_id: fromAccountId,
@@ -55,10 +61,10 @@ export function createTransfer(
 
   const nextAccounts = state.allAccounts.map((acc) => {
     if (acc.id === fromAccountId) {
-      return { ...acc, current_balance: fromCents(toCents(acc.current_balance) - transferCents) };
+      return { ...acc, current_balance: normalizeMoney(fromCents(toCents(acc.current_balance) - transferCents), 'Saldo resultante', 'signed') };
     }
     if (acc.id === toAccountId) {
-      return { ...acc, current_balance: fromCents(toCents(acc.current_balance) + transferCents) };
+      return { ...acc, current_balance: normalizeMoney(fromCents(toCents(acc.current_balance) + transferCents), 'Saldo resultante', 'signed') };
     }
     return acc;
   });

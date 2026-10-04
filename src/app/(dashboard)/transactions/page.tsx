@@ -41,6 +41,7 @@ function TransactionsContent() {
     allWorkspacePaymentMethods,
     allWorkspaceAccounts,
     allWorkspaceCreditCards,
+    isWorkspaceReadOnly,
     deleteTransaction,
     duplicateTransaction,
   } = useFinance();
@@ -152,13 +153,13 @@ function TransactionsContent() {
           </p>
         </div>
 
-        <button
+        {!isWorkspaceReadOnly && <button
           onClick={() => setIsQuickAddOpen(true)}
           className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 self-start sm:self-auto"
         >
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>Nova Transação</span>
-        </button>
+        </button>}
       </div>
 
       {/* Barra de Filtros Avançados */}
@@ -246,13 +247,13 @@ function TransactionsContent() {
                 <th className="px-3 py-3.5">Pagamento / Conta</th>
                 <th className="px-3 py-3.5">Status</th>
                 <th className="px-3 py-3.5 text-right">Valor</th>
-                <th className="py-3.5 pl-3 pr-6 text-right">Ações</th>
+                {!isWorkspaceReadOnly && <th className="py-3.5 pl-3 pr-6 text-right">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={isWorkspaceReadOnly ? 6 : 7} className="py-12 text-center text-slate-400">
                     Nenhuma transação encontrada com os filtros selecionados.
                   </td>
                 </tr>
@@ -335,7 +336,7 @@ function TransactionsContent() {
                       </td>
 
                       {/* Ações */}
-                      <td className="py-4 pl-3 pr-6 text-right">
+                      {!isWorkspaceReadOnly && <td className="py-4 pl-3 pr-6 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           {!isPaid && (
                             tx.credit_card_bill_id || tx.credit_card_id ? (
@@ -378,7 +379,7 @@ function TransactionsContent() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
-                      </td>
+                      </td>}
                     </tr>
                   );
                 })
@@ -389,13 +390,13 @@ function TransactionsContent() {
       </div>
 
       {/* Modais */}
-      <QuickAddModal isOpen={isQuickAddOpen} onClose={() => setIsQuickAddOpen(false)} />
+      <QuickAddModal isOpen={isQuickAddOpen && !isWorkspaceReadOnly} onClose={() => setIsQuickAddOpen(false)} />
 
-      <PaymentModal
+      {!isWorkspaceReadOnly && <PaymentModal
         isOpen={!!paymentTarget}
         onClose={() => setPaymentTarget(null)}
         target={paymentTarget}
-      />
+      />}
     </div>
   );
 }

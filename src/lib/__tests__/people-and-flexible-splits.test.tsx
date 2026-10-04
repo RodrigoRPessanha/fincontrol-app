@@ -364,7 +364,9 @@ describe('People & Flexible Splits UI Tests', () => {
         people: [savedPeople[0]],
         addPerson: mockAddPerson,
         addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
         createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
         createTransfer: vi.fn(),
       } as any);
 
@@ -432,7 +434,9 @@ describe('People & Flexible Splits UI Tests', () => {
         people: [savedPeople[0]],
         addPerson: mockAddPerson,
         addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
         createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
         createTransfer: vi.fn(),
       } as any);
 
@@ -506,7 +510,9 @@ describe('People & Flexible Splits UI Tests', () => {
         people: [savedPeople[0]],
         addPerson: mockAddPerson,
         addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
         createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
         createTransfer: vi.fn(),
       } as any);
 
@@ -579,7 +585,9 @@ describe('People & Flexible Splits UI Tests', () => {
         people: [], // Nenhuma pessoa cadastrada previamente
         addPerson: mockAddPerson,
         addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
         createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
         createTransfer: vi.fn(),
       } as any);
 
@@ -615,6 +623,32 @@ describe('People & Flexible Splits UI Tests', () => {
   });
 
   describe('SplitsPage with People and Settlements', () => {
+    it('retoma um acerto confirmado após resposta perdida e ignora submit enquanto aguarda', async () => {
+      let reject!: (error: Error) => void;
+      const save = vi.fn().mockImplementationOnce(() => new Promise<void>((_, fail) => { reject = fail; })).mockResolvedValue(undefined);
+      const context: any = {
+        activeWorkspace: mockWorkspace, workspaceMembers: singleMember, people: savedPeople, allWorkspacePeople: savedPeople,
+        transactions: [{ id: 'pending-settlement', workspace_id: mockWorkspace.id, description: 'Debt', amount: 100, type: 'expense', status: 'paid', paid_by_member_id: singleMember[0].id, split_type: 'equal', splits: [{ member_id: singleMember[0].id, amount: 50 }, { person_id: savedPeople[0].id, amount: 50 }] }],
+        purchases: [], settlements: [], recordSettlementAsync: save, deleteSettlement: mockDeleteSettlement,
+        addPerson: mockAddPerson, updatePerson: mockUpdatePerson, deletePerson: mockDeletePerson,
+      };
+      vi.spyOn(FinanceContext, 'useFinance').mockReturnValue(context);
+      const container = (globalThis as any).document.createElement('div'); const root = createRoot(container);
+      await act(async () => { root.render(<SplitsPage />); });
+      const open = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.children === 'Liquidar Agora');
+      await act(async () => { getReactProps(open).onClick(); });
+      const form = findNode(container, (n) => n.tagName === 'FORM'); let done!: Promise<void>;
+      await act(async () => { done = getReactProps(form).onSubmit({ preventDefault() {} }); await getReactProps(form).onSubmit({ preventDefault() {} }); });
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(findNode(container, (n) => n.tagName === 'FORM')).toBeTruthy();
+      context.settlements = [{ ...save.mock.calls[0][0], id: 'confirmed-settlement', created_at: '2026-10-03' }];
+      await act(async () => { reject(new Error('Lost reply after commit')); await done; });
+      expect(findNode(container, (n) => n.tagName === 'FORM')).toBeTruthy();
+      await act(async () => { await getReactProps(findNode(container, (n) => n.tagName === 'FORM')).onSubmit({ preventDefault() {} }); });
+      expect(save.mock.calls[1][0].operation_key).toBe(save.mock.calls[0][0].operation_key);
+      expect(findNode(container, (n) => n.tagName === 'FORM')).toBeNull();
+      await act(async () => root.unmount());
+    });
     it('calcula débitos entre membro e pessoa e registra acerto válido no modo normal e no modo expense_tracker', async () => {
       // Cenário: Rodrigo pagou R$ 100,00 e dividiu 50/50 com João (person-1).
       // João deve R$ 50,00 para Rodrigo.
@@ -654,6 +688,7 @@ describe('People & Flexible Splits UI Tests', () => {
         purchases: [],
         settlements: [],
         recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
         deleteSettlement: mockDeleteSettlement,
         addPerson: mockAddPerson,
         updatePerson: mockUpdatePerson,
@@ -687,6 +722,7 @@ describe('People & Flexible Splits UI Tests', () => {
       });
 
       expect(mockRecordSettlement).toHaveBeenCalledWith({
+        operation_key: expect.any(String),
         from_member_id: null,
         to_member_id: 'wsm-1',
         from_person_id: 'person-1',
@@ -739,6 +775,7 @@ describe('People & Flexible Splits UI Tests', () => {
           },
         ],
         recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
         deleteSettlement: mockDeleteSettlement,
         addPerson: mockAddPerson,
         updatePerson: mockUpdatePerson,
@@ -992,7 +1029,9 @@ describe('People & Flexible Splits UI Tests', () => {
         people: savedPeople,
         addPerson: mockAddPerson,
         addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
         createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
         createTransfer: vi.fn(),
       } as any);
 
@@ -1579,7 +1618,9 @@ describe('People & Flexible Splits UI Tests', () => {
         people: [savedPeople[0]],
         addPerson: mockAddPerson,
         addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
         createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
         createTransfer: vi.fn(),
       } as any);
 

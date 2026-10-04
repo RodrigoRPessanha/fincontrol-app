@@ -6,7 +6,7 @@ import {
   TransactionSplit,
   TransactionStatus,
 } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type PurchaseRow = Database['public']['Tables']['purchases']['Row'];
 type PurchaseInsert = Database['public']['Tables']['purchases']['Insert'];
@@ -22,7 +22,7 @@ export function mapPurchaseSplitsToDomain(rows: PurchaseSplitRow[]): Transaction
     purchase_id: r.purchase_id,
     member_id: r.member_id ?? undefined,
     person_id: r.person_id ?? undefined,
-    amount: roundCurrency(Number(r.amount ?? 0)),
+    amount: readMoney(r.amount),
     percentage: r.percentage !== null && r.percentage !== undefined ? Number(r.percentage) : undefined,
   }));
 }
@@ -37,7 +37,7 @@ export function mapDomainPurchaseSplitsToInsert(
     workspace_id: workspaceId,
     member_id: s.member_id ?? null,
     person_id: s.person_id ?? null,
-    amount: roundCurrency(s.amount),
+    amount: normalizeMoney(s.amount, 'Valor monetário', 'nonnegative'),
     percentage: s.percentage !== undefined ? s.percentage : null,
   }));
 }
@@ -47,11 +47,11 @@ export function mapInstallmentRowToDomain(row: InstallmentRow): Installment {
     id: row.id,
     purchase_id: row.purchase_id,
     installment_number: row.installment_number,
-    amount: roundCurrency(Number(row.amount ?? 0)),
+    amount: readMoney(row.amount),
     due_date: row.due_date,
     credit_card_bill_id: row.credit_card_bill_id ?? undefined,
     status: (row.status as TransactionStatus) ?? 'pending',
-    paid_amount: roundCurrency(Number(row.paid_amount ?? 0)),
+    paid_amount: readMoney(row.paid_amount),
     paid_at: row.paid_at,
     created_at: row.created_at,
   };
@@ -64,11 +64,11 @@ export function mapDomainToInstallmentInsert(
     id: domain.id,
     purchase_id: domain.purchase_id,
     installment_number: domain.installment_number,
-    amount: roundCurrency(domain.amount),
+    amount: normalizeMoney(domain.amount, 'Valor monetário', 'positive'),
     due_date: domain.due_date,
     credit_card_bill_id: domain.credit_card_bill_id ?? null,
     status: domain.status,
-    paid_amount: roundCurrency(domain.paid_amount),
+    paid_amount: normalizeMoney(domain.paid_amount, 'Valor monetário', 'nonnegative'),
     paid_at: domain.paid_at ?? null,
   };
 }
@@ -79,6 +79,7 @@ export function mapPurchaseRowToDomain(
   installments?: InstallmentRow[]
 ): Purchase {
   return {
+    operation_key: row.operation_key ?? undefined,
     id: row.id,
     workspace_id: row.workspace_id,
     account_id: row.account_id ?? undefined,
@@ -86,7 +87,7 @@ export function mapPurchaseRowToDomain(
     category_id: row.category_id ?? undefined,
     payment_method_id: row.payment_method_id ?? undefined,
     description: row.description,
-    total_amount: roundCurrency(Number(row.total_amount ?? 0)),
+    total_amount: readMoney(row.total_amount),
     installment_count: row.installment_count,
     paid_installments_count: row.paid_installments_count ?? 0,
     paid_by_member_id: row.paid_by_member_id ?? undefined,
@@ -111,7 +112,7 @@ export function mapDomainToPurchaseInsert(
     category_id: domain.category_id ?? null,
     payment_method_id: domain.payment_method_id ?? null,
     description: domain.description,
-    total_amount: roundCurrency(domain.total_amount),
+    total_amount: normalizeMoney(domain.total_amount, 'Valor monetário', 'positive'),
     installment_count: domain.installment_count,
     paid_installments_count: domain.paid_installments_count ?? 0,
     paid_by_member_id: domain.paid_by_member_id ?? null,

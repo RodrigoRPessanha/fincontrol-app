@@ -3,7 +3,6 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { MobileNav } from '@/components/layout/MobileNav';
 import { GlobalErrorBanner } from '@/components/shared/GlobalErrorBanner';
-import { FinanceProvider } from '@/lib/context/finance-context';
 
 export default function DashboardLayout({
   children,
@@ -11,7 +10,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <FinanceProvider>
+    <>
       <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 overflow-x-hidden">
         {/* Desktop Sidebar */}
         <Sidebar />
@@ -28,6 +27,6 @@ export default function DashboardLayout({
         {/* Mobile Bottom Navigation */}
         <MobileNav />
       </div>
-    </FinanceProvider>
+    </>
   );
 }

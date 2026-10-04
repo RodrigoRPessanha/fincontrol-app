@@ -1,10 +1,12 @@
 import { Account } from '../../types';
 import { FinanceActionDeps } from './types';
+import { normalizeMoney } from '../../financial-engine';
 
 export function addAccount(
   deps: FinanceActionDeps,
   accountData: Omit<Account, 'id' | 'workspace_id' | 'created_at'>
 ): Account {
+  accountData = { ...accountData, initial_balance: normalizeMoney(accountData.initial_balance ?? 0, 'Saldo inicial', 'signed') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   const newAcc: Account = {
@@ -29,6 +31,9 @@ export function updateAccount(
   id: string,
   data: Omit<Partial<Account>, 'id' | 'workspace_id' | 'created_at'>
 ): void {
+  data = { ...data };
+  if (data.initial_balance !== undefined) data.initial_balance = normalizeMoney(data.initial_balance, 'Saldo inicial', 'signed');
+  if (data.current_balance !== undefined) data.current_balance = normalizeMoney(data.current_balance, 'Saldo atual', 'signed');
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   deps.commit({

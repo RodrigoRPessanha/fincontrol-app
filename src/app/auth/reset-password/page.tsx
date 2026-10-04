@@ -4,6 +4,7 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/context/auth-context';
+import { getAuthErrorMessage } from '@/lib/auth-errors';
 import { ShieldCheck, Lock, ArrowRight, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 
 function ResetPasswordForm() {
@@ -36,7 +37,7 @@ function ResetPasswordForm() {
     try {
       const { error } = await updatePassword(password);
       if (error) {
-        setErrorMsg(error.message);
+        setErrorMsg(getAuthErrorMessage(error, 'Falha ao redefinir a senha.'));
       } else {
         setSuccessMsg('Senha alterada com sucesso! Você já pode acessar sua conta.');
         setTimeout(() => {
@@ -44,8 +45,7 @@ function ResetPasswordForm() {
         }, 2000);
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Falha ao redefinir a senha.';
-      setErrorMsg(msg);
+      setErrorMsg(getAuthErrorMessage(err, 'Falha ao redefinir a senha.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -92,14 +92,16 @@ function ResetPasswordForm() {
         {!successMsg && (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <label htmlFor="new-password" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Nova senha (mínimo 6 caracteres)
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
+                  id="new-password"
                   type="password"
                   required
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -109,14 +111,16 @@ function ResetPasswordForm() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <label htmlFor="confirm-new-password" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Confirmar nova senha
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
+                  id="confirm-new-password"
                   type="password"
                   required
+                  autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"

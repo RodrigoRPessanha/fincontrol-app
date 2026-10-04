@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format, parseISO, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { normalizeMoney } from './financial-engine/money';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -153,4 +154,12 @@ export function parseCurrencyInput(val: string): number {
   }
 
   return NaN;
+}
+
+export function parseMoneyField(value: string, label: string, rule: 'positive' | 'nonnegative' | 'signed' = 'positive', blankZero = false): number {
+  const text = value.trim();
+  if (!text && blankZero) return 0;
+  const negative = rule === 'signed' && text.startsWith('-');
+  const parsed = parseCurrencyInput(negative ? text.slice(1) : text);
+  return normalizeMoney(negative ? -parsed : parsed, label, rule);
 }

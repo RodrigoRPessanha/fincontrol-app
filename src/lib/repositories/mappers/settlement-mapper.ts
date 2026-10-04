@@ -1,19 +1,20 @@
 import { Database } from '../../supabase/database.types';
 import { Settlement } from '../../types';
-import { roundCurrency } from '../../financial-engine';
+import { normalizeMoney, readMoney } from '../../financial-engine';
 
 type SettlementRow = Database['public']['Tables']['settlements']['Row'];
 type SettlementInsert = Database['public']['Tables']['settlements']['Insert'];
 
 export function mapSettlementRowToDomain(row: SettlementRow): Settlement {
   return {
+    operation_key: row.operation_key ?? undefined,
     id: row.id,
     workspace_id: row.workspace_id,
     from_member_id: row.from_member_id ?? null,
     to_member_id: row.to_member_id ?? null,
     from_person_id: row.from_person_id ?? null,
     to_person_id: row.to_person_id ?? null,
-    amount: roundCurrency(Number(row.amount ?? 0)),
+    amount: readMoney(row.amount),
     settlement_date: row.settlement_date,
     notes: row.notes,
     payment_account_id: row.payment_account_id,
@@ -31,7 +32,7 @@ export function mapDomainToSettlementInsert(
     to_member_id: domain.to_member_id ?? null,
     from_person_id: domain.from_person_id ?? null,
     to_person_id: domain.to_person_id ?? null,
-    amount: roundCurrency(domain.amount),
+    amount: normalizeMoney(domain.amount, 'Valor monetário', 'positive'),
     settlement_date: domain.settlement_date,
     notes: domain.notes ?? null,
     payment_account_id: domain.payment_account_id ?? null,

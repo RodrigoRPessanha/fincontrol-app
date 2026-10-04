@@ -9,12 +9,14 @@ export interface SplitSummaryProps {
   pairwiseDebts: PairwiseDebt[];
   getMemberName: (id?: string | null) => string;
   onOpenSettleDebt: (debtFrom: string, debtTo: string, amount: number) => void;
+  readOnly?: boolean;
 }
 
 export function SplitSummary({
   pairwiseDebts,
   getMemberName,
   onOpenSettleDebt,
+  readOnly = false,
 }: SplitSummaryProps) {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -76,12 +78,12 @@ export function SplitSummary({
                 <span className="text-base font-extrabold text-amber-700 dark:text-amber-300">
                   {formatCurrency(debt.amount)}
                 </span>
-                <button
+                {!readOnly && <button
                   onClick={() => onOpenSettleDebt(debt.from_member_id, debt.to_member_id, debt.amount)}
                   className="rounded-xl bg-teal-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-teal-500 active:scale-95"
                 >
                   Liquidar Agora
-                </button>
+                </button>}
               </div>
             </div>
           ))}

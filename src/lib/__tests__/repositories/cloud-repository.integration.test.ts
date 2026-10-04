@@ -1,52 +1,18 @@
+import { loadCloudEnvironment, getStagingServiceRoleKey, assertStagingTarget, runSupabaseCli, STAGING_PROJECT_REF } from '../../../../scripts/cloud-test-safety.mjs';
 import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 import { SupabaseFinanceRepository } from '../../repositories/supabase-finance-repository';
 import { Database } from '../../supabase/database.types';
+import { parseSupabaseQueryOutput } from '../../../../scripts/parse-supabase-query-output.mjs';
 
 const isCloudEnabled = process.env.TEST_CLOUD === 'true';
 
 // Helper para ler .env.local se não definido no ambiente
-function getEnvConfig() {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  const env: Record<string, string> = { ...process.env } as Record<string, string>;
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-        const idx = trimmed.indexOf('=');
-        const k = trimmed.slice(0, idx).trim();
-        const v = trimmed.slice(idx + 1).trim();
-        if (!env[k]) env[k] = v;
-      }
-    }
-  }
-  return env;
-}
-
-function getServiceRoleKey(): string | null {
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return process.env.SUPABASE_SERVICE_ROLE_KEY;
-  }
-  try {
-    const isWindows = process.platform === 'win32';
-    const cmd = isWindows
-      ? 'cmd /c npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json'
-      : 'npx supabase projects api-keys --project-ref iwesoczokkycjovyknnz --reveal --output json';
-    const out = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    const keys = JSON.parse(out);
-    const sr = keys.find((k: any) => k.name === 'service_role' || k.tags?.includes('service_role'));
-    return sr?.api_key ?? null;
-  } catch {
-    return null;
-  }
-}
+const getEnvConfig = loadCloudEnvironment;
+function getServiceRoleKey() { return getStagingServiceRoleKey(getEnvConfig()); }
 
 describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Staging)', { timeout: 30000 }, () => {
   let adminClient: SupabaseClient<Database>;
@@ -57,9 +23,18 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
   let testWorkspaceId: string;
   let ownerMemberId: string;
   let testAccountId: string;
+  let fixtureDates: { today: string; future: string; past: string };
 
   beforeAll(async () => {
+    // A RPC compara com CURRENT_DATE do PostgreSQL, não com o relógio do Node.
     const env = getEnvConfig();
+    assertStagingTarget(env, { requireApi: true });
+    const dateOutput = runSupabaseCli(['db', 'query', '--linked', '--project-ref', STAGING_PROJECT_REF, '--output-format', 'json', 'SELECT CURRENT_DATE::text AS today, (CURRENT_DATE + 30)::text AS future, (CURRENT_DATE - 30)::text AS past;'], { env });
+    fixtureDates = parseSupabaseQueryOutput(dateOutput).rows?.[0];
+    if (!fixtureDates || ![fixtureDates.today, fixtureDates.future, fixtureDates.past]
+      .every((date) => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))) {
+      throw new Error('Não foi possível obter datas válidas do banco para as fixtures.');
+    }
     const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceRoleKey = getServiceRoleKey();
@@ -108,11 +83,11 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
 
   afterAll(async () => {
     // Teardown completo no staging
-    if (testWorkspaceId && adminClient) {
-      await adminClient.from('workspaces').delete().eq('id', testWorkspaceId);
-    }
     if (testUserId && adminClient) {
-      await adminClient.auth.admin.deleteUser(testUserId);
+      const removed = await adminClient.from('workspaces').delete().eq('owner_id', testUserId);
+      if (removed.error) throw removed.error;
+      const deleted = await adminClient.auth.admin.deleteUser(testUserId);
+      if (deleted.error) throw deleted.error;
     }
   }, 20000);
 
@@ -288,18 +263,23 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     expect(tx?.status).toBe('pending');
   });
 
-  it('8. gerencia pagamentos parciais de parcelas e recalcula status no estorno', async () => {
+  it.each([
+    { dateKey: 'future' as const, expectedStatus: 'pending' },
+    { dateKey: 'past' as const, expectedStatus: 'overdue' },
+  ])('8. estorna pagamentos parciais de parcela $dateKey e retorna $expectedStatus', async ({ dateKey, expectedStatus }) => {
     const purchase = await repo.savePurchase({
       workspace_id: testWorkspaceId,
       description: 'Equipamento Staging',
       total_amount: 400,
       installment_count: 2,
-      purchase_date: '2026-10-01',
+      purchase_date: fixtureDates[dateKey],
     });
 
     const insts = await repo.getInstallments(purchase.id);
     expect(insts.length).toBe(2);
-    const inst1 = insts[0];
+    const inst1 = insts.find((installment) => installment.installment_number === 1)!;
+    expect(inst1).toBeDefined();
+    expect(inst1.due_date).toBe(fixtureDates[dateKey]);
 
     // Pagamento parcial 1: R$ 50 de R$ 200
     const partPay1 = await repo.savePayment({
@@ -307,7 +287,7 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
       installment_id: inst1.id,
       account_id: testAccountId,
       amount: 50,
-      payment_date: '2026-04-02',
+      payment_date: fixtureDates.today,
       affects_balance: true,
     });
 
@@ -322,7 +302,7 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
       installment_id: inst1.id,
       account_id: testAccountId,
       amount: 70,
-      payment_date: '2026-04-03',
+      payment_date: fixtureDates.today,
       affects_balance: true,
     });
 
@@ -338,11 +318,11 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     expect(currentInst1?.status).toBe('partially_paid');
     expect(currentInst1?.paid_amount).toBe(50);
 
-    // Estorna pagamento parcial 1: status deve voltar para pending com paid_amount = 0
+    // Estorno integral: status depende do vencimento, com paid_amount = 0.
     await repo.deletePayment(partPay1.id);
     updatedInsts = await repo.getInstallments(purchase.id);
     currentInst1 = updatedInsts.find((i) => i.id === inst1.id);
-    expect(currentInst1?.status).toBe('pending');
+    expect(currentInst1?.status).toBe(expectedStatus);
     expect(currentInst1?.paid_amount).toBe(0);
 
     // Saldo bancário retornou para 1250 (50 + 70 estornados)
@@ -537,12 +517,15 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
       status: 'pending',
     });
 
+    // A inclusão acima deve aumentar o total; quitação usa o valor atualizado.
+    const updatedBill = (await repo.getCreditCardBills(recCard.id)).find((b) => b.id === bill.id)!;
+    expect(updatedBill.total_amount).toBe(bill.total_amount + 50);
     // Paga a fatura integralmente
     const billPayment = await repo.savePayment({
       workspace_id: testWorkspaceId,
       credit_card_bill_id: bill.id,
       account_id: testAccountId,
-      amount: bill.total_amount,
+      amount: updatedBill.total_amount,
       payment_date: '2026-04-20',
       affects_balance: true,
     });
@@ -559,12 +542,13 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
 
     txs = await repo.getTransactions(testWorkspaceId);
     reloadedTx = txs.find((t) => t.id === tx.id);
-    expect(reloadedTx?.status).toBe('pending');
+    expect(reloadedTx?.due_date).toBe(updatedBill.due_date);
+    expect(reloadedTx?.status).toBe(updatedBill.due_date < new Date().toISOString().slice(0, 10) ? 'overdue' : 'pending');
 
     // 2. Restaura quitação completa da fatura: item deve voltar a 'paid'
     await repo.savePayment({
       ...billPayment,
-      amount: bill.total_amount,
+      amount: updatedBill.total_amount,
     });
 
     txs = await repo.getTransactions(testWorkspaceId);
@@ -576,7 +560,7 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
 
     txs = await repo.getTransactions(testWorkspaceId);
     reloadedTx = txs.find((t) => t.id === tx.id);
-    expect(reloadedTx?.status).toBe('pending');
+    expect(reloadedTx?.status).toBe(updatedBill.due_date < new Date().toISOString().slice(0, 10) ? 'overdue' : 'pending');
   });
 
   it('14. conserva a soma das parcelas = total_amount ao editar compra com parcela parcialmente paga no staging', async () => {

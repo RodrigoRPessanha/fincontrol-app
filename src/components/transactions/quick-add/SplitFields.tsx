@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { WorkspaceMember, SplitType, TransactionSplit, Person, SplitParticipant } from '@/lib/types';
 import { Users, Plus, UserPlus, Check } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { calculateExpenseSplits } from '@/lib/financial-engine';
+import { calculateExpenseSplits, resolveSplitParticipants } from '@/lib/financial-engine';
 
 export interface SplitFieldsProps {
   type: 'expense' | 'income' | 'transfer';
@@ -75,27 +75,10 @@ export function SplitFields({
     : (people.some((p) => p.id === effectivePayerId) ? 'person' : 'member');
 
   // Participantes ativos no cálculo
-  const activeParticipants = useMemo(() => {
-    if (!selectedParticipantIds || selectedParticipantIds.length === 0) {
-      if (workspaceMembers.length <= 1 && people.length > 0) {
-        return allAvailableParticipants;
-      }
-      return workspaceMembers.map((m) => ({
-        id: m.id,
-        name: m.user?.name || m.user?.email?.split('@')[0] || `Membro ${m.id.substring(0, 4)}`,
-        type: 'member' as const,
-      }));
-    }
-
-    const filtered = allAvailableParticipants.filter((p) => selectedParticipantIds.includes(p.id));
-    if (effectivePayerId && !filtered.some((p) => p.id === effectivePayerId)) {
-      const payerPart = allAvailableParticipants.find((p) => p.id === effectivePayerId);
-      if (payerPart) {
-        filtered.push(payerPart);
-      }
-    }
-    return filtered.length > 0 ? filtered : allAvailableParticipants;
-  }, [allAvailableParticipants, workspaceMembers, people, selectedParticipantIds, effectivePayerId]);
+  const activeParticipants = useMemo(
+    () => resolveSplitParticipants(workspaceMembers, people, selectedParticipantIds ?? [], effectivePayerId),
+    [workspaceMembers, people, selectedParticipantIds, effectivePayerId]
+  );
 
   const { previewSplits, previewError } = useMemo(() => {
     let splits: TransactionSplit[] = [];
