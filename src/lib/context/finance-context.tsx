@@ -1043,19 +1043,35 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             currency: createdWs.currency,
             tracking_mode: createdWs.tracking_mode,
           });
-          idMapRef.current.set(createdWs.id, remoteWs.id);
+          registerCanonicalId(createdWs.id, remoteWs.id);
+          const members = await effectiveRepository.getWorkspaceMembers(remoteWs.id);
+          const owner = members.find((m) => m.workspace_id === remoteWs.id && m.user_id === remoteWs.owner_id && m.role === 'owner');
+          if (!owner) throw new Error('Não foi possível confirmar o membro proprietário do novo workspace.');
+          const provisionalMembers = stateRef.current.allWorkspaceMembers.filter((m) => m.workspace_id === createdWs.id);
+          for (const member of provisionalMembers) {
+            const canonical = members.find((m) => m.workspace_id === remoteWs.id && m.user_id === member.user_id);
+            if (canonical) registerCanonicalId(member.id, canonical.id);
+          }
           const current = stateRef.current;
           commitState({
             ...current,
-            activeWorkspaceId: remoteWs.id,
+            activeWorkspaceId: current.activeWorkspaceId === createdWs.id ? remoteWs.id : current.activeWorkspaceId,
             allWorkspaces: current.allWorkspaces.map((w) => (w.id === createdWs.id ? remoteWs : w)),
-            allWorkspaceMembers: current.allWorkspaceMembers.map((m) =>
-              m.workspace_id === createdWs.id ? { ...m, workspace_id: remoteWs.id } : m
-            ),
+            allWorkspaceMembers: [
+              ...current.allWorkspaceMembers.filter((m) => m.workspace_id !== createdWs.id && m.workspace_id !== remoteWs.id),
+              ...members.filter((m) => m.workspace_id === remoteWs.id),
+            ],
+            allTransactions: current.allTransactions.map((t) => t.workspace_id === createdWs.id ? {
+              ...t,
+              workspace_id: remoteWs.id,
+              paid_by_member_id: resolveCanonicalId(t.paid_by_member_id),
+              splits: t.splits?.map((s) => ({ ...s, member_id: resolveCanonicalId(s.member_id) })),
+            } : t),
           });
+          return remoteWs;
         }
       ),
-    [deps, effectiveRepository, runMutation, commitState]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleUpdateWorkspace = useCallback(
@@ -1353,7 +1369,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
               member_id: resolveCanonicalId(s.member_id),
               person_id: resolveCanonicalId(s.person_id),
             })),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           if (isOperationReplay(saved)) {
@@ -1380,7 +1396,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             return saved;
           }
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allTransactions: current.allTransactions.map((t) => (t.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...t, id: saved.id } : saved) : t)),

@@ -178,11 +178,12 @@ function createMockRepository(snapshot: FinanceState) {
       activeWorkspaceId: wsId,
     })),
     getWorkspaces: vi.fn().mockImplementation(async () => snapshot.allWorkspaces),
-    createWorkspace: vi.fn().mockImplementation(async (data) => ({
-      ...data,
-      id: 'ws-remote-created',
-      created_at: '2026-01-01',
-    })),
+    createWorkspace: vi.fn().mockImplementation(async (data) => {
+      const workspace = { ...data, id: 'ws-remote-created', created_at: '2026-01-01' };
+      snapshot.allWorkspaces.push(workspace);
+      snapshot.allWorkspaceMembers.push({ id: 'wsm-remote-owner', workspace_id: workspace.id, user_id: data.owner_id, role: 'owner', created_at: '2026-01-01', user: { id: data.owner_id, name: 'QA Owner', email: 'qa@example.com', created_at: '2026-01-01' } });
+      return workspace;
+    }),
     updateWorkspace: vi.fn().mockImplementation(async (id, data) => ({
       ...snapshot.allWorkspaces[0],
       ...data,
@@ -626,6 +627,52 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
       container,
     };
   }
+
+  it.each([false, true])('reconciles the new Owner before the first expense (queued=%s)', async (queued) => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.getWorkspaceMembers = vi.fn(async (id) => snapshot.allWorkspaceMembers.filter((m) => m.workspace_id === id));
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('First expense QA', 'expense_tracker'); });
+    const provisionalMemberId = getCtx().workspaceMembers[0].id;
+    if (!queued) await act(async () => { release(); await getCtx().waitForPendingMutations(); });
+    await act(async () => {
+      const owner = getCtx().workspaceMembers[0];
+      const saved = getCtx().addTransactionAsync({ description: 'First shared expense', amount: 40, type: 'expense', status: 'pending', transaction_date: '2026-10-04', due_date: '2026-10-04', paid_by_member_id: owner.id, split_type: 'custom', splits: [{ member_id: owner.id, amount: 40 }] });
+      release();
+      await saved;
+    });
+    expect(provisionalMemberId).not.toBe('wsm-remote-owner');
+    expect(getCtx().workspaceMembers[0]).toMatchObject({ id: 'wsm-remote-owner', user: { name: 'QA Owner' } });
+    expect(repo.saveTransaction).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspace_id: 'ws-remote-created', paid_by_member_id: 'wsm-remote-owner', splits: [{ member_id: 'wsm-remote-owner', amount: 40 }] }));
+    expect(getCtx().transactions).toHaveLength(1);
+    expect(getCtx().transactions[0].paid_by_member_id).toBe('wsm-remote-owner');
+    expect(getCtx().error).toBeNull();
+    expect(getCtx().isSaving).toBe(false);
+  });
+
+  it('does not switch back when workspace creation finishes after a user switches away', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      getCtx().createWorkspace('Background QA');
+      await getCtx().setActiveWorkspaceId('ws-1');
+      release();
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().activeWorkspace.id).toBe('ws-1');
+    expect(getCtx().workspaceMembers.map((m) => m.id)).toEqual(['wsm-1', 'wsm-2']);
+    expect(getCtx().error).toBeNull();
+  });
 
   it('deve hidratar workspaces e snapshot consolidado a partir do repositório remoto', async () => {
     const snapshot = createMockSnapshot();

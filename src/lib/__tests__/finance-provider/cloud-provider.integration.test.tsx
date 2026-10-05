@@ -220,6 +220,38 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
     };
   }
 
+  it('PM-01: first expense in a newly created workspace uses the canonical Owner without reload', async () => {
+    const browser = await mountCloudProvider(repo1, testUser1Id, testUser1Email);
+    let workspaceId = '';
+    try {
+      await act(async () => {
+        browser.getCtx().createWorkspace('QA PM-01 first expense', 'expense_tracker');
+        await browser.getCtx().waitForPendingMutations();
+      });
+      workspaceId = browser.getCtx().activeWorkspace.id;
+      const members = await repo1.getWorkspaceMembers(workspaceId);
+      const owner = members.find((m) => m.user_id === testUser1Id)!;
+      expect(browser.getCtx().workspaceMembers[0]).toMatchObject({ id: owner.id, user: { name: 'Browser 1 Owner' } });
+      expect(browser.getCtx().accounts).toHaveLength(0);
+      await act(async () => {
+        browser.getCtx().addPerson('QA PM-01 Person');
+        await browser.getCtx().waitForPendingMutations();
+      });
+      const personId = browser.getCtx().people[0].id;
+      await act(async () => {
+        await browser.getCtx().addTransactionAsync({ description: 'QA PM-01 expense', type: 'expense', amount: 40, status: 'pending', transaction_date: '2026-10-04', due_date: '2026-10-04', paid_by_member_id: owner.id, split_type: 'equal', splits: [{ member_id: owner.id, amount: 20 }, { person_id: personId, amount: 20 }] });
+      });
+      expect(browser.getCtx().error).toBeNull();
+      expect(browser.getCtx().transactions).toHaveLength(1);
+      const persisted = await repo1.getTransactions(workspaceId);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0]).toMatchObject({ paid_by_member_id: owner.id, amount: 40, workspace_id: workspaceId });
+      expect(persisted[0].splits).toEqual(expect.arrayContaining([expect.objectContaining({ member_id: owner.id, amount: 20 }), expect.objectContaining({ person_id: personId, amount: 20 })]));
+    } finally {
+      if (workspaceId) await repo1.deleteWorkspace(workspaceId);
+    }
+  });
+
   it('A2: goal deposit persists both sides, survives reload and handles concurrent/repeated keys', async () => {
     const goal = await repo1.saveGoal({ workspace_id: testWorkspaceId, name: 'A2 deposit fixture', target_amount: 1000, current_amount: 0, status: 'in_progress', color: '#000000', icon: 'target' });
     const balance = (await repo1.getAccounts(testWorkspaceId)).find((a) => a.id === testAccountId)!.current_balance;
