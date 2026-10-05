@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QuickAddModal } from '@/components/transactions/QuickAddModal';
@@ -92,6 +92,18 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     }
     return list;
   }
+
+  const roots = new Set<ReturnType<typeof createRoot>>();
+  function createTestRoot(container: Element) {
+    const root = createRoot(container);
+    roots.add(root);
+    return root;
+  }
+  afterEach(async () => {
+    for (const root of roots) await act(async () => { root.unmount(); });
+    roots.clear();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -196,7 +208,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
@@ -232,7 +244,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     // Submete o formulário com divisão igualitária
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -277,7 +289,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     // Submete com os splits customizados
     await act(async () => {
       const currentForm = findNodes(container, (n) => n.tagName === 'FORM')[0];
-      getReactProps(currentForm).onSubmit({ preventDefault: () => {} });
+      await getReactProps(currentForm).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -331,7 +343,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -373,7 +385,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     await act(async () => {
       const currentForm = findNodes(container, (n) => n.tagName === 'FORM')[0];
       const currentFormProps = getReactProps(currentForm);
-      currentFormProps.onSubmit({ preventDefault: () => {} });
+      await currentFormProps.onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -387,7 +399,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     await act(async () => {
       const currentForm = findNodes(container, (n) => n.tagName === 'FORM')[0];
       const currentFormProps = getReactProps(currentForm);
-      currentFormProps.onSubmit({ preventDefault: () => {} });
+      await currentFormProps.onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalledWith(
@@ -439,7 +451,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     (window as any).confirm = (globalThis as any).confirm;
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -475,7 +487,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -510,7 +522,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -573,7 +585,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -672,7 +684,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -694,7 +706,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -703,7 +715,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       getReactProps(selects[0]).onChange({ target: { value: '' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -719,7 +731,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -731,7 +743,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -747,7 +759,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalled();
@@ -802,7 +814,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -848,7 +860,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -866,7 +878,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     expect(form).toBeDefined();
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalled();
@@ -884,7 +896,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SharedExpensesList: renderiza variações de split_type, parcelamento e estado vazio', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     // 1. Estado vazio
     await act(async () => {
@@ -998,7 +1010,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SplitSummary: renderiza estado zerado e múltiplos acertos pendentes com disparo de callback', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
     const mockOnSettle = vi.fn();
 
     // 1. Estado sem dívidas
@@ -1065,7 +1077,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SettlementHistory: renderiza registros com e sem notas, e respeita confirm true/false ao excluir', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
     const mockDelete = vi.fn();
 
     const sampleSettlements = [
@@ -1132,7 +1144,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SettlementModal: trata fallbacks de nome de membros, botão Preencher Total e ausência de dívida', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     const mockSetFrom = vi.fn();
     const mockSetTo = vi.fn();
@@ -1261,7 +1273,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -1381,7 +1393,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     // Erro de valor excedente deve ser exibido (linha 140)
@@ -1402,7 +1414,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     }
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalledWith(
@@ -1432,7 +1444,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     errorMsg = findNodes(container, (n) => n.textContent?.includes('Erro ao registrar o acerto.'));
@@ -1499,7 +1511,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     ];
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(
@@ -1725,7 +1737,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     const onToggleParticipant = vi.fn();
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     // 1. Renderiza SplitFields com splitType "custom"
     await act(async () => {
@@ -1870,7 +1882,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       const modalForm = findNodes(container, (n) => n.tagName === 'FORM').find((f) => getReactProps(f)?.className?.includes('space-y-4') || getReactProps(f)?.onSubmit);
       if (modalForm) {
         await act(async () => {
-          getReactProps(modalForm).onSubmit({ preventDefault: () => {} });
+          await getReactProps(modalForm).onSubmit({ preventDefault: () => {} });
         });
         expect(mockRecordSettlement).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -1933,7 +1945,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
@@ -1995,7 +2007,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     // 5. Submete formulário
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(
@@ -2017,7 +2029,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
     ];
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(
@@ -2075,7 +2087,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     ];
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(
@@ -2292,7 +2304,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -2311,7 +2323,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       const modalForm = findNodes(container, (n) => n.tagName === 'FORM').find((f) => getReactProps(f)?.className?.includes('space-y-4') || getReactProps(f)?.onSubmit);
       if (modalForm) {
         await act(async () => {
-          getReactProps(modalForm).onSubmit({ preventDefault: () => {} });
+          await getReactProps(modalForm).onSubmit({ preventDefault: () => {} });
         });
         expect(mockRecordSettlement).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -2352,7 +2364,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
@@ -2447,7 +2459,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
@@ -2581,7 +2593,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -2604,7 +2616,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('cobre ramificações de SplitFields (sem pagador, sem callbacks opcionais, sem people)', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     // 1. Renderiza SplitFields com callbacks opcionais ausentes
     await act(async () => {
