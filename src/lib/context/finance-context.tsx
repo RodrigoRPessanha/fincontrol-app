@@ -130,6 +130,7 @@ function reconcileFailedEntities<T extends { id: string }>(
 function collectChangedIds(before: FinanceState, after: FinanceState): Set<string> {
   const ids = new Set<string>();
   const keys: (keyof FinanceState)[] = [
+    'allWorkspaces',
     'allAccounts',
     'allCreditCards',
     'allCreditCardBills',
@@ -175,13 +176,35 @@ function collectChangedIds(before: FinanceState, after: FinanceState): Set<strin
   return ids;
 }
 
+function discardProvisionalWorkspace(state: FinanceState, id: string, previousId: string): FinanceState {
+  const workspaces = state.allWorkspaces.filter((workspace) => workspace.id !== id);
+  const removedPurchases = new Set(state.allPurchases.filter((purchase) => purchase.workspace_id === id).map((purchase) => purchase.id));
+  const next: FinanceState = {
+    ...state,
+    allWorkspaces: workspaces,
+    activeWorkspaceId: state.activeWorkspaceId === id
+      ? (workspaces.some((workspace) => workspace.id === previousId) ? previousId : workspaces[0]?.id ?? '')
+      : state.activeWorkspaceId,
+    allInstallments: state.allInstallments.filter((installment) => !removedPurchases.has(installment.purchase_id)),
+  };
+  const keys = ['allWorkspaceMembers', 'allAccounts', 'allCreditCards', 'allCreditCardBills', 'allPaymentMethods',
+    'allCategories', 'allTransactions', 'allPurchases', 'allPayments', 'allTransfers', 'allRecurring',
+    'allBudgets', 'allGoals', 'allSettlements', 'allPeople'] as const;
+  for (const key of keys) {
+    (next[key] as { workspace_id: string }[]) = state[key].filter((entity) => entity.workspace_id !== id);
+  }
+  return next;
+}
+
 function applyConfirmedEntities(
   targetState: FinanceState,
   sourceState: FinanceState,
-  changedIds: Set<string>
+  changedIds: Set<string>,
+  aliases: ReadonlyMap<string, string>
 ): FinanceState {
   const next: FinanceState = { ...targetState };
   const keys: (keyof FinanceState)[] = [
+    'allWorkspaces',
     'allAccounts',
     'allCreditCards',
     'allCreditCardBills',
@@ -199,6 +222,13 @@ function applyConfirmedEntities(
     'allWorkspaceMembers',
     'allPeople',
   ];
+  const canonicalChangedIds = new Set([...changedIds].map((id) => aliases.get(id) ?? id));
+  const canonicalize = (item: { id: string; workspace_id?: string }) => {
+    const id = aliases.get(item.id) ?? item.id;
+    const workspaceId = item.workspace_id ? aliases.get(item.workspace_id) ?? item.workspace_id : undefined;
+    if (id === item.id && workspaceId === item.workspace_id) return item;
+    return { ...item, id, ...('workspace_id' in item ? { workspace_id: workspaceId } : {}) };
+  };
   for (let k = 0; k < keys.length; k++) {
     const key = keys[k];
     const targetList = targetState[key] as { id: string }[];
@@ -206,13 +236,14 @@ function applyConfirmedEntities(
     if (targetList !== sourceList) {
       const sourceMap = new Map<string, { id: string }>();
       for (let i = 0; i < sourceList.length; i++) {
-        sourceMap.set(sourceList[i].id, sourceList[i]);
+        const item = canonicalize(sourceList[i]);
+        sourceMap.set(item.id, item);
       }
       const updatedList: { id: string }[] = [];
       const handled = new Set<string>();
       for (let i = 0; i < targetList.length; i++) {
-        const item = targetList[i];
-        if (changedIds.has(item.id)) {
+        const item = canonicalize(targetList[i]);
+        if (canonicalChangedIds.has(item.id)) {
           handled.add(item.id);
           const sItem = sourceMap.get(item.id);
           if (sItem) {
@@ -223,8 +254,8 @@ function applyConfirmedEntities(
         }
       }
       for (let i = 0; i < sourceList.length; i++) {
-        const item = sourceList[i];
-        if (changedIds.has(item.id) && !handled.has(item.id)) {
+        const item = canonicalize(sourceList[i]);
+        if (canonicalChangedIds.has(item.id) && !handled.has(item.id)) {
           updatedList.push(item);
           handled.add(item.id);
         }
@@ -244,6 +275,7 @@ function mergeSnapshotWithPendingState(
 
   const merged: FinanceState = { ...snapshot };
   const keys: (keyof FinanceState)[] = [
+    'allWorkspaces',
     'allAccounts',
     'allCreditCards',
     'allCreditCardBills',
@@ -570,6 +602,34 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     };
   }, [dataMode, auth?.isLoading, auth?.user?.id, effectiveRepository, commitState, initialWorkspaceId]);
 
+  const idMapRef = useRef<Map<string, string>>(new Map());
+  const resolveCanonicalId = useCallback(<T extends string | null | undefined>(id: T): T => {
+    if (!id) return id;
+    return (idMapRef.current.get(id) ?? id) as T;
+  }, []);
+
+  const registerCanonicalId = useCallback((tempId: string, canonicalId: string) => {
+    idMapRef.current.set(tempId, canonicalId);
+    const count = pendingEntityIdsRef.current.get(tempId);
+    if (count) {
+      pendingEntityIdsRef.current.set(canonicalId, count);
+    }
+  }, []);
+
+  const unresolvedWorkspacesRef = useRef(new Set<string>());
+  const pendingWorkspaceEditsRef = useRef(new Set<{ workspaceId: string; patch: Partial<Workspace> }>());
+  const withPendingWorkspaceEdits = useCallback((workspace: Workspace): Workspace => {
+    let merged = workspace;
+    for (const edit of pendingWorkspaceEditsRef.current) {
+      if (resolveCanonicalId(edit.workspaceId) === workspace.id) {
+        for (const key of ['name', 'currency', 'tracking_mode'] as const) {
+          if (edit.patch[key] !== undefined) merged = { ...merged, [key]: edit.patch[key] };
+        }
+      }
+    }
+    return merged;
+  }, [resolveCanonicalId]);
+
   const refreshData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -578,7 +638,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         const targetId = stateRef.current.activeWorkspaceId;
         const snapshot = await effectiveRepository.loadSnapshot(targetId);
         const reconciled = mergeSnapshotWithPendingState(snapshot, stateRef.current, pendingEntityIdsRef.current);
-        commitState(reconciled);
+        if (snapshot.allWorkspaceMembers.some((m) => m.workspace_id === targetId && m.user_id === auth?.user?.id)) {
+          unresolvedWorkspacesRef.current.delete(targetId);
+        }
+        commitState({ ...reconciled, allWorkspaces: reconciled.allWorkspaces.map(withPendingWorkspaceEdits) });
       } else {
         const { snapshot } = loadFinanceSnapshot(localStorage);
         commitState(snapshot);
@@ -590,7 +653,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     } finally {
       setIsLoading(false);
     }
-  }, [dataMode, effectiveRepository, commitState]);
+  }, [dataMode, effectiveRepository, commitState, auth?.user?.id, withPendingWorkspaceEdits]);
 
   // Contrato desacoplado de dependências para actions de domínio
   const currentUserId = auth?.user?.id;
@@ -616,20 +679,6 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     [commitState, dataMode, currentUserId]
   );
 
-  const idMapRef = useRef<Map<string, string>>(new Map());
-  const resolveCanonicalId = useCallback(<T extends string | null | undefined>(id: T): T => {
-    if (!id) return id;
-    return (idMapRef.current.get(id) ?? id) as T;
-  }, []);
-
-  const registerCanonicalId = useCallback((tempId: string, canonicalId: string) => {
-    idMapRef.current.set(tempId, canonicalId);
-    const count = pendingEntityIdsRef.current.get(tempId);
-    if (count) {
-      pendingEntityIdsRef.current.set(canonicalId, count);
-    }
-  }, []);
-
   const pendingMutationsCountRef = useRef(0);
   const failedWorkspacesRef = useRef<Set<string>>(new Set());
   const rollbackBaseStateRef = useRef<FinanceState | null>(null);
@@ -640,13 +689,17 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
   const runMutationInternal = useCallback(
     <T,>(
       localAction: () => T,
-      remotePersist?: (result: T, confirmPending?: () => void) => Promise<unknown>,
-      targetWorkspaceId?: string,
+      remotePersist?: (result: T, confirmPending?: (confirmed?: Partial<FinanceState>) => void) => Promise<unknown>,
+      targetWorkspaceId?: string | ((result: T) => string),
       entityId?: string
     ): { result: T; done: Promise<T> } => {
       if (dataMode === 'supabase') boundary.assertCurrent();
       if (dataMode === 'supabase' && !currentUserId) {
         throw new Error('Operação não permitida: usuário não autenticado no modo Supabase.');
+      }
+      if (dataMode === 'supabase' && typeof targetWorkspaceId !== 'function' &&
+        unresolvedWorkspacesRef.current.has(resolveCanonicalId(targetWorkspaceId ?? stateRef.current.activeWorkspaceId))) {
+        throw new Error('Workspace aguardando confirmação de acesso. Sincronize os dados antes de gravar.');
       }
 
       if (dataMode === 'local' || !remotePersist) {
@@ -671,7 +724,6 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
       });
       done.catch(() => {});
 
-      const wsId = targetWorkspaceId ?? stateRef.current.activeWorkspaceId;
       if (pendingMutationsCountRef.current === 0) {
         rollbackBaseStateRef.current = stateRef.current;
         hasSuccessfulMutationsRef.current = false;
@@ -686,6 +738,8 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         throw err;
       }
       const afterState = stateRef.current;
+      const wsId = typeof targetWorkspaceId === 'function' ? targetWorkspaceId(result) : targetWorkspaceId ?? previousState.activeWorkspaceId;
+      const workspaceName = afterState.allWorkspaces.find((w) => resolveCanonicalId(w.id) === resolveCanonicalId(wsId))?.name;
       const changedIds = collectChangedIds(previousState, afterState);
       if (entityId) {
         changedIds.add(entityId);
@@ -715,6 +769,19 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           }
         }
       };
+      let remoteConfirmed = false;
+      let confirmedOverrides: Partial<FinanceState> = {};
+      const acknowledge = (confirmed?: Partial<FinanceState>) => {
+        remoteConfirmed = true;
+        confirmedOverrides = { ...confirmedOverrides, ...confirmed };
+        hasSuccessfulMutationsRef.current = true;
+        if (rollbackBaseStateRef.current) {
+          rollbackBaseStateRef.current = applyConfirmedEntities(
+            rollbackBaseStateRef.current, { ...afterState, ...confirmedOverrides }, changedIds, idMapRef.current
+          );
+        }
+        confirmPending();
+      };
 
       savingCountRef.current += 1;
       pendingMutationsCountRef.current += 1;
@@ -724,16 +791,8 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
       mutationQueueRef.current = mutationQueueRef.current
         .then(async () => {
           try {
-            const persisted = await remotePersist(result, confirmPending);
-            confirmPending();
-            hasSuccessfulMutationsRef.current = true;
-            if (rollbackBaseStateRef.current) {
-              rollbackBaseStateRef.current = applyConfirmedEntities(
-                rollbackBaseStateRef.current,
-                afterState,
-                changedIds
-              );
-            }
+            const persisted = await remotePersist(result, acknowledge);
+            acknowledge();
             if (failedWorkspacesRef.current.size === 0) {
               setError(null);
             }
@@ -741,11 +800,12 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           } catch (err) {
             console.error('Falha na persistência remota, reconciliando estado com repositório:', err);
             const errorObj = err instanceof Error ? err : new Error(String(err));
-            Object.assign(errorObj, { workspace_id: wsId, workspace_name: previousState.allWorkspaces.find((w) => w.id === wsId)?.name });
+            const canonicalWorkspaceId = resolveCanonicalId(wsId);
+            Object.assign(errorObj, { workspace_id: canonicalWorkspaceId, workspace_name: workspaceName });
             setError(errorObj);
-            failedWorkspacesRef.current.add(wsId);
-            for (const id of changedIds) {
-              failedEntityIdsRef.current.add(id);
+            failedWorkspacesRef.current.add(canonicalWorkspaceId);
+            if (!remoteConfirmed) for (const id of changedIds) {
+              failedEntityIdsRef.current.add(resolveCanonicalId(id));
             }
             rejectRemote(errorObj);
           } finally {
@@ -755,13 +815,20 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             if (pendingMutationsCountRef.current === 0) {
               if (failedWorkspacesRef.current.size > 0) {
                 const currentActiveWs = stateRef.current.activeWorkspaceId;
-                const shouldReconcile = failedWorkspacesRef.current.has(currentActiveWs);
+                const shouldReconcile = [...failedWorkspacesRef.current].some((id) => resolveCanonicalId(id) === resolveCanonicalId(currentActiveWs));
                 failedWorkspacesRef.current.clear();
                 if (shouldReconcile) {
                   try {
-                    const confirmed = await effectiveRepository.loadSnapshot(currentActiveWs);
+                    let confirmed = await effectiveRepository.loadSnapshot(resolveCanonicalId(currentActiveWs));
+                    if (!confirmed.allWorkspaces.some((w) => w.id === confirmed.activeWorkspaceId)) {
+                      const fallback = confirmed.allWorkspaces.find((w) => w.id === previousState.activeWorkspaceId) ?? confirmed.allWorkspaces[0];
+                      confirmed = fallback ? await effectiveRepository.loadSnapshot(fallback.id) : { ...confirmed, activeWorkspaceId: '' };
+                    }
                     if (stateRef.current.activeWorkspaceId === currentActiveWs) {
-                      commitState(confirmed);
+                      if (confirmed.allWorkspaceMembers.some((m) => m.workspace_id === confirmed.activeWorkspaceId && m.user_id === currentUserId)) {
+                        unresolvedWorkspacesRef.current.delete(confirmed.activeWorkspaceId);
+                      }
+                      commitState({ ...confirmed, allWorkspaces: confirmed.allWorkspaces.map(withPendingWorkspaceEdits) });
                     }
                   } catch (reconcileErr) {
                     console.error('Falha ao recarregar snapshot após erro de persistência:', reconcileErr);
@@ -772,6 +839,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
                         const s = stateRef.current;
                         commitState({
                           ...s,
+                          allWorkspaces: reconcileFailedEntities(s.allWorkspaces, base?.allWorkspaces, failedIds),
                           allAccounts: reconcileFailedEntities(s.allAccounts, base?.allAccounts, failedIds),
                           allCreditCards: reconcileFailedEntities(s.allCreditCards, base?.allCreditCards, failedIds),
                           allCreditCardBills: reconcileFailedEntities(s.allCreditCardBills, base?.allCreditCardBills, failedIds),
@@ -811,14 +879,14 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
 
       return { result, done };
     },
-    [dataMode, effectiveRepository, commitState, currentUserId, boundary]
+    [dataMode, effectiveRepository, commitState, currentUserId, boundary, resolveCanonicalId, withPendingWorkspaceEdits]
   );
 
   const runMutation = useCallback(
     <T,>(
       localAction: () => T,
-      remotePersist?: (result: T, confirmPending?: () => void) => Promise<unknown>,
-      targetWorkspaceId?: string,
+      remotePersist?: (result: T, confirmPending?: (confirmed?: Partial<FinanceState>) => void) => Promise<unknown>,
+      targetWorkspaceId?: string | ((result: T) => string),
       entityId?: string
     ): T => {
       return runMutationInternal(localAction, remotePersist, targetWorkspaceId, entityId).result;
@@ -1007,13 +1075,17 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     async (id: string) => {
       const seq = ++workspaceSwitchSeqRef.current;
       if (dataMode === 'supabase') {
-        setActiveWorkspaceId(id);
-        stateRef.current.activeWorkspaceId = id;
+        const workspaceId = resolveCanonicalId(id);
+        setActiveWorkspaceId(workspaceId);
+        stateRef.current.activeWorkspaceId = workspaceId;
         setIsLoading(true);
         try {
-          const snapshot = await effectiveRepository.loadSnapshot(id);
+          const snapshot = await effectiveRepository.loadSnapshot(workspaceId);
           if (workspaceSwitchSeqRef.current === seq) {
-            commitState(snapshot);
+            if (snapshot.allWorkspaceMembers.some((m) => m.workspace_id === workspaceId && m.user_id === currentUserId)) {
+              unresolvedWorkspacesRef.current.delete(workspaceId);
+            }
+            commitState({ ...snapshot, allWorkspaces: snapshot.allWorkspaces.map(withPendingWorkspaceEdits) });
           }
         } catch (err) {
           if (workspaceSwitchSeqRef.current === seq) {
@@ -1029,34 +1101,62 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         actions.setActiveWorkspaceId(deps, resolveCanonicalId(id));
       }
     },
-    [dataMode, deps, effectiveRepository, commitState, resolveCanonicalId]
+    [dataMode, deps, effectiveRepository, commitState, resolveCanonicalId, currentUserId, withPendingWorkspaceEdits]
   );
 
   const handleCreateWorkspace = useCallback(
-    (name: string, tracking_mode?: WorkspaceTrackingMode) =>
-      runMutation(
-        () => actions.createWorkspace(deps, name, tracking_mode),
-        async (createdWs) => {
-          const remoteWs = await effectiveRepository.createWorkspace({
-            name: createdWs.name,
-            owner_id: createdWs.owner_id,
-            currency: createdWs.currency,
-            tracking_mode: createdWs.tracking_mode,
-          });
+    (name: string, tracking_mode?: WorkspaceTrackingMode) => {
+      let provisionalOwnerId = '';
+      let previousWorkspaceId = '';
+      return runMutation(
+        () => {
+          previousWorkspaceId = stateRef.current.activeWorkspaceId;
+          const created = actions.createWorkspace(deps, name, tracking_mode);
+          provisionalOwnerId = deps.getState().allWorkspaceMembers.find((m) => m.workspace_id === created.id && m.user_id === created.owner_id)!.id;
+          return created;
+        },
+        async (createdWs, confirmPending) => {
+          let remoteWs: Workspace;
+          try {
+            remoteWs = await effectiveRepository.createWorkspace({
+              name: createdWs.name,
+              owner_id: createdWs.owner_id,
+              currency: createdWs.currency,
+              tracking_mode: createdWs.tracking_mode,
+            });
+          } catch (err) {
+            commitState(discardProvisionalWorkspace(stateRef.current, createdWs.id, previousWorkspaceId));
+            throw err;
+          }
           registerCanonicalId(createdWs.id, remoteWs.id);
-          const members = await effectiveRepository.getWorkspaceMembers(remoteWs.id);
+          unresolvedWorkspacesRef.current.add(remoteWs.id);
+          const partial = stateRef.current;
+          commitState({
+            ...partial,
+            activeWorkspaceId: partial.activeWorkspaceId === createdWs.id ? remoteWs.id : partial.activeWorkspaceId,
+            allWorkspaces: [...partial.allWorkspaces.filter((w) => w.id !== createdWs.id && w.id !== remoteWs.id), withPendingWorkspaceEdits(remoteWs)],
+            allWorkspaceMembers: partial.allWorkspaceMembers.filter((m) => m.workspace_id !== createdWs.id && m.workspace_id !== remoteWs.id),
+          });
+          confirmPending?.({ allWorkspaces: [remoteWs], allWorkspaceMembers: [] });
+          let members: WorkspaceMember[];
+          try {
+            members = await effectiveRepository.getWorkspaceMembers(remoteWs.id);
+          } catch {
+            const recovered = await effectiveRepository.loadSnapshot(remoteWs.id);
+            members = recovered.allWorkspaceMembers.filter((m) => m.workspace_id === remoteWs.id);
+          }
           const owner = members.find((m) => m.workspace_id === remoteWs.id && m.user_id === remoteWs.owner_id && m.role === 'owner');
           if (!owner) throw new Error('Não foi possível confirmar o membro proprietário do novo workspace.');
-          const provisionalMembers = stateRef.current.allWorkspaceMembers.filter((m) => m.workspace_id === createdWs.id);
-          for (const member of provisionalMembers) {
-            const canonical = members.find((m) => m.workspace_id === remoteWs.id && m.user_id === member.user_id);
-            if (canonical) registerCanonicalId(member.id, canonical.id);
-          }
+          registerCanonicalId(provisionalOwnerId, owner.id);
+          unresolvedWorkspacesRef.current.delete(remoteWs.id);
+          confirmPending?.({ allWorkspaceMembers: members });
           const current = stateRef.current;
+          const remapWorkspace = <T extends { workspace_id: string }>(entities: T[]): T[] =>
+            entities.map((entity) => entity.workspace_id === createdWs.id ? { ...entity, workspace_id: remoteWs.id } : entity);
           commitState({
             ...current,
             activeWorkspaceId: current.activeWorkspaceId === createdWs.id ? remoteWs.id : current.activeWorkspaceId,
-            allWorkspaces: current.allWorkspaces.map((w) => (w.id === createdWs.id ? remoteWs : w)),
+            allWorkspaces: [...current.allWorkspaces.filter((w) => w.id !== createdWs.id && w.id !== remoteWs.id), withPendingWorkspaceEdits(remoteWs)],
             allWorkspaceMembers: [
               ...current.allWorkspaceMembers.filter((m) => m.workspace_id !== createdWs.id && m.workspace_id !== remoteWs.id),
               ...members.filter((m) => m.workspace_id === remoteWs.id),
@@ -1067,21 +1167,61 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
               paid_by_member_id: resolveCanonicalId(t.paid_by_member_id),
               splits: t.splits?.map((s) => ({ ...s, member_id: resolveCanonicalId(s.member_id) })),
             } : t),
+            allAccounts: remapWorkspace(current.allAccounts),
+            allCreditCards: remapWorkspace(current.allCreditCards),
+            allCreditCardBills: remapWorkspace(current.allCreditCardBills),
+            allPaymentMethods: remapWorkspace(current.allPaymentMethods),
+            allCategories: remapWorkspace(current.allCategories),
+            allPurchases: remapWorkspace(current.allPurchases).map((p) => p.workspace_id === remoteWs.id ? {
+              ...p,
+              paid_by_member_id: resolveCanonicalId(p.paid_by_member_id),
+              splits: p.splits?.map((s) => ({ ...s, member_id: resolveCanonicalId(s.member_id) })),
+            } : p),
+            allPayments: remapWorkspace(current.allPayments),
+            allTransfers: remapWorkspace(current.allTransfers),
+            allRecurring: remapWorkspace(current.allRecurring),
+            allBudgets: remapWorkspace(current.allBudgets),
+            allGoals: remapWorkspace(current.allGoals),
+            allPeople: remapWorkspace(current.allPeople),
+            allSettlements: remapWorkspace(current.allSettlements).map((s) => s.workspace_id === remoteWs.id ? {
+              ...s,
+              from_member_id: resolveCanonicalId(s.from_member_id),
+              to_member_id: resolveCanonicalId(s.to_member_id),
+            } : s),
           });
           return remoteWs;
-        }
-      ),
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
+        },
+        (createdWs) => createdWs.id
+      );
+    },
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId, withPendingWorkspaceEdits]
   );
 
   const handleUpdateWorkspace = useCallback(
     (id: string, data: Partial<Workspace>) => {
+      const edit = { workspaceId: id, patch: data };
       return runMutation(
-        () => actions.updateWorkspace(deps, resolveCanonicalId(id), data),
-        () => effectiveRepository.updateWorkspace(resolveCanonicalId(id), data)
+        () => {
+          actions.updateWorkspace(deps, resolveCanonicalId(id), data);
+          if (dataMode === 'supabase') pendingWorkspaceEditsRef.current.add(edit);
+        },
+        async (_result, confirmPending) => {
+          try {
+            const saved = await effectiveRepository.updateWorkspace(resolveCanonicalId(id), data);
+            pendingWorkspaceEditsRef.current.delete(edit);
+            const current = stateRef.current;
+            commitState({ ...current, allWorkspaces: current.allWorkspaces.map((w) => w.id === saved.id ? withPendingWorkspaceEdits(saved) : w) });
+            confirmPending?.({ allWorkspaces: [saved] });
+            return saved;
+          } finally {
+            pendingWorkspaceEditsRef.current.delete(edit);
+          }
+        },
+        id,
+        id
       );
     },
-    [deps, effectiveRepository, runMutation, resolveCanonicalId]
+    [deps, effectiveRepository, runMutation, resolveCanonicalId, dataMode, commitState, withPendingWorkspaceEdits]
   );
 
   const handleAddWorkspaceMember = useCallback(
@@ -1096,19 +1236,19 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         () => actions.addWorkspaceMember(deps, emailOrUserId, role),
         async () => {
           await effectiveRepository.addWorkspaceMember({
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
             user_id: resolvedUserId,
             role,
           });
-          const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
-          if (stateRef.current.activeWorkspaceId === targetWorkspaceId) {
+          const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
+          if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState(fresh);
           }
         },
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState]
+    [deps, effectiveRepository, runMutation, commitState, resolveCanonicalId]
   );
 
 
@@ -1121,11 +1261,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           const saved = await effectiveRepository.saveAccount({
             ...accountData,
             active: res.active,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allAccounts: current.allAccounts.map((a) => (a.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...a, id: saved.id } : saved) : a)),
@@ -1135,7 +1275,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleUpdateAccount = useCallback(
@@ -1147,10 +1287,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           const saved = await effectiveRepository.saveAccount({
             ...data,
             id: resolveCanonicalId(id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           } as any);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allAccounts: current.allAccounts.map((a) => (resolveCanonicalId(a.id) === resolveCanonicalId(id) ? { ...a, ...saved } : a)),
@@ -1185,11 +1325,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res) => {
           const saved = await effectiveRepository.saveCreditCard({
             ...cardData,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allCreditCards: current.allCreditCards.map((c) => (c.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...c, id: saved.id } : saved) : c)),
@@ -1199,7 +1339,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleUpdateCreditCard = useCallback(
@@ -1211,10 +1351,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           const saved = await effectiveRepository.saveCreditCard({
             ...data,
             id: resolveCanonicalId(id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           } as any);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allCreditCards: current.allCreditCards.map((c) => (resolveCanonicalId(c.id) === resolveCanonicalId(id) ? { ...c, ...saved } : c)),
@@ -1237,7 +1377,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res, confirmPending) => {
           const saved = await effectiveRepository.savePayment({
             operation_key: operationKey,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
             credit_card_bill_id: resolveCanonicalId(billId),
             account_id: (resolveCanonicalId(accountId) ?? res.account_id ?? null) as string | null,
             affects_balance: res.affects_balance,
@@ -1246,9 +1386,9 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             notes: res.notes,
           });
           if (isOperationReplay(saved)) {
-            const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+            const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
             confirmPending?.();
-            if (stateRef.current.activeWorkspaceId === targetWorkspaceId) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
+            if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
           }
           return saved;
         },
@@ -1280,11 +1420,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res) => {
           const saved = await effectiveRepository.savePaymentMethod({
             ...pmData,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allPaymentMethods: current.allPaymentMethods.map((p) => (p.id === res.id ? saved : p)),
@@ -1294,7 +1434,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleAddCategory = useCallback(
@@ -1305,11 +1445,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res) => {
           const saved = await effectiveRepository.saveCategory({
             ...catData,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allCategories: current.allCategories.map((c) => (c.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...c, id: saved.id } : saved) : c)),
@@ -1319,7 +1459,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleUpdateCategory = useCallback(
@@ -1331,10 +1471,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           const saved = await effectiveRepository.saveCategory({
             ...data,
             id: resolveCanonicalId(id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           } as any);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allCategories: current.allCategories.map((c) => (resolveCanonicalId(c.id) === resolveCanonicalId(id) ? { ...c, ...saved } : c)),
@@ -1373,18 +1513,18 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           });
           registerCanonicalId(res.id, saved.id);
           if (isOperationReplay(saved)) {
-            const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+            const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
             confirmPending?.();
-            if (stateRef.current.activeWorkspaceId === targetWorkspaceId) {
+            if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
               commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
             }
             return saved;
           }
           if (res.credit_card_bill_id && saved.credit_card_bill_id) {
             idMapRef.current.set(res.credit_card_bill_id, saved.credit_card_bill_id);
-            const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+            const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
             confirmPending?.();
-            if (stateRef.current.activeWorkspaceId === targetWorkspaceId) {
+            if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
               const current = stateRef.current;
               const reconciled = {
                 ...current,
@@ -1432,7 +1572,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
               member_id: resolveCanonicalId(s.member_id),
               person_id: resolveCanonicalId(s.person_id),
             })),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           } as any);
         },
         targetWorkspaceId,
@@ -1475,11 +1615,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             splits: res.splits?.map((split) => ({
               ...split, member_id: resolveCanonicalId(split.member_id), person_id: resolveCanonicalId(split.person_id),
             })),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allTransactions: current.allTransactions.map((t) => (t.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...t, id: saved.id } : saved) : t)),
@@ -1521,12 +1661,12 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
               member_id: resolveCanonicalId(s.member_id),
               person_id: resolveCanonicalId(s.person_id),
             })),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
 
           registerCanonicalId(localPurchase.id, remotePurchase.id);
 
-          const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+          const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
           const remoteInsts = fresh.allInstallments.filter((ri) => ri.purchase_id === remotePurchase.id);
           localInsts.forEach((li) => {
             const ri = remoteInsts.find((r) => r.installment_number === li.installment_number);
@@ -1540,7 +1680,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
 
           confirmPending?.();
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             const reconciled = {
               ...current,
               allPurchases: current.allPurchases.map((p) => (p.id === localPurchase.id ? remotePurchase : p)),
@@ -1595,20 +1735,20 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             account_id: (resolveCanonicalId(res.account_id) ?? null) as string | null,
             payment_method_id: (canonicalPaymentMethodId ?? null) as string | null,
             affects_balance: res.affects_balance,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allPayments: current.allPayments.map((p) => (p.id === res.id ? saved : p)),
             });
           }
           if (isOperationReplay(saved)) {
-            const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+            const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
             confirmPending?.();
-            if (stateRef.current.activeWorkspaceId === targetWorkspaceId) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
+            if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
           }
           return saved;
         },
@@ -1641,7 +1781,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res, confirmPending) => {
           const saved = await effectiveRepository.saveTransfer({
             operation_key: operationKey,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
             from_account_id: resolveCanonicalId(fromAccountId),
             to_account_id: resolveCanonicalId(toAccountId),
             amount,
@@ -1650,11 +1790,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) commitState({ ...current, allTransfers: current.allTransfers.map((item) => item.id === res.id ? saved : item) });
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) commitState({ ...current, allTransfers: current.allTransfers.map((item) => item.id === res.id ? saved : item) });
           if (isOperationReplay(saved)) {
-            const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+            const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
             confirmPending?.();
-            if (stateRef.current.activeWorkspaceId === targetWorkspaceId) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
+            if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
           }
           return saved;
         },
@@ -1682,16 +1822,16 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             to_person_id: resolveCanonicalId(data.to_person_id) ?? res.to_person_id,
             payment_account_id: (resolveCanonicalId(data.payment_account_id) ?? null) as string | null,
             settlement_date: res.settlement_date,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) commitState({ ...current, allSettlements: current.allSettlements.map((item) => item.id === res.id ? saved : item) });
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) commitState({ ...current, allSettlements: current.allSettlements.map((item) => item.id === res.id ? saved : item) });
           if (isOperationReplay(saved)) {
-            const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+            const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
             confirmPending?.();
-            if (stateRef.current.activeWorkspaceId === targetWorkspaceId) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
+            if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
           }
           return saved;
         },
@@ -1725,13 +1865,13 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         () => actions.addPerson(deps, data),
         async (res) => {
           const saved = await effectiveRepository.savePerson({
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
             name: res.name,
             archived: res.archived,
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allPeople: (current.allPeople || []).map((p) => (p.id === res.id ? saved : p)),
@@ -1741,7 +1881,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleUpdatePerson = useCallback(
@@ -1753,7 +1893,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res) => {
           await effectiveRepository.savePerson({
             id: resolveCanonicalId(id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
             name: res.name,
             archived: res.archived,
           });
@@ -1794,17 +1934,17 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             category_id: resolveCanonicalId(data.category_id),
             payment_method_id: resolveCanonicalId(data.payment_method_id),
             credit_card_id: resolveCanonicalId(data.credit_card_id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allRecurring: current.allRecurring.map((r) => (r.id === res.id ? { ...r, id: saved.id } : r)),
             });
           }
-          await effectiveRepository.materializeRecurring(targetWorkspaceId);
+          await effectiveRepository.materializeRecurring(resolveCanonicalId(targetWorkspaceId));
           confirmPending?.();
           await refreshData();
         },
@@ -1832,9 +1972,9 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             category_id: resolveCanonicalId(currentItem.category_id),
             payment_method_id: resolveCanonicalId(currentItem.payment_method_id),
             credit_card_id: resolveCanonicalId(currentItem.credit_card_id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
-          await effectiveRepository.materializeRecurring(targetWorkspaceId);
+          await effectiveRepository.materializeRecurring(resolveCanonicalId(targetWorkspaceId));
           confirmPending?.();
           await refreshData();
         },
@@ -1870,7 +2010,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           const canonicalBudgetId = idMapRef.current.get(res.id);
           const saved = await effectiveRepository.saveBudget({
             id: canonicalBudgetId,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
             category_id: canonicalCategoryId,
             month: res.month,
             year: res.year,
@@ -1878,7 +2018,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allBudgets: current.allBudgets.map((bg) => (bg.id === res.id ? saved : bg)),
@@ -1899,11 +2039,11 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         async (res) => {
           const saved = await effectiveRepository.saveGoal({
             ...goalData,
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allGoals: current.allGoals.map((g) => (g.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...g, id: saved.id } : saved) : g)),
@@ -1913,7 +2053,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId]
+    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
   const handleUpdateGoal = useCallback(
@@ -1925,10 +2065,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           const saved = await effectiveRepository.saveGoal({
             ...data,
             id: resolveCanonicalId(id),
-            workspace_id: targetWorkspaceId,
+            workspace_id: resolveCanonicalId(targetWorkspaceId),
           } as any);
           const current = stateRef.current;
-          if (current.activeWorkspaceId === targetWorkspaceId) {
+          if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
               allGoals: current.allGoals.map((g) => (resolveCanonicalId(g.id) === resolveCanonicalId(id) ? { ...g, ...saved } : g)),
@@ -1959,10 +2099,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         () => actions.depositGoal(deps, goalId, amount, accountId),
         async (_, confirmPending) => {
           if (!effectiveRepository.recordGoalDeposit) throw new Error('O repositório não suporta aportes atômicos.');
-          await effectiveRepository.recordGoalDeposit(targetWorkspaceId, resolveCanonicalId(goalId), resolveCanonicalId(accountId), amount, key);
-          const fresh = await effectiveRepository.loadSnapshot(targetWorkspaceId);
+          await effectiveRepository.recordGoalDeposit(resolveCanonicalId(targetWorkspaceId), resolveCanonicalId(goalId), resolveCanonicalId(accountId), amount, key);
+          const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(targetWorkspaceId));
           confirmPending?.();
-          if (stateRef.current.activeWorkspaceId === targetWorkspaceId) {
+          if (stateRef.current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
           }
         },

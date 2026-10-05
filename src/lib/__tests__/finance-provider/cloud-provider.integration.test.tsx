@@ -220,6 +220,107 @@ describe.runIf(isCloudEnabled)('FinanceProvider Real Cloud Integration (Staging)
     };
   }
 
+  it('A8-C02: queued first expense survives switching away before workspace creation finishes', async () => {
+    const repository = new SupabaseFinanceRepository(userClient1);
+    const create = repository.createWorkspace.bind(repository);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let id = '';
+    repository.createWorkspace = async data => { await gate; const ws = await create(data); id = ws.id; return ws; };
+    const browser = await mountCloudProvider(repository, testUser1Id, testUser1Email);
+    try {
+      await act(async () => { browser.getCtx().createWorkspace('QA A8 queued-switch', 'expense_tracker'); });
+      const owner = browser.getCtx().workspaceMembers[0];
+      await act(async () => {
+        const saved = browser.getCtx().addTransactionAsync({ description: 'QA A8 queued expense', type: 'expense', amount: 40, status: 'pending', transaction_date: '2026-10-04', due_date: '2026-10-04', paid_by_member_id: owner.id, split_type: 'custom', splits: [{ member_id: owner.id, amount: 40 }] });
+        await browser.getCtx().setActiveWorkspaceId(testWorkspaceId);
+        release();
+        await saved;
+        await browser.getCtx().waitForPendingMutations();
+      });
+      expect(browser.getCtx().error).toBeNull();
+      const txs = await repository.getTransactions(id);
+      expect(txs).toHaveLength(1);
+    } finally {
+      release();
+      await act(async () => { await browser.getCtx().waitForPendingMutations(); });
+      if (id) await repository.deleteWorkspace(id);
+    }
+  });
+
+  it('A8-C03: first account queued during workspace creation persists in the canonical workspace', async () => {
+    const repository = new SupabaseFinanceRepository(userClient1);
+    const create = repository.createWorkspace.bind(repository);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let id = '';
+    repository.createWorkspace = async data => { await gate; const ws = await create(data); id = ws.id; return ws; };
+    const browser = await mountCloudProvider(repository, testUser1Id, testUser1Email);
+    try {
+      await act(async () => { browser.getCtx().createWorkspace('QA A8 queued-account'); });
+      await act(async () => {
+        browser.getCtx().addAccount({ name: 'QA A8 first account', institution: 'QA', type: 'checking', initial_balance: 0, current_balance: 0, color: '#000000', active: true });
+        release();
+        await browser.getCtx().waitForPendingMutations();
+      });
+      expect(browser.getCtx().error).toBeNull();
+      const accounts = await repository.getAccounts(id);
+      expect(accounts).toHaveLength(1);
+    } finally {
+      release();
+      await act(async () => { await browser.getCtx().waitForPendingMutations(); });
+      if (id) await repository.deleteWorkspace(id);
+    }
+  });
+
+  it('A8-RC01: queued mode update agrees with the persisted workspace after creation completes', async () => {
+    const repository = new SupabaseFinanceRepository(userClient1);
+    const create = repository.createWorkspace.bind(repository);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let id = '';
+    repository.createWorkspace = async data => { await gate; const ws = await create(data); id = ws.id; return ws; };
+    const browser = await mountCloudProvider(repository, testUser1Id, testUser1Email);
+    try {
+      await act(async () => { browser.getCtx().createWorkspace('QA A8 R01 mode'); });
+      await act(async () => {
+        browser.getCtx().updateWorkspace(browser.getCtx().activeWorkspace.id, { tracking_mode: 'expense_tracker' });
+        release();
+        await browser.getCtx().waitForPendingMutations();
+      });
+      const stored = (await repository.getWorkspaces()).find(w => w.id === id)!;
+      expect(stored.tracking_mode).toBe('expense_tracker');
+      expect(browser.getCtx().activeWorkspace.tracking_mode).toBe(stored.tracking_mode);
+      expect(browser.getCtx().error).toBeNull();
+    } finally {
+      release();
+      await act(async () => { await browser.getCtx().waitForPendingMutations(); });
+      if (id) await repository.deleteWorkspace(id);
+    }
+  });
+
+  it('A8-RC02: a member-fetch error after committed creation does not leave a provisional identity', async () => {
+    const repository = new SupabaseFinanceRepository(userClient1);
+    const create = repository.createWorkspace.bind(repository);
+    let id = '';
+    repository.createWorkspace = async data => { const ws = await create(data); id = ws.id; return ws; };
+    repository.getWorkspaceMembers = async () => { throw new Error('A8 member fetch offline'); };
+    const browser = await mountCloudProvider(repository, testUser1Id, testUser1Email);
+    try {
+      await act(async () => {
+        browser.getCtx().createWorkspace('QA A8 R02 member-fetch');
+        await browser.getCtx().waitForPendingMutations();
+      });
+      const canonical = (await repo1.getWorkspaceMembers(id))[0];
+      expect(canonical).toBeDefined();
+      expect(browser.getCtx().activeWorkspace.id).toBe(id);
+      expect(browser.getCtx().workspaceMembers[0].id).toBe(canonical.id);
+    } finally {
+      await act(async () => { await browser.getCtx().waitForPendingMutations(); });
+      if (id) await repo1.deleteWorkspace(id);
+    }
+  });
+
   it('PM-01: first expense in a newly created workspace uses the canonical Owner without reload', async () => {
     const browser = await mountCloudProvider(repo1, testUser1Id, testUser1Email);
     let workspaceId = '';

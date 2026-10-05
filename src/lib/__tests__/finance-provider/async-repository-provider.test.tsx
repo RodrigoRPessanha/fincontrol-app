@@ -182,13 +182,13 @@ function createMockRepository(snapshot: FinanceState) {
       const workspace = { ...data, id: 'ws-remote-created', created_at: '2026-01-01' };
       snapshot.allWorkspaces.push(workspace);
       snapshot.allWorkspaceMembers.push({ id: 'wsm-remote-owner', workspace_id: workspace.id, user_id: data.owner_id, role: 'owner', created_at: '2026-01-01', user: { id: data.owner_id, name: 'QA Owner', email: 'qa@example.com', created_at: '2026-01-01' } });
-      return workspace;
+      return structuredClone(workspace);
     }),
-    updateWorkspace: vi.fn().mockImplementation(async (id, data) => ({
-      ...snapshot.allWorkspaces[0],
-      ...data,
-      id,
-    })),
+    updateWorkspace: vi.fn().mockImplementation(async (id, data) => {
+      const workspace = snapshot.allWorkspaces.find(w => w.id === id)!;
+      Object.assign(workspace, data);
+      return structuredClone(workspace);
+    }),
     deleteWorkspace: vi.fn().mockResolvedValue(undefined),
     getWorkspaceMembers: vi.fn().mockImplementation(async () => snapshot.allWorkspaceMembers),
     addWorkspaceMember: vi.fn().mockImplementation(async (data) => ({
@@ -672,6 +672,382 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     expect(getCtx().activeWorkspace.id).toBe('ws-1');
     expect(getCtx().workspaceMembers.map((m) => m.id)).toEqual(['wsm-1', 'wsm-2']);
     expect(getCtx().error).toBeNull();
+  });
+
+  it.each([false, true])('A8-P01: removes a rejected first expense (snapshot unavailable=%s)', async (snapshotUnavailable) => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async (id) => {
+      if (snapshotUnavailable && id === 'ws-remote-created') throw new Error('A8 snapshot unavailable');
+      return structuredClone({ ...snapshot, activeWorkspaceId: id });
+    });
+    repo.getWorkspaces = vi.fn(async () => structuredClone(snapshot.allWorkspaces));
+    repo.getWorkspaceMembers = vi.fn(async (id) => structuredClone(snapshot.allWorkspaceMembers.filter(m => m.workspace_id === id)));
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    repo.saveTransaction = vi.fn().mockRejectedValue(new Error('A8 rejected transaction'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('A8 newly created', 'expense_tracker'); });
+    const owner = getCtx().workspaceMembers[0];
+    await act(async () => {
+      const saved = getCtx().addTransactionAsync({ description: 'A8 rejected first expense', type: 'expense', amount: 40, status: 'pending', transaction_date: '2026-10-04', due_date: '2026-10-04', paid_by_member_id: owner.id, split_type: 'custom', splits: [{ member_id: owner.id, amount: 40 }] });
+      release();
+      await expect(saved).rejects.toThrow('A8 rejected transaction');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().activeWorkspace.id).toBe('ws-remote-created');
+    expect(getCtx().error).not.toBeNull();
+    expect(getCtx().transactions.filter(t => t.description === 'A8 rejected first expense')).toHaveLength(0);
+    expect(getCtx().workspaceMembers[0].id).toBe('wsm-remote-owner');
+    expect(getCtx().workspaces.some(w => w.id === 'ws-remote-created')).toBe(true);
+  });
+
+  it('A8-P02: queued payer stays canonical if the user switches workspace before creation finishes', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async (id) => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    repo.getWorkspaces = vi.fn(async () => structuredClone(snapshot.allWorkspaces));
+    repo.getWorkspaceMembers = vi.fn(async (id) => structuredClone(snapshot.allWorkspaceMembers.filter(m => m.workspace_id === id)));
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('A8 switch during creation', 'expense_tracker'); });
+    const owner = getCtx().workspaceMembers[0];
+    await act(async () => {
+      const saved = getCtx().addTransactionAsync({ description: 'A8 queued first expense', type: 'expense', amount: 40, status: 'pending', transaction_date: '2026-10-04', due_date: '2026-10-04', paid_by_member_id: owner.id, split_type: 'custom', splits: [{ member_id: owner.id, amount: 40 }] });
+      await getCtx().setActiveWorkspaceId('ws-1');
+      release();
+      await saved;
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().activeWorkspace.id).toBe('ws-1');
+    expect(repo.saveTransaction).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspace_id: 'ws-remote-created', paid_by_member_id: 'wsm-remote-owner', splits: [{ member_id: 'wsm-remote-owner', amount: 40 }] }));
+    expect(getCtx().workspaces.some(w => w.id === 'ws-remote-created')).toBe(true);
+  });
+
+  it('A8-P01: fallback removes only the failed expense and preserves a confirmed expense and workspace', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async (id) => {
+      if (id === 'ws-remote-created') throw new Error('A8 refresh offline');
+      return structuredClone({ ...snapshot, activeWorkspaceId: id });
+    });
+    repo.getWorkspaceMembers = vi.fn(async (id) => structuredClone(snapshot.allWorkspaceMembers.filter(m => m.workspace_id === id)));
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    repo.saveTransaction = vi.fn(async (data) => {
+      if (data.description === 'Rejected') throw new Error('A8 server rejected');
+      return { ...data, id: 'confirmed-expense', created_at: '2026-10-04' };
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('A8 fallback batch', 'expense_tracker'); });
+    const owner = getCtx().workspaceMembers[0];
+    const data = { amount: 40, type: 'expense' as const, status: 'pending' as const, transaction_date: '2026-10-04', due_date: '2026-10-04', paid_by_member_id: owner.id, split_type: 'custom' as const, splits: [{ member_id: owner.id, amount: 40 }] };
+    await act(async () => {
+      const confirmed = getCtx().addTransactionAsync({ ...data, description: 'Confirmed' });
+      const rejected = getCtx().addTransactionAsync({ ...data, description: 'Rejected' });
+      release();
+      await confirmed;
+      await expect(rejected).rejects.toThrow('A8 server rejected');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().transactions).toHaveLength(1);
+    expect(getCtx().transactions[0]).toMatchObject({ id: 'confirmed-expense', description: 'Confirmed', workspace_id: 'ws-remote-created' });
+    expect(getCtx().activeWorkspace.id).toBe('ws-remote-created');
+    expect(getCtx().workspaceMembers[0].id).toBe('wsm-remote-owner');
+  });
+
+  it('A8-P03: selecting a workspace through its original result uses its canonical ID', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    let provisionalId = '';
+    await act(async () => {
+      provisionalId = getCtx().createWorkspace('A8 selection').id;
+      await getCtx().waitForPendingMutations();
+    });
+    await act(async () => { await getCtx().setActiveWorkspaceId('ws-1'); });
+    await act(async () => { await getCtx().setActiveWorkspaceId(provisionalId); });
+    expect(repo.loadSnapshot).toHaveBeenLastCalledWith('ws-remote-created');
+    expect(getCtx().activeWorkspace.id).toBe('ws-remote-created');
+    expect(getCtx().error).toBeNull();
+  });
+
+  it.each(['account', 'person', 'category', 'method', 'card', 'goal', 'recurring'])('A8-P03: queued %s uses the canonical workspace', async (kind) => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('A8 account during creation'); });
+    await act(async () => {
+      if (kind === 'account') getCtx().addAccount({ name: 'A8 bank', institution: 'QA', type: 'checking', initial_balance: 0, current_balance: 0, color: '#000000', active: true });
+      if (kind === 'person') getCtx().addPerson('A8 person');
+      if (kind === 'category') getCtx().addCategory({ name: 'A8 category', type: 'expense', color: '#000000', icon: 'tag', active: true });
+      if (kind === 'method') getCtx().addPaymentMethod({ name: 'A8 method', type: 'pix', active: true });
+      if (kind === 'card') getCtx().addCreditCard({ name: 'A8 card', institution: 'QA', credit_limit: 1000, closing_day: 20, due_day: 28, color: '#000000', active: true });
+      if (kind === 'goal') getCtx().addGoal({ name: 'A8 goal', target_amount: 100, current_amount: 0, status: 'in_progress', color: '#000000', icon: 'target' });
+      if (kind === 'recurring') getCtx().addRecurring({ description: 'A8 recurring', amount: 10, type: 'expense', frequency: 'monthly', start_date: '2050-01-01', next_occurrence: '2050-01-01', active: true, auto_create: false });
+      release();
+      await getCtx().waitForPendingMutations();
+    });
+    const writes = { account: repo.saveAccount, person: repo.savePerson, category: repo.saveCategory, method: repo.savePaymentMethod, card: repo.saveCreditCard, goal: repo.saveGoal, recurring: repo.saveRecurring };
+    expect(writes[kind as keyof typeof writes]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspace_id: 'ws-remote-created' }));
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('A8-P03: queued purchase and settlement keep their workspace and participant references', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    repo.createWorkspace = vi.fn(async (data) => { await gate; return create(data); });
+    repo.savePerson = vi.fn(async data => {
+      const person = { ...data, id: 'canonical-person', archived: false, created_at: '2026-10-04', updated_at: '2026-10-04' };
+      snapshot.allPeople.push(person);
+      return person;
+    });
+    repo.savePurchase = vi.fn(async data => {
+      const purchase = { ...data, id: 'canonical-purchase', created_at: '2026-10-04' };
+      snapshot.allPurchases.push(purchase);
+      snapshot.allInstallments.push(
+        { id: 'canonical-installment-1', purchase_id: purchase.id, installment_number: 1, amount: 20, paid_amount: 0, due_date: '2050-01-01', status: 'pending', created_at: '2026-10-04' },
+        { id: 'canonical-installment-2', purchase_id: purchase.id, installment_number: 2, amount: 20, paid_amount: 0, due_date: '2050-02-01', status: 'pending', created_at: '2026-10-04' }
+      );
+      return purchase;
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('A8 shared purchase', 'expense_tracker'); });
+    const owner = getCtx().workspaceMembers[0];
+    await act(async () => {
+      const person = getCtx().addPerson('A8 purchase participant');
+      const purchase = getCtx().createInstallmentPurchaseAsync({ description: 'A8 purchase', total_amount: 40, installment_count: 2, purchase_date: '2050-01-01', paid_by_member_id: owner.id, split_type: 'equal', splits: [{ member_id: owner.id, amount: 20 }, { person_id: person.id, amount: 20 }] });
+      const settlement = getCtx().recordSettlementAsync({ from_person_id: person.id, to_member_id: owner.id, amount: 10 });
+      release();
+      await Promise.all([purchase, settlement]);
+      await getCtx().waitForPendingMutations();
+    });
+    expect(repo.savePurchase).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspace_id: 'ws-remote-created', paid_by_member_id: 'wsm-remote-owner', splits: [expect.objectContaining({ member_id: 'wsm-remote-owner', amount: 20 }), expect.objectContaining({ person_id: 'canonical-person', amount: 20 })] }));
+    expect(repo.saveSettlement).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspace_id: 'ws-remote-created', from_person_id: 'canonical-person', to_member_id: 'wsm-remote-owner', amount: 10 }));
+    expect(getCtx().purchases.find(p => p.id === 'canonical-purchase')?.workspace_id).toBe('ws-remote-created');
+    expect(getCtx().settlements[0].to_member_id).toBe('wsm-remote-owner');
+    expect(getCtx().installments.filter(i => i.purchase_id === 'canonical-purchase')).toHaveLength(2);
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('A8-R01: a mode change queued behind creation remains equal to the persisted mode', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    repo.getWorkspaces = vi.fn(async () => structuredClone(snapshot.allWorkspaces));
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    repo.createWorkspace = vi.fn(async data => { await gate; return structuredClone(await create(data)); });
+    repo.updateWorkspace = vi.fn(async (id, patch) => {
+      const ws = snapshot.allWorkspaces.find(w => w.id === id)!;
+      Object.assign(ws, patch);
+      return structuredClone(ws);
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('A8 mode queued'); });
+    await act(async () => {
+      getCtx().updateWorkspace(getCtx().activeWorkspace.id, { tracking_mode: 'expense_tracker' });
+      release();
+      await getCtx().waitForPendingMutations();
+    });
+    expect(repo.updateWorkspace).toHaveBeenCalledWith('ws-remote-created', { tracking_mode: 'expense_tracker' });
+    expect(snapshot.allWorkspaces.find(w => w.id === 'ws-remote-created')?.tracking_mode).toBe('expense_tracker');
+    expect(getCtx().activeWorkspace.tracking_mode).toBe('expense_tracker');
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('A8-R02a: rejected workspace creation does not leave a usable phantom workspace', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    repo.createWorkspace = vi.fn().mockRejectedValue(new Error('A8 workspace quota rejected'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      getCtx().createWorkspace('A8 rejected workspace');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().error?.message).toBe('A8 workspace quota rejected');
+    expect(getCtx().workspaces.some(w => w.name === 'A8 rejected workspace')).toBe(false);
+    expect(getCtx().activeWorkspace.id).toBe('ws-1');
+  });
+
+  it('A8-R02b: failed member fetch after committed creation recovers canonical workspace identity', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    repo.getWorkspaceMembers = vi.fn().mockRejectedValue(new Error('A8 member fetch offline'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      getCtx().createWorkspace('A8 committed workspace');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(snapshot.allWorkspaces.some(w => w.id === 'ws-remote-created')).toBe(true);
+    expect(getCtx().activeWorkspace.id).toBe('ws-remote-created');
+    expect(getCtx().workspaceMembers[0].id).toBe('wsm-remote-owner');
+  });
+
+  it.each([false, true])('A8-R01: later workspace edits survive an earlier response and navigation (switch=%s)', async (switchWorkspace) => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    const create = repo.createWorkspace;
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>(resolve => { releaseCreate = resolve; });
+    repo.createWorkspace = vi.fn(async data => { await createGate; return create(data); });
+    const update = repo.updateWorkspace;
+    let firstStarted!: () => void;
+    const started = new Promise<void>(resolve => { firstStarted = resolve; });
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    let count = 0;
+    repo.updateWorkspace = vi.fn(async (id, patch) => {
+      const stored = await update(id, patch);
+      if (++count === 1) { firstStarted(); await firstGate; }
+      return stored;
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    let id = '';
+    await act(async () => { id = getCtx().createWorkspace('Initial name').id; });
+    await act(async () => {
+      getCtx().updateWorkspace(id, { name: 'First name', tracking_mode: 'expense_tracker' });
+      getCtx().updateWorkspace(id, { name: 'Final name', currency: 'BRL' });
+      getCtx().updateWorkspace('ws-1', { name: 'Other workspace' });
+      releaseCreate();
+      await started;
+    });
+    expect(getCtx().activeWorkspace.name).toBe('Final name');
+    if (switchWorkspace) await act(async () => { await getCtx().setActiveWorkspaceId('ws-1'); });
+    expect(getCtx().workspaces.find(w => w.id === 'ws-remote-created')?.name).toBe('Final name');
+    await act(async () => { releaseFirst(); await getCtx().waitForPendingMutations(); });
+    expect(getCtx().workspaces.find(w => w.id === 'ws-remote-created')).toMatchObject({ name: 'Final name', tracking_mode: 'expense_tracker' });
+    expect(getCtx().activeWorkspace.id).toBe(switchWorkspace ? 'ws-1' : 'ws-remote-created');
+    expect(getCtx().workspaces.find(w => w.id === 'ws-1')?.name).toBe('Other workspace');
+    expect(getCtx().error).toBeNull();
+  });
+
+  it('A8-R01: failed rename rolls back without losing a successful mode update when refresh fails', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => {
+      if (id === 'ws-remote-created') throw new Error('Snapshot offline');
+      return structuredClone({ ...snapshot, activeWorkspaceId: id });
+    });
+    const create = repo.createWorkspace;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    repo.createWorkspace = vi.fn(async data => { await gate; return create(data); });
+    const update = repo.updateWorkspace;
+    repo.updateWorkspace = vi.fn(async (id, patch) => {
+      if (patch.name === 'Rejected name') throw new Error('Rename rejected');
+      return update(id, patch);
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    let id = '';
+    await act(async () => { id = getCtx().createWorkspace('Confirmed name').id; });
+    await act(async () => {
+      getCtx().updateWorkspace(id, { name: 'Rejected name' });
+      getCtx().updateWorkspace(id, { tracking_mode: 'expense_tracker' });
+      release();
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().activeWorkspace).toMatchObject({ id: 'ws-remote-created', name: 'Confirmed name', tracking_mode: 'expense_tracker' });
+    expect(getCtx().workspaceMembers[0].id).toBe('wsm-remote-owner');
+    expect(getCtx().error?.message).toBe('Rename rejected');
+  });
+
+  it.each([false, true])('A8-R02: rejected creation discards its dependent graph and preserves other workspaces (switch=%s)', async (switchWorkspace) => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    repo.createWorkspace = vi.fn(async () => { await gate; throw new Error('Creation rejected'); });
+    repo.saveAccount = vi.fn().mockRejectedValue(new Error('Unknown workspace'));
+    repo.savePurchase = vi.fn().mockRejectedValue(new Error('Unknown workspace'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('Rejected with dependents', 'expense_tracker'); });
+    await act(async () => {
+      getCtx().addAccount({ name: 'Discarded account', type: 'checking', institution: 'QA', initial_balance: 0, current_balance: 0, color: '#000000', active: true });
+      const purchase = getCtx().createInstallmentPurchaseAsync({ description: 'Discarded purchase', total_amount: 40, installment_count: 2, purchase_date: '2050-01-01' });
+      if (switchWorkspace) await getCtx().setActiveWorkspaceId('ws-1');
+      release();
+      await expect(purchase).rejects.toThrow('Unknown workspace');
+      await getCtx().waitForPendingMutations();
+    });
+    expect(getCtx().workspaces.some(w => w.name === 'Rejected with dependents')).toBe(false);
+    expect(getCtx().activeWorkspace.id).toBe('ws-1');
+    expect(getCtx().accounts.map(a => a.id)).toEqual(['acc-1', 'acc-2']);
+    expect(getCtx().purchases.map(p => p.id)).toEqual(['pur-1']);
+    expect(getCtx().installments.map(i => i.id)).toEqual(['inst-1']);
+  });
+
+  it('A8-R02: committed workspace stays read-only until a failed membership lookup can be recovered', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    let offline = true;
+    repo.loadSnapshot = vi.fn(async id => {
+      if (offline && id === 'ws-remote-created') throw new Error('Snapshot offline');
+      return structuredClone({ ...snapshot, activeWorkspaceId: id });
+    });
+    repo.getWorkspaceMembers = vi.fn().mockRejectedValue(new Error('Members offline'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('Committed but unresolved'); await getCtx().waitForPendingMutations(); });
+    expect(getCtx().activeWorkspace.id).toBe('ws-remote-created');
+    expect(getCtx().workspaceMembers).toHaveLength(0);
+    expect(getCtx().isWorkspaceReadOnly).toBe(true);
+    const account = { name: 'Blocked account', type: 'checking' as const, institution: 'QA', initial_balance: 0, current_balance: 0, color: '#000000', active: true };
+    expect(() => getCtx().addAccount(account)).toThrow(/aguardando confirmação de acesso/);
+    expect(repo.saveAccount).not.toHaveBeenCalled();
+    offline = false;
+    await act(async () => { await getCtx().refreshData(); });
+    expect(getCtx().isWorkspaceReadOnly).toBe(false);
+    await act(async () => { getCtx().addAccount(account); await getCtx().waitForPendingMutations(); });
+    expect(repo.saveAccount).toHaveBeenCalledOnce();
+    expect(getCtx().workspaceMembers[0].id).toBe('wsm-remote-owner');
+  });
+
+  it('A8-R02: rejected creation with no previous workspace leaves no phantom environment', async () => {
+    const repo = createMockRepository(createMockSnapshot());
+    repo.getWorkspaces = vi.fn().mockResolvedValue([]);
+    repo.createWorkspace = vi.fn().mockRejectedValue(new Error('Creation offline'));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('No previous workspace'); await getCtx().waitForPendingMutations(); });
+    expect(getCtx().workspaces).toHaveLength(0);
+    expect(getCtx().workspaceMembers).toHaveLength(0);
+    expect(getCtx().isWorkspaceReadOnly).toBe(true);
+  });
+
+  it.each(['previous', 'other', 'empty'])('A8-R02: reconciles a workspace deleted remotely before its Owner can be read (%s)', async (fallback) => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    repo.loadSnapshot = vi.fn(async id => structuredClone({ ...snapshot, activeWorkspaceId: id }));
+    repo.getWorkspaceMembers = vi.fn(async id => {
+      snapshot.allWorkspaces = snapshot.allWorkspaces.filter(w => w.id !== id && (fallback === 'previous' || w.id !== 'ws-1') && fallback !== 'empty');
+      snapshot.allWorkspaceMembers = fallback === 'previous' ? snapshot.allWorkspaceMembers.filter(m => m.workspace_id === 'ws-1')
+        : fallback === 'other' ? [{ id: 'other-owner', workspace_id: 'ws-2', user_id: 'usr-1', role: 'owner', created_at: '2026-01-01' }] : [];
+      return [];
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { getCtx().createWorkspace('Removed in another session'); await getCtx().waitForPendingMutations(); });
+    expect(getCtx().workspaces.some(w => w.id === 'ws-remote-created')).toBe(false);
+    expect(getCtx().activeWorkspace.id).toBe(fallback === 'previous' ? 'ws-1' : fallback === 'other' ? 'ws-2' : '');
+    expect(getCtx().isWorkspaceReadOnly).toBe(fallback === 'empty');
+    expect(getCtx().error).not.toBeNull();
   });
 
   it('deve hidratar workspaces e snapshot consolidado a partir do repositório remoto', async () => {
