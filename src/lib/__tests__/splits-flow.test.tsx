@@ -2411,7 +2411,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
