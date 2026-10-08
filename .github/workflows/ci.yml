@@ -38,6 +38,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Backup Safety Tests (No Cloud Access)
+        run: python3 -m unittest discover -s scripts/tests -p 'test_backup_cloud.py'
+
       - name: Test & Coverage
         run: npm run test:coverage
 

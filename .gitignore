@@ -8,6 +8,13 @@
 /coverage
 /output/
 
+# private backup material (never commit database exports or age identities)
+/backups/
+*.dump
+*.age
+*.agekey
+__pycache__/
+
 # local pre-production review artifacts
 /docs/reviews/
 /docs/plans/v14-pre-production-review.md

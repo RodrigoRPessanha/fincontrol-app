@@ -1,0 +1,70 @@
+name: Encrypted Supabase Backup
+
+on:
+  # Bootstrap validation before this workflow exists on the default branch.
+  # Remove this trigger once workflow_dispatch is available from main.
+  push:
+    branches: [staging]
+    paths: ['.github/workflows/backup.yml']
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Cloud source (read-only export)
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+  # Add a daily schedule only after a successful export AND restore rehearsal.
+  # Scheduled workflows run from the default branch, not staging.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-backup-${{ inputs.source || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    name: Export, encrypt and verify R2 copy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: backup-${{ inputs.source || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test backup guards (no cloud access)
+        run: python3 -m unittest discover -s scripts/tests -p 'test_backup_cloud.py'
+      - name: Require operator activation
+        env:
+          BACKUP_ENABLED: ${{ vars.BACKUP_ENABLED }}
+        run: test "$BACKUP_ENABLED" = true
+      - name: Install native client tools (no Docker or database server)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-17 age
+          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+          aws --version
+      - name: Export and send encrypted archive
+        env:
+          BACKUP_SOURCE: ${{ inputs.source || 'staging' }}
+          PGHOST: ${{ vars.BACKUP_PGHOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: ${{ vars.BACKUP_PGUSER }}
+          PGPASSWORD: ${{ secrets.BACKUP_DB_PASSWORD }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+          BACKUP_OUTPUT_DIR: ${{ runner.temp }}/fincontrol-encrypted
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/backup_cloud.py
+      - name: Record status (no database contents or artifacts)
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          echo "Backup job: $RESULT. A successful upload does not certify restoration." >> "$GITHUB_STEP_SUMMARY"
