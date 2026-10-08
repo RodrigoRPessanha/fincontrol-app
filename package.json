@@ -53,6 +53,7 @@
     "node": ">=22.4.0"
   },
   "overrides": {
+    "postcss-selector-parser": "7.1.6",
     "braces": "https://codeload.github.com/FSDevelop/braces/tar.gz/28d440b5dd449dbf1fe6f3506cf94ecca4d02660"
   }
 }
