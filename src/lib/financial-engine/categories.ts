@@ -1,26 +1,46 @@
 import { Category } from '../types';
 
-/**
- * Resolve e localiza uma categoria ou subcategoria na árvore de categorias.
- * Retorna se foi encontrada, o nome de exibição (composto se subcategoria) e o ID da categoria raiz.
- */
-export function resolveCategory(
-  categories: Category[],
-  categoryId?: string | null
-): { isFound: boolean; displayName: string; rootId?: string; rootCategory?: Category } {
-  if (!categoryId) return { isFound: false, displayName: 'Sem Categoria', rootId: undefined };
-  for (const c of categories) {
-    if (c.id === categoryId) {
-      return { isFound: true, displayName: c.name, rootId: c.id, rootCategory: c };
-    }
-    if (c.subcategories && c.subcategories.length > 0) {
-      const sub = c.subcategories.find((s) => s.id === categoryId);
-      if (sub) {
-        return { isFound: true, displayName: `${c.name} > ${sub.name}`, rootId: c.id, rootCategory: c };
-      }
+/** Enumerates flat and legacy nested categories once per ID, preserving explicit rows. */
+export function flattenCategories(categories: Category[]): Category[] {
+  const index = new Map<string, Category>();
+  const pending = [...categories];
+  for (let i = 0; i < pending.length; i++) {
+    const category = pending[i];
+    if (index.has(category.id)) continue;
+    index.set(category.id, category);
+    for (const child of category.subcategories ?? []) {
+      if (child.workspace_id && child.workspace_id !== category.workspace_id) continue;
+      pending.push({ ...child, workspace_id: child.workspace_id ?? category.workspace_id, parent_id: child.parent_id ?? category.id });
     }
   }
-  return { isFound: false, displayName: 'Sem Categoria', rootId: undefined };
+  return [...index.values()];
+}
+
+/** Returns target-to-root ancestry for flat Cloud rows and legacy nested categories. */
+export function getCategoryLineage(categories: Category[], categoryId?: string | null): Category[] {
+  const index = new Map(flattenCategories(categories).map((category) => [category.id, category]));
+  const lineage: Category[] = [];
+  const seen = new Set<string>();
+  let current = categoryId ? index.get(categoryId) : undefined;
+  while (current) {
+    if (seen.has(current.id)) return []; // Invalid cycles must not fabricate a root.
+    seen.add(current.id);
+    lineage.push(current);
+    if (!current.parent_id) break;
+    const parent = index.get(current.parent_id);
+    if (!parent || parent.workspace_id !== current.workspace_id) return [];
+    current = parent;
+  }
+  return lineage;
+}
+
+export function resolveCategory(
+  categories: Category[], categoryId?: string | null
+): { isFound: boolean; displayName: string; rootId?: string; rootCategory?: Category } {
+  const lineage = getCategoryLineage(categories, categoryId);
+  if (!lineage.length) return { isFound: false, displayName: 'Sem Categoria', rootId: undefined };
+  const root = lineage[lineage.length - 1];
+  return { isFound: true, displayName: [...lineage].reverse().map((c) => c.name).join(' > '), rootId: root.id, rootCategory: root };
 }
 
 /**

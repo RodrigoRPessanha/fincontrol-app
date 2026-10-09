@@ -1,6 +1,8 @@
+import { findOperationReceipt } from './operation-receipts';
 import { format } from 'date-fns';
 import { CreditCard, Payment } from '../../types';
 import {
+  normalizeMoney,
   toCents,
   fromCents,
   validateCreditCardBillIntegrity,
@@ -12,6 +14,7 @@ export function addCreditCard(
   deps: FinanceActionDeps,
   cardData: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>
 ): CreditCard {
+  cardData = { ...cardData, credit_limit: normalizeMoney(cardData.credit_limit, 'Limite do cartão', 'nonnegative') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   if (cardData.linked_payment_account_id) {
@@ -41,6 +44,7 @@ export function updateCreditCard(
   id: string,
   data: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>
 ): void {
+  if (data.credit_limit !== undefined) data = { ...data, credit_limit: normalizeMoney(data.credit_limit, 'Limite do cartão', 'nonnegative') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   if (data.linked_payment_account_id) {
@@ -67,10 +71,13 @@ export function payCreditCardBill(
   accountId?: string | null,
   amount?: number,
   paymentDate: string = format(deps.now(), 'yyyy-MM-dd'),
-  notes?: string
+  notes?: string,
+  operationKey?: string
 ): Payment {
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allPayments, targetWsId, operationKey, { credit_card_bill_id: billId, account_id: accountId, amount, payment_date: paymentDate });
+  if (receipt) return receipt;
   const currentBills = state.allCreditCardBills;
   const currentAccounts = state.allAccounts;
 
@@ -88,6 +95,7 @@ export function payCreditCardBill(
   if (!Number.isFinite(payAmount) || payAmount <= 0 || paymentCents <= 0 || !Number.isSafeInteger(paymentCents)) {
     throw new Error('Valor inválido para pagamento.');
   }
+  normalizeMoney(payAmount, 'Pagamento de fatura');
 
   const totalCents = toCents(bill.total_amount);
   const paidCents = toCents(bill.paid_amount || 0);
@@ -101,7 +109,10 @@ export function payCreditCardBill(
 
   const finalAmount = fromCents(paymentCents);
   const shouldMutateAccount = !!(accountId && !isExpenseTracker);
+  const userId = deps.getUserId();
+
   const newPay: Payment = {
+    operation_key: operationKey,
     id: deps.generateId('pay'),
     workspace_id: targetWsId,
     credit_card_bill_id: billId,
@@ -109,7 +120,7 @@ export function payCreditCardBill(
     amount: finalAmount,
     payment_date: paymentDate,
     notes: notes || `Pagamento de fatura ${bill.reference_month}`,
-    created_by: 'usr-1',
+    created_by: userId,
     created_at: deps.now().toISOString(),
     affects_balance: shouldMutateAccount,
   };
@@ -132,7 +143,7 @@ export function payCreditCardBill(
   const nextAccounts = accountId && !isExpenseTracker
     ? currentAccounts.map((a) =>
         a.id === accountId
-          ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+          ? { ...a, current_balance: normalizeMoney(fromCents(toCents(normalizeMoney(a.current_balance, 'Saldo atual', 'signed')) - paymentCents), 'Saldo resultante', 'signed') }
           : a
       )
     : currentAccounts;

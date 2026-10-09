@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Sparkles,
   Scale,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFinance } from '@/lib/context/finance-context';
@@ -35,6 +36,7 @@ const navItems = [
   { href: '/reports', label: 'Relatórios', icon: BarChart3 },
   { href: '/workspaces', label: 'Membros & Acesso', icon: Users },
   { href: '/settings', label: 'Configurações', icon: Settings },
+  { href: '/ajuda', label: 'Central de ajuda', icon: BookOpen },
 ];
 
 export function Sidebar() {
@@ -53,7 +55,7 @@ export function Sidebar() {
 
   return (
     <aside className="hidden lg:flex h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 sticky top-0">
-      <div className="flex flex-col gap-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-6">
         {/* Logo & App Brand */}
         <div className="flex items-center gap-3 px-2 pt-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 text-white shadow-lg shadow-emerald-500/20">
@@ -70,7 +72,7 @@ export function Sidebar() {
         </div>
 
         {/* Navigation Items */}
-        <nav className="flex flex-col gap-1">
+        <nav className="flex min-h-0 flex-col gap-1 overflow-y-auto" aria-label="Menu principal">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
@@ -78,6 +80,9 @@ export function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                target={item.href === '/ajuda' ? '_blank' : undefined}
+                rel={item.href === '/ajuda' ? 'noopener noreferrer' : undefined}
+                aria-label={item.href === '/ajuda' ? 'Central de ajuda (nova aba)' : undefined}
                 className={cn(
                   'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition duration-150',
                   isActive

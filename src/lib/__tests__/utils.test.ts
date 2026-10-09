@@ -1,5 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { cn, formatCurrency, formatDate, formatMonthYear, getStatusBadge, sanitizeCsvCell } from '../utils';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  cn,
+  formatCurrency,
+  formatDate,
+  formatMonthYear,
+  getStatusBadge,
+  sanitizeCsvCell,
+  getSafeRedirectPath,
+  parseCurrencyInput,
+} from '../utils';
 
 describe('Utils - cn (Tailwind Class Merging)', () => {
   it('deve combinar e mesclar classes do Tailwind corretamente', () => {
@@ -54,8 +63,9 @@ describe('Utils - formatDate', () => {
     expect(formatDate('2026/08/22')).toBe('22/08/2026');
   });
 
-  it('deve retornar a string original se a data for inválida', () => {
+  it('deve retornar a string original se a data for inválida ou se a formatação lançar exceção', () => {
     expect(formatDate('data-invalida')).toBe('data-invalida');
+    expect(formatDate('2026-08-22', 'invalid format \'\'\'')).toBe('2026-08-22');
   });
 });
 
@@ -116,5 +126,101 @@ describe('Utils - sanitizeCsvCell', () => {
     expect(sanitizeCsvCell(null)).toBe('""');
     expect(sanitizeCsvCell(undefined)).toBe('""');
     expect(sanitizeCsvCell('')).toBe('""');
+  });
+});
+
+describe('Utils - getSafeRedirectPath', () => {
+  it('deve aceitar caminhos relativos válidos', () => {
+    expect(getSafeRedirectPath('/dashboard')).toBe('/dashboard');
+    expect(getSafeRedirectPath('/accounts?id=123')).toBe('/accounts?id=123');
+    expect(getSafeRedirectPath('/settings#profile')).toBe('/settings#profile');
+    expect(getSafeRedirectPath('/')).toBe('/');
+  });
+
+  it('deve bloquear tentativa de open redirect com @evil.example', () => {
+    expect(getSafeRedirectPath('@evil.example/path')).toBe('/');
+    expect(getSafeRedirectPath('/@evil.example')).toBe('/');
+    expect(getSafeRedirectPath('/dashboard@evil.com')).toBe('/');
+  });
+
+  it('deve bloquear URLs com barras duplas protocol-relative ou barras invertidas', () => {
+    expect(getSafeRedirectPath('//evil.example')).toBe('/');
+    expect(getSafeRedirectPath('/\\evil.example')).toBe('/');
+    expect(getSafeRedirectPath('///evil.example')).toBe('/');
+  });
+
+  it('deve bloquear URLs absolutas e esquemas perigosos', () => {
+    expect(getSafeRedirectPath('https://evil.com/dashboard')).toBe('/');
+    expect(getSafeRedirectPath('http://evil.com/dashboard')).toBe('/');
+    expect(getSafeRedirectPath('javascript:alert(1)')).toBe('/');
+    expect(getSafeRedirectPath('data:text/html,<script>alert(1)</script>')).toBe('/');
+  });
+
+  it('deve bloquear caracteres de controle', () => {
+    expect(getSafeRedirectPath('/dashboard\n/evil')).toBe('/');
+    expect(getSafeRedirectPath('/dashboard\r/evil')).toBe('/');
+    expect(getSafeRedirectPath('/dashboard\x00')).toBe('/');
+  });
+
+  it('deve retornar fallback customizado quando especificado', () => {
+    expect(getSafeRedirectPath(null, '/fallback')).toBe('/fallback');
+    expect(getSafeRedirectPath(undefined, '/auth/login')).toBe('/auth/login');
+    expect(getSafeRedirectPath('', '/custom')).toBe('/custom');
+    expect(getSafeRedirectPath('//evil.com', '/safe')).toBe('/safe');
+  });
+
+  it('deve capturar falhas de parsing de URL malformada ou origem divergente', () => {
+    // Malformed URI that throws in URL parser
+    expect(getSafeRedirectPath('/%E0%A4%A')).toBe('/');
+    // Non-matching origin check
+    expect(getSafeRedirectPath('http://outra-origem.com/path')).toBe('/');
+    expect(getSafeRedirectPath('http://localhost:8080/path')).toBe('/');
+
+    // Erro inesperado no construtor URL
+    const originalURL = globalThis.URL;
+    try {
+      (globalThis as any).URL = function () {
+        throw new Error('URL constructor failure');
+      };
+      expect(getSafeRedirectPath('/valid-path')).toBe('/');
+    } finally {
+      globalThis.URL = originalURL;
+    }
+  });
+});
+
+describe('Utils - parseCurrencyInput', () => {
+  it('deve converter valores brasileiros com vírgula decimal e separador de milhar', () => {
+    expect(parseCurrencyInput('1.234,56')).toBe(1234.56);
+    expect(parseCurrencyInput('12,34')).toBe(12.34);
+    expect(parseCurrencyInput('0,50')).toBe(0.5);
+    expect(parseCurrencyInput('1234,56')).toBe(1234.56);
+  });
+
+  it('deve converter valores internacionais com ponto decimal e vírgula de milhar', () => {
+    expect(parseCurrencyInput('1,234.56')).toBe(1234.56);
+    expect(parseCurrencyInput('12.34')).toBe(12.34);
+    expect(parseCurrencyInput('0.50')).toBe(0.5);
+    expect(parseCurrencyInput('1234.56')).toBe(1234.56);
+  });
+
+  it('deve converter números inteiros puros', () => {
+    expect(parseCurrencyInput('100')).toBe(100);
+    expect(parseCurrencyInput('1234')).toBe(1234);
+    expect(parseCurrencyInput('0')).toBe(0);
+  });
+
+  it('deve retornar NaN para strings vazias, com espaços ou caracteres inválidos', () => {
+    expect(parseCurrencyInput('')).toBeNaN();
+    expect(parseCurrencyInput('   ')).toBeNaN();
+    expect(parseCurrencyInput('abc')).toBeNaN();
+    expect(parseCurrencyInput('12.34.56')).toBeNaN();
+    expect(parseCurrencyInput('12,34,56')).toBeNaN();
+    expect(parseCurrencyInput('R$ 10,00')).toBeNaN();
+
+    // Valores que geram Infinity
+    expect(parseCurrencyInput('9'.repeat(400) + ',00')).toBeNaN();
+    expect(parseCurrencyInput('9'.repeat(400) + '.00')).toBeNaN();
+    expect(parseCurrencyInput('9'.repeat(400))).toBeNaN();
   });
 });

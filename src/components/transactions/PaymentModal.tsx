@@ -1,11 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
-import { X, CheckCircle2, DollarSign, Calendar, Wallet } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { X, CheckCircle2, DollarSign, Calendar, Wallet, AlertCircle } from 'lucide-react';
+import { formatCurrency, parseCurrencyInput } from '@/lib/utils';
 import { toCents, fromCents } from '@/lib/financial-engine';
 import { format } from 'date-fns';
+
+export { parseCurrencyInput };
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -20,43 +23,28 @@ interface PaymentModalProps {
   } | null;
 }
 
-export function parseCurrencyInput(val: string): number {
-  const trimmed = val.trim();
-  if (!trimmed) return NaN;
-
-  // 1. Formato brasileiro com vírgula decimal (ex: 1.234,56 ou 1234,56 ou 0,20)
-  if (/^\d{1,3}(\.\d{3})*,\d{1,2}$/.test(trimmed) || /^\d+,\d{1,2}$/.test(trimmed)) {
-    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(normalized);
-    return Number.isFinite(num) ? num : NaN;
-  }
-
-  // 2. Formato internacional com ponto decimal (ex: 1,234.56 ou 1234.56 ou 0.20)
-  if (/^\d{1,3}(,\d{3})*\.\d{1,2}$/.test(trimmed) || /^\d+\.\d{1,2}$/.test(trimmed)) {
-    const normalized = trimmed.replace(/,/g, '');
-    const num = parseFloat(normalized);
-    return Number.isFinite(num) ? num : NaN;
-  }
-
-  // 3. Inteiro puro (ex: 20 ou 1000)
-  if (/^\d+$/.test(trimmed)) {
-    const num = parseFloat(trimmed);
-    return Number.isFinite(num) ? num : NaN;
-  }
-
-  return NaN;
-}
-
 export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
-  const { accounts, activeWorkspace, recordPayment, payCreditCardBill } = useFinance();
+  const {
+    isWorkspaceReadOnly,
+    accounts,
+    activeWorkspace,
+    recordPayment,
+    recordPaymentAsync,
+    payCreditCardBill,
+    payCreditCardBillAsync,
+  } = useFinance();
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
+  const attempt = useOperationAttempt(activeWorkspace?.id ?? '', `payment:${target?.type}:${target?.id}`);
+  const pending = useRef(false);
 
   const [amountStr, setAmountStr] = useState('');
   const [accountId, setAccountId] = useState('');
   const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [notes, setNotes] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen || !target) return null;
+  if (!isOpen || !target || isWorkspaceReadOnly) return null;
 
   const totalCents = toCents(target.totalAmount);
   const paidCents = toCents(target.paidAmount || 0);
@@ -74,24 +62,36 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
   const isAccountMissing = !isExpenseTracker && !accountId;
   const canSubmit = !isAccountMissing && !isInputEmpty && !isInvalid && currentAmountCents > 0 && !isOverRemaining;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || pending.current) return;
+    setSubmitError(null);
+    setIsSubmitting(true);
+    pending.current = true;
 
-    if (target.type === 'bill') {
-      payCreditCardBill(target.id, accountId || undefined, currentAmount, paymentDate, notes || undefined);
-    } else {
-      recordPayment({
-        transaction_id: target.type === 'transaction' ? target.id : undefined,
-        installment_id: target.type === 'installment' ? target.id : undefined,
-        account_id: accountId || undefined,
-        amount: currentAmount,
-        payment_date: paymentDate,
-        notes: notes || undefined,
-      });
+    try {
+      const operationKey = await attempt.getKey([target.id, accountId, currentAmount, paymentDate, notes]);
+      if (target.type === 'bill') {
+        await payCreditCardBillAsync(target.id, accountId || undefined, currentAmount, paymentDate, notes || undefined, operationKey);
+      } else {
+        await recordPaymentAsync({
+          operation_key: operationKey,
+          transaction_id: target.type === 'transaction' ? target.id : undefined,
+          installment_id: target.type === 'installment' ? target.id : undefined,
+          account_id: accountId || undefined,
+          amount: currentAmount,
+          payment_date: paymentDate,
+          notes: notes || undefined,
+        });
+      }
+      attempt.complete();
+      onClose();
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Falha ao registrar pagamento.');
+    } finally {
+      setIsSubmitting(false);
+      pending.current = false;
     }
-
-    onClose();
   };
 
   return (
@@ -138,6 +138,13 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          {submitError && (
+            <div className="rounded-2xl bg-rose-50 p-3.5 text-xs font-bold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-200 dark:border-rose-900 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           {/* Valor a Pagar */}
           <div>
             <div className="flex items-center justify-between">
@@ -146,7 +153,10 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
               </label>
               <button
                 type="button"
-                onClick={() => setAmountStr(remaining.toFixed(2).replace('.', ','))}
+                onClick={() => {
+                  setAmountStr(remaining.toFixed(2).replace('.', ','));
+                  setSubmitError(null);
+                }}
                 className="text-xs font-bold text-emerald-600 hover:underline"
               >
                 Pagar Total ({formatCurrency(remaining)})
@@ -161,7 +171,10 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
                 required
                 placeholder={remaining.toFixed(2).replace('.', ',')}
                 value={amountStr}
-                onChange={(e) => setAmountStr(e.target.value)}
+                onChange={(e) => {
+                  setAmountStr(e.target.value);
+                  setSubmitError(null);
+                }}
                 className={`w-full rounded-xl border py-2.5 pl-10 pr-3 text-lg font-bold text-slate-900 focus:outline-none dark:bg-slate-800 dark:text-white ${
                   isInvalid || isOverRemaining
                     ? 'border-rose-500 bg-rose-50/30'
@@ -169,6 +182,9 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
                 }`}
               />
             </div>
+            <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+              Aceita vírgula ou ponto decimal (ex: 12,34 ou 12.34).
+            </p>
             {isInvalid && (
               <p className="mt-1 text-[11px] font-bold text-rose-600">
                 Por favor, informe um valor monetário válido maior que zero.
@@ -239,20 +255,21 @@ export function PaymentModal({ isOpen, onClose, target }: PaymentModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              disabled={isSubmitting}
+              className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit || isSubmitting}
               className={`rounded-xl px-5 py-2 text-sm font-bold text-white shadow-md transition ${
-                !canSubmit
+                !canSubmit || isSubmitting
                   ? 'bg-slate-400 cursor-not-allowed opacity-60'
                   : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-500'
               }`}
             >
-              Confirmar Pagamento
+              {isSubmitting ? 'Confirmando...' : 'Confirmar Pagamento'}
             </button>
           </div>
         </form>

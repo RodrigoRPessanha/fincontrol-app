@@ -1,5 +1,7 @@
 'use client';
 
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -19,7 +21,7 @@ import { formatCurrency, sanitizeCsvCell } from '@/lib/utils';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { format } from 'date-fns';
 import { Category } from '@/lib/types';
-import { resolveCategory, calculateIntegerPercentages, toCents, fromCents } from '@/lib/financial-engine';
+import { resolveCategory, calculateIntegerPercentages, toCents, fromCents, allocateBillPayments } from '@/lib/financial-engine';
 
 export default function ReportsPage() {
   const {
@@ -28,6 +30,7 @@ export default function ReportsPage() {
     allWorkspacePaymentMethods,
     purchases,
     installments,
+    creditCardBills = [],
   } = useFinance();
 
   const [periodFilter, setPeriodFilter] = useState<'month' | 'quarter' | 'year'>('month');
@@ -71,6 +74,9 @@ export default function ReportsPage() {
     return true;
   });
 
+  const billAllocations = useMemo(() => allocateBillPayments(transactions, installments, creditCardBills),
+    [transactions, installments, creditCardBills]);
+
   // Dataset normalizado do relatório (fonte única de verdade para tudo)
   const reportRows = useMemo(() => {
     const rows: {
@@ -85,6 +91,7 @@ export default function ReportsPage() {
       paymentMethodId?: string;
       paymentMethodName: string;
       amount: number;
+      paidAmount?: number;
       status: string;
     }[] = [];
 
@@ -104,6 +111,7 @@ export default function ReportsPage() {
         paymentMethodId: t.payment_method_id || undefined,
         paymentMethodName: pm?.name || 'Outro / Sem Método',
         amount: t.amount,
+        paidAmount: billAllocations.transactions.get(t.id) ?? t.paid_amount ?? (t.status === 'paid' ? t.amount : 0),
         status: t.status,
       });
     });
@@ -125,12 +133,13 @@ export default function ReportsPage() {
         paymentMethodId: pur?.payment_method_id || undefined,
         paymentMethodName: pm?.name || 'Outro / Sem Método',
         amount: i.amount,
+        paidAmount: billAllocations.installments.get(i.id) ?? i.paid_amount ?? (i.status === 'paid' ? i.amount : 0),
         status: i.status,
       });
     });
 
     return rows;
-  }, [filteredTxs, filteredPeriodInstallments, allWorkspaceCategories, allWorkspacePaymentMethods, purchases]);
+  }, [filteredTxs, filteredPeriodInstallments, allWorkspaceCategories, allWorkspacePaymentMethods, purchases, billAllocations]);
 
   // Gastos por Categoria derivados do dataset único (partição estrita sem dupla contagem)
   const categorySpending = useMemo(() => {
@@ -179,14 +188,18 @@ export default function ReportsPage() {
 
   const paidExpensesCents = useMemo(() => {
     return reportRows
-      .filter((r) => r.type === 'expense' && r.status === 'paid')
-      .reduce((acc, r) => acc + toCents(r.amount), 0);
+      .filter((r) => r.type === 'expense')
+      .reduce((acc, r) => acc + toCents(r.paidAmount ?? (r.status === 'paid' ? r.amount : 0)), 0);
   }, [reportRows]);
 
   const pendingExpensesCents = useMemo(() => {
     return reportRows
-      .filter((r) => r.type === 'expense' && r.status !== 'paid')
-      .reduce((acc, r) => acc + toCents(r.amount), 0);
+      .filter((r) => r.type === 'expense')
+      .reduce((acc, r) => {
+        const paidCents = toCents(r.paidAmount ?? (r.status === 'paid' ? r.amount : 0));
+        const totalCents = toCents(r.amount);
+        return acc + Math.max(0, totalCents - paidCents);
+      }, 0);
   }, [reportRows]);
 
   const totalExpensePeriodCents = toCents(totalExpensePeriod);
@@ -269,9 +282,9 @@ export default function ReportsPage() {
 
   // Exportar CSV diretamente do dataset normalizado
   const handleExportCSV = () => {
-    let csv = 'Data;Descrição;Tipo;Categoria;Método;Valor;Status\n';
+    let csv = 'Data;Descrição;Tipo;Categoria;Método;Valor;Quitado;Pendente;Status\n';
     reportRows.forEach((r) => {
-      csv += `${sanitizeCsvCell(r.date)};${sanitizeCsvCell(r.description)};${sanitizeCsvCell(r.type)};${sanitizeCsvCell(r.categoryName)};${sanitizeCsvCell(r.paymentMethodName)};${sanitizeCsvCell(r.amount)};${sanitizeCsvCell(r.status)}\n`;
+      csv += `${sanitizeCsvCell(r.date)};${sanitizeCsvCell(r.description)};${sanitizeCsvCell(r.type)};${sanitizeCsvCell(r.categoryName)};${sanitizeCsvCell(r.paymentMethodName)};${sanitizeCsvCell(r.amount)};${sanitizeCsvCell(r.paidAmount ?? 0)};${sanitizeCsvCell(fromCents(Math.max(0, toCents(r.amount) - toCents(r.paidAmount ?? 0))))};${sanitizeCsvCell(r.status)}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -286,6 +299,7 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
+      <ContextualHelp slug="relatorios" label="Como interpretar e exportar relatórios" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "audit": "npm audit"
+    "test:db:cloud": "node scripts/test-db-cloud.mjs",
+    "test:auth:cloud": "node scripts/test-auth-cloud.mjs",
+    "test:repo:cloud": "node scripts/test-repository-cloud.mjs",
+    "audit": "node scripts/audit-dependencies.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
@@ -29,6 +32,7 @@
     "@eslint/eslintrc": "^3.3.6",
     "@next/eslint-plugin-next": "^16.3.4",
     "@types/node": "^20.17.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@typescript-eslint/parser": "^8.67.0",
@@ -38,12 +42,18 @@
     "eslint": "^9.20.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "pg": "^8.23.0",
     "postcss": "^8.4.47",
+    "supabase": "^2.117.0",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
     "vitest": "^4.1.11"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.4.0"
+  },
+  "overrides": {
+    "postcss-selector-parser": "7.1.6",
+    "braces": "https://codeload.github.com/FSDevelop/braces/tar.gz/28d440b5dd449dbf1fe6f3506cf94ecca4d02660"
   }
 }

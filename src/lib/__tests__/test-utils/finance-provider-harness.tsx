@@ -40,12 +40,23 @@ export function setupFinanceHarness(): FinanceHarness {
       removeEventListener() {}
     }
 
+    class MockSelectElement extends MockElement {
+      tagName = 'SELECT';
+      options: any[] = [];
+      appendChild(child: any) {
+        super.appendChild(child);
+        this.options.push(child);
+        return child;
+      }
+    }
+
     const doc: any = new MockNode();
     doc.nodeType = 9;
     doc.defaultView = globalThis;
     doc.activeElement = null;
     doc.createElement = (tag: string) => {
-      const el = new MockElement();
+      const lower = tag.toLowerCase();
+      const el = lower === 'select' ? new MockSelectElement() : new MockElement();
       el.tagName = tag.toUpperCase();
       el.ownerDocument = doc;
       return el;

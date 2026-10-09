@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QuickAddModal } from '@/components/transactions/QuickAddModal';
@@ -7,15 +7,20 @@ import { SharedExpensesList } from '@/components/splits/SharedExpensesList';
 import { SplitSummary } from '@/components/splits/SplitSummary';
 import { SettlementHistory } from '@/components/splits/SettlementHistory';
 import { SettlementModal } from '@/components/splits/SettlementModal';
+import { PeopleManager } from '@/components/splits/PeopleManager';
+import { SplitFields } from '@/components/transactions/quick-add/SplitFields';
 import * as FinanceContext from '@/lib/context/finance-context';
 import { calculateExpenseSplits } from '@/lib/financial-engine';
-import { WorkspaceMember, Workspace } from '@/lib/types';
+import { WorkspaceMember, Workspace, Person } from '@/lib/types';
 
 describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
   const mockAddTransaction = vi.fn();
   const mockCreateInstallmentPurchase = vi.fn();
   const mockRecordSettlement = vi.fn();
   const mockDeleteSettlement = vi.fn();
+  const mockAddPerson = vi.fn();
+  const mockUpdatePerson = vi.fn();
+  const mockDeletePerson = vi.fn();
   const mockOnClose = vi.fn();
 
   const mockWorkspace: Workspace = {
@@ -88,6 +93,18 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     return list;
   }
 
+  const roots = new Set<ReturnType<typeof createRoot>>();
+  function createTestRoot(container: Element) {
+    const root = createRoot(container);
+    roots.add(root);
+    return root;
+  }
+  afterEach(async () => {
+    for (const root of roots) await act(async () => { root.unmount(); });
+    roots.clear();
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -116,6 +133,8 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       removeAttribute(k: string) { delete (this as any)[k]; }
       addEventListener() {}
       removeEventListener() {}
+      focus() {}
+      blur() {}
     }
 
     class MockSelectElement extends MockElement {
@@ -182,12 +201,14 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       accounts: mockAccounts as any,
       creditCards: [] as any,
       addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
       createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
       createTransfer: vi.fn(),
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
@@ -223,7 +244,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     // Submete o formulário com divisão igualitária
     const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -268,7 +289,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     // Submete com os splits customizados
     await act(async () => {
       const currentForm = findNodes(container, (n) => n.tagName === 'FORM')[0];
-      getReactProps(currentForm).onSubmit({ preventDefault: () => {} });
+      await getReactProps(currentForm).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockAddTransaction).toHaveBeenCalledWith(
@@ -317,11 +338,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -363,7 +385,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     await act(async () => {
       const currentForm = findNodes(container, (n) => n.tagName === 'FORM')[0];
       const currentFormProps = getReactProps(currentForm);
-      currentFormProps.onSubmit({ preventDefault: () => {} });
+      await currentFormProps.onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -377,7 +399,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     await act(async () => {
       const currentForm = findNodes(container, (n) => n.tagName === 'FORM')[0];
       const currentFormProps = getReactProps(currentForm);
-      currentFormProps.onSubmit({ preventDefault: () => {} });
+      await currentFormProps.onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalledWith(
@@ -420,6 +442,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: mockSettlements as any,
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -428,7 +451,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     (window as any).confirm = (globalThis as any).confirm;
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -459,11 +482,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -493,11 +517,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -555,11 +580,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: mockPurchases as any,
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -653,11 +679,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -679,7 +706,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -688,7 +715,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       getReactProps(selects[0]).onChange({ target: { value: '' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -704,7 +731,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -716,7 +743,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordSettlement).not.toHaveBeenCalled();
 
@@ -732,7 +759,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalled();
@@ -782,11 +809,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: mockSettlements as any,
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -827,11 +855,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -849,7 +878,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     expect(form).toBeDefined();
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalled();
@@ -867,7 +896,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SharedExpensesList: renderiza variações de split_type, parcelamento e estado vazio', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     // 1. Estado vazio
     await act(async () => {
@@ -981,7 +1010,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SplitSummary: renderiza estado zerado e múltiplos acertos pendentes com disparo de callback', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
     const mockOnSettle = vi.fn();
 
     // 1. Estado sem dívidas
@@ -1048,7 +1077,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SettlementHistory: renderiza registros com e sem notas, e respeita confirm true/false ao excluir', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
     const mockDelete = vi.fn();
 
     const sampleSettlements = [
@@ -1115,7 +1144,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
 
   it('SettlementModal: trata fallbacks de nome de membros, botão Preencher Total e ausência de dívida', async () => {
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     const mockSetFrom = vi.fn();
     const mockSetTo = vi.fn();
@@ -1239,11 +1268,12 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
     const container = (globalThis as any).document.createElement('div');
-    const root = createRoot(container);
+    const root = createTestRoot(container);
 
     await act(async () => {
       root.render(<SplitsPage />);
@@ -1332,6 +1362,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: mockSettlements as any,
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -1362,7 +1393,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     // Erro de valor excedente deve ser exibido (linha 140)
@@ -1383,7 +1414,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     }
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordSettlement).toHaveBeenCalledWith(
@@ -1413,7 +1444,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     errorMsg = findNodes(container, (n) => n.textContent?.includes('Erro ao registrar o acerto.'));
@@ -1449,6 +1480,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       purchases: [],
       settlements: [],
       recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
       deleteSettlement: mockDeleteSettlement,
     } as any);
 
@@ -1466,6 +1498,1281 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
         getReactProps(headerBtnEmpty).onClick();
       });
     }
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('PeopleManager: adiciona, edita, arquiva, desarquiva, exclui e trata erros de validação e servidor', async () => {
+    const peopleData: Person[] = [
+      { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
+      { id: 'p-2', workspace_id: 'ws-2', name: 'Mariana Costa', created_at: '2026-03-05T10:00:00Z', archived: true },
+    ];
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PeopleManager
+          people={peopleData}
+          onAddPerson={mockAddPerson}
+          onUpdatePerson={mockUpdatePerson}
+          onDeletePerson={mockDeletePerson}
+        />
+      );
+    });
+
+    // 1. Verifica validação de nome vazio e nome duplicado
+    // Nome vazio via Enter
+    await act(async () => {
+      const input = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+      getReactProps(input).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+    });
+
+    // Nome duplicado existente
+    await act(async () => {
+      const input = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+      getReactProps(input).onChange({ target: { value: '  carlos silva  ' } });
+    });
+    await act(async () => {
+      const input = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+      getReactProps(input).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+    });
+
+    // Sucesso na adição via clique no botão Adicionar
+    mockAddPerson.mockResolvedValueOnce({ id: 'p-3', name: 'Lucas Fernandes', workspace_id: 'ws-2', created_at: '2026-03-10' });
+    await act(async () => {
+      const input = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+      getReactProps(input).onChange({ target: { value: 'Lucas Fernandes' } });
+    });
+    await act(async () => {
+      const btns = findNodes(container, (n) => n.tagName === 'BUTTON');
+      const btn = btns.find((b) => {
+        const p = getReactProps(b);
+        return Array.isArray(p?.children) && p.children.includes('Adicionar');
+      });
+      await getReactProps(btn).onClick({ preventDefault: () => {} });
+    });
+    expect(mockAddPerson).toHaveBeenCalledWith({ name: 'Lucas Fernandes' });
+
+    // Erro assíncrono no add
+    mockAddPerson.mockRejectedValueOnce(new Error('Erro no servidor ao salvar'));
+    await act(async () => {
+      const input = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+      getReactProps(input).onChange({ target: { value: 'Nome Que Falha' } });
+    });
+    await act(async () => {
+      const btns = findNodes(container, (n) => n.tagName === 'BUTTON');
+      const btn = btns.find((b) => {
+        const p = getReactProps(b);
+        return Array.isArray(p?.children) && p.children.includes('Adicionar');
+      });
+      await getReactProps(btn).onClick({ preventDefault: () => {} });
+    });
+
+    // 2. Fechar banner de erro se visível
+    const allBtns = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const dismissBtn = allBtns.find((b) => getReactProps(b)?.className?.includes('text-rose-500'));
+    if (dismissBtn) {
+      await act(async () => {
+        getReactProps(dismissBtn).onClick();
+      });
+    }
+
+    // 3. Edição / Renomeação
+    // 3. Edição / Renomeação
+    // Inicia edição e cancela
+    await act(async () => {
+      const btn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Renomear pessoa');
+      getReactProps(btn).onClick();
+    });
+    const cancelBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Cancelar');
+    if (cancelBtn) {
+      await act(async () => {
+        getReactProps(cancelBtn).onClick();
+      });
+    }
+
+    // Inicia edição novamente
+    await act(async () => {
+      const btn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Renomear pessoa');
+      getReactProps(btn).onClick();
+    });
+
+    // Testa tecla Escape para cancelar
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onKeyDown({ key: 'Escape' });
+    });
+
+    // Inicia edição novamente para salvar
+    await act(async () => {
+      const btn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Renomear pessoa');
+      getReactProps(btn).onClick();
+    });
+
+    // Tenta salvar nome vazio
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onChange({ target: { value: '   ' } });
+    });
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+    });
+
+    // Salva rename com sucesso via Enter
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onChange({ target: { value: 'Carlos Silva Jr.' } });
+    });
+    mockUpdatePerson.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+    });
+    expect(mockUpdatePerson).toHaveBeenCalledWith('p-1', { name: 'Carlos Silva Jr.' });
+
+    // Testa erro ao renomear
+    await act(async () => {
+      const btn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Renomear pessoa');
+      getReactProps(btn).onClick();
+    });
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onChange({ target: { value: 'Nome Com Erro' } });
+    });
+    mockUpdatePerson.mockRejectedValueOnce(new Error('Erro de renomeação'));
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      getReactProps(editInput).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+    });
+
+    // Cancela o modo de edição com Escape após erro
+    await act(async () => {
+      const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+      if (editInput) getReactProps(editInput).onKeyDown({ key: 'Escape' });
+    });
+
+    // 4. Toggle Archive / Unarchive
+    mockUpdatePerson.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      const archiveBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Arquivar pessoa');
+      if (archiveBtn) await getReactProps(archiveBtn).onClick();
+    });
+    expect(mockUpdatePerson).toHaveBeenCalledWith('p-1', { archived: true });
+
+    // Erro na requisição de arquivamento
+    mockUpdatePerson.mockRejectedValueOnce(new Error('Erro ao arquivar'));
+    await act(async () => {
+      const archiveBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Arquivar pessoa');
+      if (archiveBtn) await getReactProps(archiveBtn).onClick();
+    });
+
+    // Unarchive
+    mockUpdatePerson.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      const unarchiveBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Reativar pessoa');
+      if (unarchiveBtn) await getReactProps(unarchiveBtn).onClick();
+    });
+    expect(mockUpdatePerson).toHaveBeenCalledWith('p-2', { archived: false });
+
+    // 5. Exclusão
+    // Confirm = false
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    await act(async () => {
+      const deleteBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Excluir pessoa');
+      await getReactProps(deleteBtn).onClick();
+    });
+    expect(mockDeletePerson).not.toHaveBeenCalled();
+
+    // Confirm = true sucesso
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    mockDeletePerson.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      const deleteBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Excluir pessoa');
+      await getReactProps(deleteBtn).onClick();
+    });
+    expect(mockDeletePerson).toHaveBeenCalledWith('p-1');
+
+    // Confirm = true erro (histórico restrito)
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    mockDeletePerson.mockRejectedValueOnce(new Error('Possui histórico'));
+    await act(async () => {
+      const deleteBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Excluir pessoa');
+      await getReactProps(deleteBtn).onClick();
+    });
+
+    // 6. Lista vazia
+    await act(async () => {
+      root.render(
+        <PeopleManager
+          people={[]}
+          onAddPerson={mockAddPerson}
+          onUpdatePerson={mockUpdatePerson}
+          onDeletePerson={mockDeletePerson}
+        />
+      );
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('SplitFields & SplitsPage: lida com pessoas em rateio, alteração de pagador e acerto com pessoa externa', async () => {
+    const peopleData: Person[] = [
+      { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
+      { id: 'p-2', workspace_id: 'ws-2', name: 'Mariana Costa', created_at: '2026-03-05T10:00:00Z', archived: true },
+    ];
+
+    const onSplitTypeChange = vi.fn();
+    const onActiveParticipantIdsChange = vi.fn();
+    const onPaidByMemberIdChange = vi.fn();
+    const onPaidByPersonIdChange = vi.fn();
+    const onCustomSplitChange = vi.fn();
+    const onAddPerson = vi.fn().mockResolvedValue({ id: 'p-new', name: 'Novo Participante' });
+    const onToggleParticipant = vi.fn();
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    // 1. Renderiza SplitFields com splitType "custom"
+    await act(async () => {
+      root.render(
+        <SplitFields
+          splitType="custom"
+          onSplitTypeChange={onSplitTypeChange}
+          workspaceMembers={mockMembers}
+          people={peopleData}
+          selectedParticipantIds={['wsm-2', 'p-1']}
+          paidByMemberId="wsm-2"
+          onPaidByMemberIdChange={onPaidByMemberIdChange}
+          paidByPersonId=""
+          onPaidByPersonIdChange={onPaidByPersonIdChange}
+          totalAmount={100}
+          type="expense"
+          customSplits={{ 'wsm-2': 50, 'p-1': 50 }}
+          onCustomSplitChange={onCustomSplitChange}
+          onAddPerson={onAddPerson}
+          onToggleParticipant={onToggleParticipant}
+        />
+      );
+    });
+
+    // 2. Altera "Quem pagou?" para uma pessoa (p-1)
+    const selects = findNodes(container, (n) => n.tagName === 'SELECT');
+    const payerSelect = selects[0];
+    if (payerSelect) {
+      await act(async () => {
+        getReactProps(payerSelect).onChange({ target: { value: 'p-1' } });
+      });
+      expect(onPaidByPersonIdChange).toHaveBeenCalledWith('p-1');
+      expect(onPaidByMemberIdChange).toHaveBeenCalledWith('');
+
+      // Altera de volta para um membro
+      await act(async () => {
+        getReactProps(payerSelect).onChange({ target: { value: 'wsm-3' } });
+      });
+      expect(onPaidByMemberIdChange).toHaveBeenCalledWith('wsm-3');
+      expect(onPaidByPersonIdChange).toHaveBeenCalledWith('');
+    }
+
+    // 2.1 Altera regra de divisão
+    if (selects[1]) {
+      await act(async () => {
+        getReactProps(selects[1]).onChange({ target: { value: 'equal' } });
+      });
+      expect(onSplitTypeChange).toHaveBeenCalledWith('equal');
+    }
+
+    // 2.2 Altera valor de custom split
+    const numberInputs = findNodes(container, (n) => n.tagName === 'INPUT' && getReactProps(n)?.type === 'number');
+    if (numberInputs.length > 0) {
+      await act(async () => {
+        getReactProps(numberInputs[0]).onChange({ target: { value: '60' } });
+      });
+      expect(onCustomSplitChange).toHaveBeenCalledWith('wsm-2', 60);
+    }
+
+    // 3. Chips de participantes
+    const chipBtns = findNodes(container, (n) => n.tagName === 'BUTTON').filter((b) => getReactProps(b)?.className?.includes('rounded-full'));
+    if (chipBtns.length > 0) {
+      await act(async () => {
+        getReactProps(chipBtns[0]).onClick();
+      });
+      expect(onToggleParticipant).toHaveBeenCalled();
+    }
+
+    // 4. Testar adicionar pessoa inline dentro de SplitFields
+    const addInlineBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.className?.includes('text-teal-700'));
+    if (addInlineBtn) {
+      await act(async () => {
+        getReactProps(addInlineBtn).onClick();
+      });
+      const inlineInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+      if (inlineInput) {
+        await act(async () => {
+          getReactProps(inlineInput).onChange({ target: { value: 'Roberto' } });
+        });
+        const inlineSaveBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.children === 'Salvar');
+        if (inlineSaveBtn) {
+          await act(async () => {
+            await getReactProps(inlineSaveBtn).onClick({ preventDefault: () => {} });
+          });
+          expect(onAddPerson).toHaveBeenCalledWith('Roberto');
+        }
+      }
+    }
+
+    // 5. SplitsPage: Acerto envolvendo pessoa externa (from_person_id ou to_person_id)
+    const txWithPerson = [
+      {
+        id: 'tx-pers-1',
+        workspace_id: 'ws-2',
+        description: 'Aluguel com Carlos',
+        amount: 200,
+        transaction_date: '2026-03-01',
+        due_date: '2026-03-01',
+        type: 'expense' as const,
+        status: 'pending' as const,
+        paid_by_member_id: 'wsm-2',
+        split_type: 'equal' as const,
+        splits: [
+          { member_id: 'wsm-2', amount: 100, percentage: 50 },
+          { person_id: 'p-1', amount: 100, percentage: 50 },
+        ],
+      },
+    ];
+
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      people: peopleData,
+      allWorkspacePeople: peopleData,
+      transactions: txWithPerson as any,
+      purchases: [],
+      settlements: [],
+      recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
+      deleteSettlement: mockDeleteSettlement,
+      addPerson: mockAddPerson,
+      updatePerson: mockUpdatePerson,
+      deletePerson: mockDeletePerson,
+    } as any);
+
+    await act(async () => {
+      root.render(<SplitsPage />);
+    });
+
+    // Encontra botão "Acertar" no saldo devedor de Carlos para Rodrigo
+    const settleBtns = findNodes(container, (n) => n.tagName === 'BUTTON').filter((b) => {
+      const p = getReactProps(b);
+      return Array.isArray(p?.children) ? p.children.includes('Acertar') : p?.children === 'Acertar';
+    });
+
+    if (settleBtns.length > 0) {
+      await act(async () => {
+        getReactProps(settleBtns[0]).onClick();
+      });
+
+      // Submete o formulário de acerto no modal aberto
+      const modalForm = findNodes(container, (n) => n.tagName === 'FORM').find((f) => getReactProps(f)?.className?.includes('space-y-4') || getReactProps(f)?.onSubmit);
+      if (modalForm) {
+        await act(async () => {
+          await getReactProps(modalForm).onSubmit({ preventDefault: () => {} });
+        });
+        expect(mockRecordSettlement).toHaveBeenCalledWith(
+          expect.objectContaining({
+            from_person_id: 'p-1',
+            to_member_id: 'wsm-2',
+            amount: 100,
+          })
+        );
+      }
+    }
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('QuickAddModal: valida coerção para individual com 1 participante e compra parcelada paga por pessoa', async () => {
+    const peopleData: Person[] = [
+      { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
+    ];
+
+    const mockCards: any[] = [
+      {
+        id: 'card-1',
+        workspace_id: 'ws-2',
+        name: 'Nubank',
+        institution: 'Nubank',
+        credit_limit: 5000,
+        closing_day: 5,
+        due_day: 15,
+        active: true,
+      },
+    ];
+
+    const mockPaymentMethods: any[] = [
+      {
+        id: 'pm-card',
+        workspace_id: 'ws-2',
+        name: 'Cartão Nubank',
+        type: 'credit_card',
+        credit_card_id: 'card-1',
+        active: true,
+      },
+    ];
+
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      people: peopleData,
+      allWorkspacePeople: peopleData,
+      categories: mockCategories as any,
+      paymentMethods: mockPaymentMethods,
+      accounts: mockAccounts as any,
+      creditCards: mockCards,
+      addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
+      createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
+      createTransfer: vi.fn(),
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
+    });
+
+    const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    const amountInput = inputs.find((i) => getReactProps(i)?.placeholder === '0,00');
+    const descInput = inputs.find((i) => getReactProps(i)?.placeholder?.includes('Supermercado'));
+
+    await act(async () => {
+      getReactProps(amountInput).onChange({ target: { value: '600,00' } });
+      getReactProps(descInput).onChange({ target: { value: 'TV Parcelada por Carlos' } });
+    });
+
+    // 1. Seleciona método de pagamento com cartão
+    const allSelects = findNodes(container, (n) => n.tagName === 'SELECT');
+    const pmSelect = allSelects.find((s) => (s as any).options?.some?.((o: any) => o.value === 'pm-card'));
+    if (pmSelect) {
+      await act(async () => {
+        getReactProps(pmSelect).onChange({ target: { value: 'pm-card' } });
+      });
+    }
+
+    // 2. Configura parcelamento em 3x
+    const updatedSelects = findNodes(container, (n) => n.tagName === 'SELECT');
+    const instSelect = updatedSelects.find((s) => {
+      const p = getReactProps(s);
+      return (p?.value === 1 || p?.value === '1') && s !== pmSelect;
+    });
+    if (instSelect) {
+      await act(async () => {
+        getReactProps(instSelect).onChange({ target: { value: 3 } });
+      });
+    }
+
+    // 3. Altera regra de rateio para equal
+    const splitSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return p?.children?.some?.((c: any) => c?.props?.value === 'equal');
+    });
+    if (splitSelect) {
+      await act(async () => {
+        getReactProps(splitSelect).onChange({ target: { value: 'equal' } });
+      });
+    }
+
+    // 4. Altera pagador para a pessoa p-1
+    const payerSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return (s as any).options?.some?.((o: any) => o.value === 'p-1') ||
+             (Array.isArray(p?.children) && p.children.flat().some((c: any) => c?.props?.value === 'p-1'));
+    });
+    if (payerSelect) {
+      await act(async () => {
+        getReactProps(payerSelect).onChange({ target: { value: 'p-1' } });
+      });
+    }
+
+    // 5. Submete formulário
+    const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
+    await act(async () => {
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'TV Parcelada por Carlos',
+        total_amount: 600,
+        paid_by_person_id: 'p-1',
+        paid_by_member_id: undefined,
+      })
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre PeopleManager com Escape no modo edição, tecla Tab e erro de arquivamento genérico', async () => {
+    const peopleData: Person[] = [
+      { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
+    ];
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(
+        <PeopleManager
+          people={peopleData}
+          onAddPerson={mockAddPerson}
+          onUpdatePerson={mockUpdatePerson}
+          onDeletePerson={mockDeletePerson}
+        />
+      );
+    });
+
+    // 1. Enter com texto vazio / espaços no input de adicionar nova pessoa
+    const addInput = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+    await act(async () => {
+      getReactProps(addInput).onChange({ target: { value: '   ' } });
+      getReactProps(addInput).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+      getReactProps(addInput).onKeyDown({ key: 'Tab' });
+    });
+    expect(mockAddPerson).not.toHaveBeenCalled();
+
+    // 2. Entra em modo de edição
+    const editBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Renomear pessoa');
+    await act(async () => {
+      getReactProps(editBtn).onClick();
+    });
+
+    // Pressiona tecla qualquer (ex: Tab) para exercitar implicit else em onKeyDown
+    const editInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.autoFocus);
+    await act(async () => {
+      getReactProps(editInput).onKeyDown({ key: 'Tab' });
+      // Cancela edição com Escape
+      getReactProps(editInput).onKeyDown({ key: 'Escape' });
+    });
+
+    // 3. Erro de arquivamento sem propriedade message (exercita fallback)
+    mockUpdatePerson.mockRejectedValueOnce('Erro simples sem message');
+    const archiveBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.title === 'Arquivar pessoa');
+    await act(async () => {
+      await getReactProps(archiveBtn).onClick();
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre SplitFields com troca de pagador, inline add, cancelamento, Enter, Tab e chips', async () => {
+    const handlePaidByMember = vi.fn();
+    const handlePaidByPerson = vi.fn();
+    const handleAddPerson = vi.fn().mockResolvedValue({ id: 'p-new', name: 'Novo Participante' });
+    const handleTogglePart = vi.fn();
+    const peopleData: Person[] = [
+      { id: 'p-1', name: 'Carlos', workspace_id: 'ws-2', created_at: '2026-03-01T00:00:00Z', archived: false },
+    ];
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={mockMembers}
+          people={peopleData}
+          paidByMemberId="wsm-2"
+          onPaidByMemberIdChange={handlePaidByMember}
+          paidByPersonId=""
+          onPaidByPersonIdChange={handlePaidByPerson}
+          splitType="equal"
+          onSplitTypeChange={vi.fn()}
+          numAmount={100}
+          onAddPerson={handleAddPerson}
+          selectedParticipantIds={['wsm-2', 'p-1']}
+          onToggleParticipant={handleTogglePart}
+        />
+      );
+    });
+
+    // 1. Payer select
+    const selects = findNodes(container, (n) => n.tagName === 'SELECT');
+    const payerSelect = selects[0];
+    await act(async () => {
+      // Muda para pessoa
+      getReactProps(payerSelect).onChange({ target: { value: 'p-1' } });
+    });
+    expect(handlePaidByPerson).toHaveBeenCalledWith('p-1');
+    expect(handlePaidByMember).toHaveBeenCalledWith('');
+
+    await act(async () => {
+      // Muda de volta para membro
+      getReactProps(payerSelect).onChange({ target: { value: 'wsm-3' } });
+    });
+    expect(handlePaidByMember).toHaveBeenCalledWith('wsm-3');
+    expect(handlePaidByPerson).toHaveBeenCalledWith('');
+
+    // 2. Chip de participante
+    const chipBtns = findNodes(container, (n) => n.tagName === 'BUTTON').filter((b) => getReactProps(b)?.className?.includes('rounded-full'));
+    if (chipBtns.length > 0) {
+      await act(async () => {
+        getReactProps(chipBtns[0]).onClick();
+      });
+      expect(handleTogglePart).toHaveBeenCalled();
+    }
+
+    // 3. Abrir inline add person e cancelar
+    const addPersonBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.className?.includes('text-teal-700'));
+    if (addPersonBtn) {
+      await act(async () => {
+        getReactProps(addPersonBtn).onClick();
+      });
+
+      const cancelBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.children === 'Cancelar');
+      if (cancelBtn) {
+        await act(async () => {
+          getReactProps(cancelBtn).onClick();
+        });
+      }
+
+      // Reabre após cancelar re-consultando o botão
+      await act(async () => {
+        const reAddBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.className?.includes('text-teal-700'));
+        if (reAddBtn) getReactProps(reAddBtn).onClick();
+      });
+
+      const inlineInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+      if (inlineInput) {
+        // 1. Tentar salvar vazio
+        await act(async () => {
+          getReactProps(inlineInput).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+        });
+
+        // 2. Tentar salvar nome existente 'Carlos'
+        await act(async () => {
+          getReactProps(inlineInput).onChange({ target: { value: 'Carlos' } });
+        });
+        await act(async () => {
+          const cur = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+          if (cur) getReactProps(cur).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+        });
+
+        // 3. Salvar com erro na API
+        handleAddPerson.mockRejectedValueOnce(new Error('Erro na API'));
+        await act(async () => {
+          const cur = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+          if (cur) getReactProps(cur).onChange({ target: { value: 'Lucas' } });
+        });
+        await act(async () => {
+          const cur = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+          if (cur) getReactProps(cur).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+        });
+
+        // 4. Salvar com sucesso
+        handleAddPerson.mockResolvedValueOnce({ id: 'p-lucas', name: 'Lucas' });
+        await act(async () => {
+          const cur = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+          if (cur) getReactProps(cur).onChange({ target: { value: 'Lucas' } });
+        });
+        await act(async () => {
+          const cur = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('Nome da pessoa'));
+          if (cur) {
+            getReactProps(cur).onKeyDown({ key: 'Tab' });
+            getReactProps(cur).onKeyDown({ key: 'Enter', preventDefault: () => {} });
+          }
+        });
+        expect(handleAddPerson).toHaveBeenCalledWith('Lucas');
+      }
+    }
+
+    // 5. SplitFields sem callbacks opcionais nem people
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={mockMembers}
+          paidByMemberId="wsm-2"
+          onPaidByMemberIdChange={handlePaidByMember}
+          splitType="equal"
+          onSplitTypeChange={vi.fn()}
+          numAmount={100}
+        />
+      );
+    });
+    const chipBtnsNoCb = findNodes(container, (n) => n.tagName === 'BUTTON').filter((b) => getReactProps(b)?.className?.includes('rounded-full'));
+    if (chipBtnsNoCb.length > 0) {
+      await act(async () => {
+        getReactProps(chipBtnsNoCb[0]).onClick();
+      });
+    }
+    const payerSelectNoCb = findNodes(container, (n) => n.tagName === 'SELECT')[0];
+    if (payerSelectNoCb) {
+      await act(async () => {
+        getReactProps(payerSelectNoCb).onChange({ target: { value: 'wsm-3' } });
+      });
+    }
+
+    // 6. SplitFields com membro único e sem pessoas (totalCount <= 1)
+    const handleAddPersonSingle = vi.fn().mockResolvedValue({ id: 'p-single', name: 'Ana' });
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          workspaceMembers={[mockMembers[0]]}
+          people={[]}
+          paidByMemberId="wsm-2"
+          onPaidByMemberIdChange={handlePaidByMember}
+          splitType="individual"
+          onSplitTypeChange={vi.fn()}
+          numAmount={100}
+          onAddPerson={handleAddPersonSingle}
+        />
+      );
+    });
+
+    const singleInput = findNodes(container, (n) => n.tagName === 'INPUT').find((i) => getReactProps(i)?.placeholder?.includes('ex: Lucas'));
+    if (singleInput) {
+      await act(async () => {
+        getReactProps(singleInput).onChange({ target: { value: 'Ana' } });
+      });
+      const singleAddBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => getReactProps(b)?.className?.includes('bg-teal-600'));
+      if (singleAddBtn) {
+        await act(async () => {
+          await getReactProps(singleAddBtn).onClick({ preventDefault: () => {} });
+        });
+        expect(handleAddPersonSingle).toHaveBeenCalledWith('Ana');
+      }
+    }
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre SplitsPage quando membro paga para pessoa externa (isToPerson = true)', async () => {
+    const peopleData: Person[] = [
+      { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
+    ];
+
+    const tx = [
+      {
+        id: 'tx-p-paid',
+        workspace_id: 'ws-2',
+        description: 'Jantar pago por Carlos',
+        amount: 100,
+        transaction_date: '2026-03-01',
+        due_date: '2026-03-01',
+        type: 'expense' as const,
+        status: 'pending' as const,
+        paid_by_person_id: 'p-1',
+        split_type: 'equal' as const,
+        splits: [
+          { person_id: 'p-1', amount: 50, percentage: 50 },
+          { member_id: 'wsm-2', amount: 50, percentage: 50 },
+        ],
+      },
+    ];
+
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      people: peopleData,
+      allWorkspacePeople: peopleData,
+      transactions: tx as any,
+      purchases: [],
+      settlements: [],
+      recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
+      deleteSettlement: mockDeleteSettlement,
+      addPerson: mockAddPerson,
+      updatePerson: mockUpdatePerson,
+      deletePerson: mockDeletePerson,
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(<SplitsPage />);
+    });
+
+    const settleBtns = findNodes(container, (n) => n.tagName === 'BUTTON').filter((b) => {
+      const p = getReactProps(b);
+      return Array.isArray(p?.children) ? p.children.includes('Liquidar Agora') : p?.children === 'Liquidar Agora';
+    });
+
+    if (settleBtns.length > 0) {
+      await act(async () => {
+        getReactProps(settleBtns[0]).onClick();
+      });
+
+      const modalForm = findNodes(container, (n) => n.tagName === 'FORM').find((f) => getReactProps(f)?.className?.includes('space-y-4') || getReactProps(f)?.onSubmit);
+      if (modalForm) {
+        await act(async () => {
+          await getReactProps(modalForm).onSubmit({ preventDefault: () => {} });
+        });
+        expect(mockRecordSettlement).toHaveBeenCalledWith(
+          expect.objectContaining({
+            from_member_id: 'wsm-2',
+            to_member_id: null,
+            from_person_id: null,
+            to_person_id: 'p-1',
+            amount: 50,
+          })
+        );
+      }
+    }
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre QuickAddModal com despesa customizada contendo membro e pessoa paga por pessoa', async () => {
+    const peopleData: Person[] = [
+      { id: 'p-1', workspace_id: 'ws-2', name: 'Carlos Silva', created_at: '2026-03-01T10:00:00Z', archived: false },
+    ];
+
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      people: peopleData,
+      allWorkspacePeople: peopleData,
+      categories: mockCategories as any,
+      paymentMethods: [],
+      accounts: mockAccounts as any,
+      creditCards: [],
+      addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
+      createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
+      createTransfer: vi.fn(),
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
+    });
+
+    const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    const amountInput = inputs.find((i) => getReactProps(i)?.placeholder === '0,00');
+    const descInput = inputs.find((i) => getReactProps(i)?.placeholder?.includes('Supermercado'));
+
+    await act(async () => {
+      getReactProps(amountInput).onChange({ target: { value: '100,00' } });
+      getReactProps(descInput).onChange({ target: { value: 'Churrasco com Carlos' } });
+    });
+
+    // Seleciona categoria cat-1
+    const catSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return Array.isArray(p?.children) && p.children.flat().some((c: any) => c?.props?.value === 'cat-1');
+    });
+    if (catSelect) {
+      await act(async () => {
+        getReactProps(catSelect).onChange({ target: { value: 'cat-1' } });
+      });
+    }
+
+    // Seleciona regra custom
+    const splitSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return p?.children?.some?.((c: any) => c?.props?.value === 'custom');
+    });
+    if (splitSelect) {
+      await act(async () => {
+        getReactProps(splitSelect).onChange({ target: { value: 'custom' } });
+      });
+    }
+
+    // Define valores customizados somando 100
+    const customInputs = findNodes(container, (n) => n.tagName === 'INPUT' && getReactProps(n)?.type === 'number');
+    if (customInputs.length >= 2) {
+      await act(async () => {
+        getReactProps(customInputs[0]).onChange({ target: { value: '50' } });
+        getReactProps(customInputs[1]).onChange({ target: { value: '50' } });
+      });
+    }
+
+    // Seleciona pagador pessoa p-1
+    const payerSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return (Array.isArray(p?.children) && p.children.flat().some((c: any) => c?.props?.value === 'p-1'));
+    });
+    if (payerSelect) {
+      await act(async () => {
+        getReactProps(payerSelect).onChange({ target: { value: 'p-1' } });
+      });
+    }
+
+    const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
+    await act(async () => {
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Churrasco com Carlos',
+        amount: 100,
+        paid_by_person_id: 'p-1',
+        paid_by_member_id: undefined,
+        split_type: 'custom',
+      })
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre QuickAddModal quando pagador não está nos participantes selecionados e é incluído automaticamente', async () => {
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      people: [],
+      allWorkspacePeople: [],
+      categories: mockCategories as any,
+      paymentMethods: [],
+      accounts: mockAccounts as any,
+      creditCards: [],
+      addTransaction: mockAddTransaction,
+        addTransactionAsync: async (data: any) => mockAddTransaction(data),
+      createInstallmentPurchase: mockCreateInstallmentPurchase,
+        createInstallmentPurchaseAsync: async (data: any) => mockCreateInstallmentPurchase(data),
+      createTransfer: vi.fn(),
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(<QuickAddModal isOpen={true} onClose={mockOnClose} />);
+    });
+
+    const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+    const amountInput = inputs.find((i) => getReactProps(i)?.placeholder === '0,00');
+    const descInput = inputs.find((i) => getReactProps(i)?.placeholder?.includes('Supermercado'));
+
+    await act(async () => {
+      getReactProps(amountInput).onChange({ target: { value: '80,00' } });
+      getReactProps(descInput).onChange({ target: { value: 'Café com Camila' } });
+    });
+
+    // Seleciona categoria cat-1
+    const catSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return Array.isArray(p?.children) && p.children.flat().some((c: any) => c?.props?.value === 'cat-1');
+    });
+    if (catSelect) {
+      await act(async () => {
+        getReactProps(catSelect).onChange({ target: { value: 'cat-1' } });
+      });
+    }
+
+    // Seleciona splitType equal
+    const splitSelect = findNodes(container, (n) => n.tagName === 'SELECT').find((s) => {
+      const p = getReactProps(s);
+      return p?.children?.some?.((c: any) => c?.props?.value === 'equal');
+    });
+    if (splitSelect) {
+      await act(async () => {
+        getReactProps(splitSelect).onChange({ target: { value: 'equal' } });
+      });
+    }
+
+    // Payer é wsm-2 (Rodrigo), mas desmarcou Rodrigo e deixou só Camila (wsm-3)
+    const chipBtns = findNodes(container, (n) => n.tagName === 'BUTTON').filter((b) => getReactProps(b)?.className?.includes('rounded-full'));
+    if (chipBtns.length > 0) {
+      await act(async () => {
+        getReactProps(chipBtns[0]).onClick();
+      });
+    }
+
+    const form = findNodes(container, (n) => n.tagName === 'FORM')[0];
+    await act(async () => {
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockAddTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Café com Camila',
+        amount: 80,
+        paid_by_member_id: 'wsm-2',
+        split_type: 'equal',
+      })
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre SplitsPage com despesa sem splits e compra parcelada com splits no histórico', async () => {
+    const txWithoutSplits = [
+      {
+        id: 'tx-no-splits',
+        workspace_id: 'ws-2',
+        description: 'Padaria Simples',
+        amount: 30,
+        transaction_date: '2026-03-01',
+        due_date: '2026-03-01',
+        type: 'expense' as const,
+        status: 'paid' as const,
+        split_type: 'equal' as const,
+        splits: undefined,
+      },
+    ];
+
+    const purchasesWithSplits = [
+      {
+        id: 'pur-splits-1',
+        workspace_id: 'ws-2',
+        description: 'Geladeira Nova',
+        total_amount: 1000,
+        installment_count: 10,
+        purchase_date: '2026-03-01',
+        paid_by_member_id: 'wsm-2',
+        split_type: 'equal' as const,
+        splits: [
+          { member_id: 'wsm-2', amount: 500, percentage: 50 },
+          { member_id: 'wsm-3', amount: 500, percentage: 50 },
+        ],
+      },
+      {
+        id: 'pur-splits-no-array',
+        workspace_id: 'ws-2',
+        description: 'Mesa de Jantar',
+        total_amount: 400,
+        installment_count: 4,
+        purchase_date: '2026-03-01',
+        paid_by_member_id: 'wsm-2',
+        split_type: 'equal' as const,
+        splits: undefined,
+      },
+      {
+        id: 'pur-other-ws',
+        workspace_id: 'ws-other',
+        description: 'Outro workspace',
+        total_amount: 200,
+        installment_count: 2,
+        purchase_date: '2026-03-01',
+        splits: [],
+      },
+    ];
+
+    vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
+      activeWorkspace: mockWorkspace,
+      workspaceMembers: mockMembers,
+      people: [],
+      allWorkspacePeople: [],
+      transactions: txWithoutSplits as any,
+      purchases: purchasesWithSplits as any,
+      settlements: [],
+      recordSettlement: mockRecordSettlement,
+        recordSettlementAsync: async (data: any) => mockRecordSettlement(data),
+      deleteSettlement: mockDeleteSettlement,
+      addPerson: mockAddPerson,
+      updatePerson: mockUpdatePerson,
+      deletePerson: mockDeletePerson,
+    } as any);
+
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    await act(async () => {
+      root.render(<SplitsPage />);
+    });
+
+    const registerSettlementBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((b) => {
+      const p = getReactProps(b);
+      return Array.isArray(p?.children) ? p.children.includes('Registrar Acerto de Contas') : p?.children === 'Registrar Acerto de Contas';
+    });
+    if (registerSettlementBtn) {
+      await act(async () => {
+        getReactProps(registerSettlementBtn).onClick();
+      });
+    }
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it('cobre ramificações de SplitFields (sem pagador, sem callbacks opcionais, sem people)', async () => {
+    const container = (globalThis as any).document.createElement('div');
+    const root = createTestRoot(container);
+
+    // 1. Renderiza SplitFields com callbacks opcionais ausentes
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          totalAmount={100}
+          splitType="equal"
+          onSplitTypeChange={vi.fn()}
+          paidByMemberId="wsm-2"
+          paidByPersonId=""
+          onPaidByMemberIdChange={vi.fn()}
+          onPaidByPersonIdChange={vi.fn()}
+          workspaceMembers={mockMembers}
+          people={[{ id: 'person-test-0', name: 'Pessoa Inicial', workspace_id: 'ws-2', archived: false, created_at: '' }]}
+          selectedParticipantIds={['wsm-2', 'person-test-0']}
+          onToggleParticipant={undefined as any}
+          onAddPerson={undefined as any}
+        />
+      );
+    });
+
+    // 2. Clica no chip de participante quando onToggleParticipant é indefinido (linha 282)
+    const chips = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const memberChip = chips.find((c) => c.textContent?.includes('Rodrigo Silva'));
+    if (memberChip) {
+      await act(async () => {
+        getReactProps(memberChip).onClick();
+      });
+    }
+
+    // 3. Abre form de nova pessoa e tenta adicionar com nome duplicado (linha 143)
+    const addPersonBtn = chips.find((c) => c.textContent?.includes('Nova Pessoa'));
+    if (addPersonBtn) {
+      await act(async () => {
+        getReactProps(addPersonBtn).onClick();
+      });
+    }
+    const input = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+    const saveBtn = findNodes(container, (n) => n.tagName === 'BUTTON').find((c) => c.textContent?.includes('Salvar'));
+    if (input && saveBtn) {
+      await act(async () => {
+        getReactProps(input).onChange({ target: { value: 'Rodrigo Silva' } });
+      });
+      await act(async () => {
+        getReactProps(saveBtn).onClick({ preventDefault: vi.fn() });
+      });
+      // Agora com nome inédito mas onAddPerson ausente (linha 146 false)
+      await act(async () => {
+        getReactProps(input).onChange({ target: { value: 'Nova Pessoa Sem Callback' } });
+      });
+      await act(async () => {
+        getReactProps(saveBtn).onClick({ preventDefault: vi.fn() });
+      });
+    }
+
+    // 4. Troca o select para membro e depois para pessoa existente cobrindo isPerson
+    const payerSelect = findNodes(container, (n) => n.tagName === 'SELECT')[1];
+    if (payerSelect) {
+      await act(async () => {
+        getReactProps(payerSelect).onChange({ target: { value: 'wsm-3' } });
+      });
+      await act(async () => {
+        getReactProps(payerSelect).onChange({ target: { value: 'person-test-0' } });
+      });
+    }
+
+    // 5. Renderiza com onToggleParticipant e onAddPerson definidos, pagador fora dos selecionados
+    const mockToggle = vi.fn();
+    const mockAdd = vi.fn().mockResolvedValue({ id: 'p-lucas', name: 'Lucas' });
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          totalAmount={100}
+          splitType="equal"
+          onSplitTypeChange={vi.fn()}
+          paidByMemberId="wsm-2"
+          paidByPersonId=""
+          onPaidByMemberIdChange={vi.fn()}
+          onPaidByPersonIdChange={vi.fn()}
+          workspaceMembers={mockMembers}
+          people={[{ id: 'person-test-0', name: 'Pessoa Inicial', workspace_id: 'ws-2', archived: false, created_at: '' }]}
+          selectedParticipantIds={['wsm-3']} // wsm-2 pagou mas não está nos selecionados -> cobre linhas 91-95
+          onToggleParticipant={mockToggle}
+          onAddPerson={mockAdd}
+        />
+      );
+    });
+
+    const chipsWithToggle = findNodes(container, (n) => n.tagName === 'BUTTON');
+    const chipToClick = chipsWithToggle.find((c) => c.textContent?.includes('Rodrigo Silva'));
+    if (chipToClick) {
+      await act(async () => {
+        getReactProps(chipToClick).onClick();
+      });
+      expect(mockToggle).toHaveBeenCalledWith('wsm-2');
+    }
+
+    // Adiciona pessoa com sucesso invocando onToggleParticipant(created.id) (linhas 151-153)
+    const addBtn2 = chipsWithToggle.find((c) => c.textContent?.includes('Nova Pessoa'));
+    if (addBtn2) {
+      await act(async () => {
+        getReactProps(addBtn2).onClick();
+      });
+    }
+    const input2 = findNodes(container, (n) => n.tagName === 'INPUT')[0];
+    const saveBtn2 = findNodes(container, (n) => n.tagName === 'BUTTON').find((c) => c.textContent?.includes('Salvar'));
+    if (input2 && saveBtn2) {
+      await act(async () => {
+        getReactProps(input2).onChange({ target: { value: 'Lucas' } });
+      });
+      await act(async () => {
+        await getReactProps(saveBtn2).onClick({ preventDefault: vi.fn() });
+      });
+      expect(mockAdd).toHaveBeenCalledWith('Lucas');
+      expect(mockToggle).toHaveBeenCalledWith('p-lucas');
+    }
+
+    // 6. Renderiza com pagador inexistente e selectedParticipantIds inexistente (payerPart undefined -> linha 93 false, filtered.length === 0 -> linha 97 fallback)
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          totalAmount={100}
+          splitType="equal"
+          onSplitTypeChange={vi.fn()}
+          paidByMemberId="unknown-payer-id"
+          paidByPersonId=""
+          onPaidByMemberIdChange={vi.fn()}
+          onPaidByPersonIdChange={vi.fn()}
+          workspaceMembers={mockMembers}
+          people={[]}
+          selectedParticipantIds={['id-inexistente']}
+        />
+      );
+    });
+
+    // 7. Renderiza com workspaceMembers vazio e somente people (linha 71 people[0]?.id e linha 75 isPerson)
+    await act(async () => {
+      root.render(
+        <SplitFields
+          type="expense"
+          totalAmount={100}
+          splitType="equal"
+          onSplitTypeChange={vi.fn()}
+          paidByMemberId=""
+          paidByPersonId=""
+          onPaidByMemberIdChange={vi.fn()}
+          onPaidByPersonIdChange={vi.fn()}
+          workspaceMembers={[]}
+          people={[{ id: 'p-sole', name: 'Pessoa Unica', workspace_id: 'ws-2', archived: false, created_at: '' }]}
+          selectedParticipantIds={['p-sole']}
+        />
+      );
+    });
 
     await act(async () => {
       root.unmount();

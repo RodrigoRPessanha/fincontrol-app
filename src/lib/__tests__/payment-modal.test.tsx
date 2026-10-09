@@ -61,7 +61,9 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
       accounts: mockAccounts as any,
       recordPayment: mockRecordPayment,
+      recordPaymentAsync: mockRecordPayment,
       payCreditCardBill: mockPayCreditCardBill,
+      payCreditCardBillAsync: mockPayCreditCardBill,
     } as any);
 
     // Mock DOM robusto para React 19
@@ -281,7 +283,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
 
     // 3. Envia o formulário
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledTimes(1);
@@ -305,7 +307,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledTimes(1);
@@ -358,7 +360,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     });
 
     await act(async () => {
-      getReactProps(form1).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form1).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledWith(
@@ -407,7 +409,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     });
 
     await act(async () => {
-      getReactProps(form2).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form2).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledWith(
@@ -456,7 +458,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     });
 
     await act(async () => {
-      getReactProps(form3).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form3).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockPayCreditCardBill).toHaveBeenCalledWith(
@@ -464,7 +466,8 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       'acc-1',
       1000.50,
       expect.any(String),
-      undefined
+      undefined,
+      expect.any(String)
     );
     root3.unmount();
   });
@@ -499,7 +502,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledWith(
@@ -516,7 +519,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
     });
 
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledWith(
@@ -562,7 +565,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput).onChange({ target: { value: 'abc' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordPayment).not.toHaveBeenCalled();
 
@@ -571,7 +574,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput).onChange({ target: { value: '' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordPayment).not.toHaveBeenCalled();
 
@@ -580,7 +583,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput).onChange({ target: { value: '-10,00' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordPayment).not.toHaveBeenCalled();
 
@@ -588,7 +591,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput).onChange({ target: { value: '-5.50' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordPayment).not.toHaveBeenCalled();
 
@@ -597,7 +600,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput).onChange({ target: { value: '50,01' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordPayment).not.toHaveBeenCalled();
 
@@ -607,7 +610,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput).onChange({ target: { value: '50,00' } });
     });
     await act(async () => {
-      getReactProps(form).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form).onSubmit({ preventDefault: () => {} });
     });
     expect(mockRecordPayment).not.toHaveBeenCalled();
 
@@ -646,7 +649,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput1).onChange({ target: { value: '50,00' } });
     });
     await act(async () => {
-      getReactProps(form1).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form1).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockRecordPayment).toHaveBeenCalledWith(
@@ -690,7 +693,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       getReactProps(amountInput2).onChange({ target: { value: '150,00' } });
     });
     await act(async () => {
-      getReactProps(form2).onSubmit({ preventDefault: () => {} });
+      await getReactProps(form2).onSubmit({ preventDefault: () => {} });
     });
 
     expect(mockPayCreditCardBill).toHaveBeenCalledWith(
@@ -698,7 +701,8 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       'acc-2',
       150.0,
       expect.any(String),
-      undefined
+      undefined,
+      expect.any(String)
     );
     root2.unmount();
   });
@@ -750,7 +754,9 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       vi.spyOn(FinanceContext, 'useFinance').mockReturnValue({
         accounts: mockAccounts as any,
         recordPayment: mockRecordPayment,
+        recordPaymentAsync: mockRecordPayment,
         payCreditCardBill: mockPayCreditCardBill,
+        payCreditCardBillAsync: mockPayCreditCardBill,
         activeWorkspace: {
           id: 'ws-tracker',
           name: 'Workspace Despesas',
@@ -832,7 +838,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
       // Submeter pagamento e verificar que recordPayment recebe account_id undefined
       const form = findNode(container, (n) => n.tagName === 'FORM');
       await act(async () => {
-        getReactProps(form).onSubmit({ preventDefault: () => {} });
+        await getReactProps(form).onSubmit({ preventDefault: () => {} });
       });
 
       expect(mockRecordPayment).toHaveBeenCalledWith(
@@ -884,7 +890,7 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
 
       const form = findNode(container, (n) => n.tagName === 'FORM');
       await act(async () => {
-        getReactProps(form).onSubmit({ preventDefault: () => {} });
+        await getReactProps(form).onSubmit({ preventDefault: () => {} });
       });
 
       expect(mockPayCreditCardBill).toHaveBeenCalledWith(
@@ -892,10 +898,139 @@ describe('PaymentModal Component & Cent-Accuracy Logic (V36 / P0-01 & P2-01)', (
         undefined,
         450.0,
         expect.any(String),
-        undefined
+        undefined,
+        expect.any(String)
       );
       expect(mockOnClose).toHaveBeenCalledTimes(1);
 
+      root.unmount();
+    });
+
+    it('deve exibir mensagem de erro quando recordPayment rejeitar a operação', async () => {
+      mockRecordPayment.mockRejectedValueOnce(new Error('Saldo insuficiente na conta'));
+      const container = (globalThis as any).document.createElement('div');
+      const root = createRoot(container);
+
+      await act(async () => {
+        root.render(
+          <PaymentModal
+            isOpen={true}
+            onClose={mockOnClose}
+            target={{
+              type: 'transaction',
+              id: 'tx-err-1',
+              title: 'Despesa Erro',
+              totalAmount: 100.0,
+              paidAmount: 0,
+            }}
+          />
+        );
+      });
+
+      const select = findNode(container, (n) => n.tagName === 'SELECT');
+      if (select) {
+        await act(async () => {
+          getReactProps(select).onChange({ target: { value: 'acc-1' } });
+        });
+      }
+
+      const buttons = findNodes(container, (n) => n.tagName === 'BUTTON');
+      const totalBtn = buttons.find((b) => {
+        const props = getReactProps(b);
+        return props?.type === 'button' && props?.onClick && typeof props?.children === 'object';
+      });
+      await act(async () => {
+        getReactProps(totalBtn).onClick();
+      });
+
+      const form = findNode(container, (n) => n.tagName === 'FORM');
+      await act(async () => {
+        await getReactProps(form).onSubmit({ preventDefault: () => {} });
+      });
+
+      const errSpans = findNodes(container, (n) => n.tagName === 'SPAN' && getReactProps(n)?.children === 'Saldo insuficiente na conta');
+      expect(errSpans.length).toBe(1);
+      expect(mockOnClose).not.toHaveBeenCalled();
+
+      // Teste de fallback quando err?.message for vazio ou indefinido
+      mockRecordPayment.mockRejectedValueOnce({});
+      await act(async () => {
+        await getReactProps(form).onSubmit({ preventDefault: () => {} });
+      });
+      const fallbackSpans = findNodes(container, (n) => n.tagName === 'SPAN' && getReactProps(n)?.children === 'Falha ao registrar pagamento.');
+      expect(fallbackSpans.length).toBe(1);
+
+      root.unmount();
+    });
+
+    it('deve exibir "Confirmando..." e desabilitar botões durante a submissão assíncrona', async () => {
+      let resolvePayment!: () => void;
+      const paymentPromise = new Promise<void>((resolve) => {
+        resolvePayment = resolve;
+      });
+      mockRecordPayment.mockReturnValueOnce(paymentPromise);
+
+      const target = {
+        type: 'transaction' as const,
+        id: 'tx-async',
+        title: 'Despesa Async',
+        totalAmount: 100,
+        paidAmount: 0,
+      };
+
+      const container = (globalThis as any).document.createElement('div');
+      const root = createRoot(container);
+
+      await act(async () => {
+        root.render(
+          <PaymentModal
+            isOpen={true}
+            onClose={mockOnClose}
+            target={target}
+          />
+        );
+      });
+
+      const inputs = findNodes(container, (n) => n.tagName === 'INPUT');
+      const amountInput = inputs.find((i) => getReactProps(i)?.type === 'text');
+      await act(async () => {
+        getReactProps(amountInput).onChange({ target: { value: '50' } });
+      });
+
+      const selects = findNodes(container, (n) => n.tagName === 'SELECT');
+      if (selects.length > 0) {
+        await act(async () => {
+          getReactProps(selects[0]).onChange({ target: { value: 'acc-1' } });
+        });
+      }
+
+      const form = findNode(container, (n) => n.tagName === 'FORM');
+      let submitPromise: Promise<void> | undefined;
+      act(() => {
+        submitPromise = getReactProps(form).onSubmit({ preventDefault: () => {} });
+      });
+
+      // Enquanto o pagamento está pendente, o botão de submit exibe "Confirmando..."
+      const submitBtn = findNode(container, (n) => n.tagName === 'BUTTON' && getReactProps(n)?.type === 'submit');
+      expect(getReactProps(submitBtn)?.children).toBe('Confirmando...');
+      expect(getReactProps(submitBtn)?.disabled).toBe(true);
+
+      // Nova tentativa de submissão enquanto isSubmitting não deve disparar mockRecordPayment novamente
+      act(() => {
+        getReactProps(form).onSubmit({ preventDefault: () => {} });
+      });
+      for (let i = 0; i < 100 && mockRecordPayment.mock.calls.length === 0; i++) {
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2)); });
+      }
+      expect(mockRecordPayment).toHaveBeenCalledTimes(1);
+
+      // Conclui a persistência
+      await act(async () => {
+        resolvePayment();
+        await submitPromise;
+      });
+
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
       root.unmount();
     });
   });

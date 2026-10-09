@@ -1,3 +1,4 @@
+import { findOperationReceipt } from './operation-receipts';
 import {
   Purchase,
   Installment,
@@ -9,6 +10,7 @@ import {
   resolveTransactionAccountId,
   validateTransactionBusinessRules,
   splitInstallments,
+  normalizeMoney,
 } from '../../financial-engine';
 import {
   getOrCreateAndAddItemToBill,
@@ -21,6 +23,7 @@ import { FinanceActionDeps } from './types';
 export function createInstallmentPurchase(
   deps: FinanceActionDeps,
   data: {
+    operation_key?: string;
     description: string;
     total_amount: number;
     installment_count: number;
@@ -30,17 +33,18 @@ export function createInstallmentPurchase(
     account_id?: string;
     payment_method_id?: string;
     paid_installments_count?: number;
-    paid_by_member_id?: string;
+    paid_by_member_id?: string | null;
+    paid_by_person_id?: string | null;
     split_type?: SplitType;
     splits?: TransactionSplit[];
   }
 ): Purchase {
-  if (typeof data.total_amount !== 'number' || !Number.isFinite(data.total_amount) || data.total_amount <= 0) {
-    throw new Error('O valor total da compra parcelada deve ser maior que zero.');
-  }
+  data = { ...data, total_amount: normalizeMoney(data.total_amount, 'O valor total da compra parcelada') };
 
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allPurchases, targetWsId, data.operation_key, data);
+  if (receipt) return receipt;
   const effectiveAccountId = resolveTransactionAccountId(
     data.payment_method_id,
     data.account_id,
@@ -66,7 +70,15 @@ export function createInstallmentPurchase(
     targetWsId
   );
   validateActiveCategory(deps, targetWsId, data.category_id);
-  validateTransactionSplits(deps, data.total_amount, targetWsId, data.paid_by_member_id, data.splits, data.split_type);
+  validateTransactionSplits(
+    deps,
+    data.total_amount,
+    targetWsId,
+    data.paid_by_member_id,
+    data.splits,
+    data.split_type,
+    data.paid_by_person_id
+  );
 
   const paidCount = Math.max(0, Math.min(data.installment_count, data.paid_installments_count || 0));
   const card = effectiveCardId ? state.allCreditCards.find((c) => c.id === effectiveCardId && c.workspace_id === targetWsId) : undefined;
@@ -78,6 +90,7 @@ export function createInstallmentPurchase(
 
   const effectiveSplitType: SplitType = data.split_type || 'individual';
   const effectiveSplits = effectiveSplitType !== 'individual' ? data.splits : undefined;
+  const userId = deps.getUserId();
 
   const newPurchase: Purchase = {
     ...data,
@@ -86,10 +99,11 @@ export function createInstallmentPurchase(
     paid_installments_count: paidCount,
     credit_card_id: effectiveCardId,
     account_id: effectiveAccountId,
-    paid_by_member_id: data.paid_by_member_id,
+    paid_by_member_id: data.paid_by_member_id ?? null,
+    paid_by_person_id: data.paid_by_person_id ?? null,
     split_type: effectiveSplitType,
     splits: effectiveSplits,
-    created_by: 'usr-1',
+    created_by: userId,
     created_at: deps.now().toISOString(),
   };
 
@@ -133,9 +147,9 @@ export function createInstallmentPurchase(
           account_id: effectiveAccountId || null,
           payment_method_id: data.payment_method_id,
           amount: inst.amount,
-          payment_date: inst.paid_at || inst.due_date,
+          payment_date: inst.due_date,
           notes: 'Quitação prévia de parcela importada',
-          created_by: 'usr-1',
+          created_by: userId,
           created_at: deps.now().toISOString(),
           affects_balance: false,
         });

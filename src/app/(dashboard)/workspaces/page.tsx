@@ -16,6 +16,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { WorkspaceRole } from '@/lib/types';
+import { ContextualHelp } from '@/components/help/ContextualHelp';
 
 export default function WorkspacesPage() {
   const {
@@ -25,6 +26,7 @@ export default function WorkspacesPage() {
     createWorkspace,
     updateWorkspace,
     addWorkspaceMember,
+    isWorkspaceReadOnly,
   } = useFinance();
   const { user } = useAuth();
 
@@ -46,6 +48,11 @@ export default function WorkspacesPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap gap-x-6">
+        <ContextualHelp slug="workspaces" label="Como criar e trocar de workspace" />
+        <ContextualHelp slug="modos-de-operacao" label="Qual modo de operação escolher" />
+        <ContextualHelp slug="membros-e-permissoes" label="Como dar acesso e escolher permissões" />
+      </div>
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -57,13 +64,13 @@ export default function WorkspacesPage() {
           </p>
         </div>
 
-        <button
+        {!isWorkspaceReadOnly && <button
           onClick={() => setIsInviteOpen(true)}
           className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 self-start sm:self-auto"
         >
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>Convidar Pessoa</span>
-        </button>
+        </button>}
       </div>
 
       {/* Modo de Operação do Workspace */}
@@ -85,8 +92,8 @@ export default function WorkspacesPage() {
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Opção 1: Completo */}
           <div
-            onClick={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
-            className={`cursor-pointer rounded-2xl border p-4.5 transition ${
+            onClick={() => !isWorkspaceReadOnly && updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
+            className={`${isWorkspaceReadOnly ? '' : 'cursor-pointer'} rounded-2xl border p-5 transition ${
               activeWorkspace.tracking_mode !== 'expense_tracker'
                 ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20 dark:border-emerald-600'
                 : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40'
@@ -99,8 +106,9 @@ export default function WorkspacesPage() {
               <input
                 type="radio"
                 name="tracking_mode"
+                disabled={isWorkspaceReadOnly}
                 checked={activeWorkspace.tracking_mode !== 'expense_tracker'}
-                onChange={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
+                onChange={() => !isWorkspaceReadOnly && updateWorkspace(activeWorkspace.id, { tracking_mode: 'full' })}
                 className="h-4 w-4 text-emerald-600 focus:ring-emerald-500"
               />
             </div>
@@ -111,8 +119,8 @@ export default function WorkspacesPage() {
 
           {/* Opção 2: Apenas Despesas & Rateio */}
           <div
-            onClick={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
-            className={`cursor-pointer rounded-2xl border p-4.5 transition ${
+            onClick={() => !isWorkspaceReadOnly && updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
+            className={`${isWorkspaceReadOnly ? '' : 'cursor-pointer'} rounded-2xl border p-5 transition ${
               activeWorkspace.tracking_mode === 'expense_tracker'
                 ? 'border-teal-500 bg-teal-50/40 dark:bg-teal-950/20 dark:border-teal-600'
                 : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40'
@@ -125,8 +133,9 @@ export default function WorkspacesPage() {
               <input
                 type="radio"
                 name="tracking_mode"
+                disabled={isWorkspaceReadOnly}
                 checked={activeWorkspace.tracking_mode === 'expense_tracker'}
-                onChange={() => updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
+                onChange={() => !isWorkspaceReadOnly && updateWorkspace(activeWorkspace.id, { tracking_mode: 'expense_tracker' })}
                 className="h-4 w-4 text-teal-600 focus:ring-teal-500"
               />
             </div>
@@ -236,7 +245,7 @@ export default function WorkspacesPage() {
       </div>
 
       {/* Modal Convidar Membro */}
-      {isInviteOpen && (
+      {isInviteOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Convidar para o Workspace</h3>

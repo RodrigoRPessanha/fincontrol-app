@@ -1,5 +1,7 @@
 'use client';
 
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
 import React, { useState } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -17,7 +19,7 @@ import {
   Landmark,
   Wallet,
 } from 'lucide-react';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { parseMoneyField, formatCurrency, formatDate } from '@/lib/utils';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { RecurringTransaction, RecurrenceFrequency } from '@/lib/types';
@@ -39,9 +41,11 @@ export default function RecurringPage() {
     addRecurring,
     toggleRecurring,
     deleteRecurring,
+    isWorkspaceReadOnly,
   } = useFinance();
 
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
+  const [formError, setFormError] = useState<string | null>(null);
   const [isNewRecOpen, setIsNewRecOpen] = useState(false);
   const [desc, setDesc] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -97,34 +101,39 @@ export default function RecurringPage() {
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    const amt = parseFloat(amountStr.replace(/\./g, '').replace(',', '.')) || 0;
-    if (amt <= 0 || !desc.trim()) return;
+    setFormError(null);
+    try {
+      const amt = parseMoneyField(amountStr, 'Recorrência');
+      if (amt <= 0 || !desc.trim()) return;
 
-    if (recType === 'expense' && selectedPm?.type === 'credit_card' && !fixedCard && !creditCardId) {
-      return;
+      if (recType === 'expense' && selectedPm?.type === 'credit_card' && !fixedCard && !creditCardId) {
+        return;
+      }
+
+      addRecurring({
+        description: desc.trim(),
+        amount: amt,
+        type: recType,
+        category_id: catId || undefined,
+        account_id: recType === 'expense' && (fixedCard || creditCardId) ? undefined : accountId || undefined,
+        payment_method_id: paymentMethodId || undefined,
+        credit_card_id: recType === 'income' ? undefined : (fixedCard?.id || creditCardId) || undefined,
+        frequency: freq,
+        start_date: startDate,
+        next_occurrence: startDate,
+        auto_create: true,
+        active: true,
+      });
+
+      setDesc('');
+      setAmountStr('');
+      setPaymentMethodId('');
+      setAccountId('');
+      setCreditCardId('');
+      setIsNewRecOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
     }
-
-    addRecurring({
-      description: desc.trim(),
-      amount: amt,
-      type: recType,
-      category_id: catId || undefined,
-      account_id: recType === 'expense' && (fixedCard || creditCardId) ? undefined : accountId || undefined,
-      payment_method_id: paymentMethodId || undefined,
-      credit_card_id: recType === 'income' ? undefined : (fixedCard?.id || creditCardId) || undefined,
-      frequency: freq,
-      start_date: startDate,
-      next_occurrence: startDate,
-      auto_create: true,
-      active: true,
-    });
-
-    setDesc('');
-    setAmountStr('');
-    setPaymentMethodId('');
-    setAccountId('');
-    setCreditCardId('');
-    setIsNewRecOpen(false);
   };
 
   // Converte o valor de cada recorrência para uma base mensal proporcional com centavos inteiros
@@ -189,6 +198,8 @@ export default function RecurringPage() {
 
   return (
     <div className="space-y-6">
+      {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
+      <ContextualHelp slug="recorrencias" label="Como cadastrar e pausar recorrências" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -200,13 +211,13 @@ export default function RecurringPage() {
           </p>
         </div>
 
-        <button
+        {!isWorkspaceReadOnly && <button
           onClick={() => setIsNewRecOpen(true)}
           className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 self-start sm:self-auto"
         >
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>Nova Recorrência</span>
-        </button>
+        </button>}
       </div>
 
       {/* Cards de Totais Recorrentes */}
@@ -298,8 +309,8 @@ export default function RecurringPage() {
 
       {/* Lista de Recorrências */}
       <div className="overflow-hidden rounded-3xl bg-white shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto w-full max-w-full touch-pan-x overscroll-x-contain">
+          <table className="w-full min-w-[700px] text-left text-xs">
             <thead className="border-b border-slate-100 bg-slate-50/70 uppercase tracking-wider text-slate-400 dark:border-slate-800 dark:bg-slate-800/40">
               <tr>
                 <th className="py-3.5 pl-6 pr-3">Descrição & Categoria</th>
@@ -312,7 +323,31 @@ export default function RecurringPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {recurring.map((rec) => {
+              {recurring.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 mb-3">
+                        <Repeat className="h-6 w-6" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        Nenhuma transação recorrente cadastrada
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 max-w-xs">
+                        Automatize o controle de assinaturas, aluguel, salários e contas mensais fixas.
+                      </p>
+                      {!isWorkspaceReadOnly && <button
+                        onClick={() => setIsNewRecOpen(true)}
+                        className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-500"
+                      >
+                        <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
+                        <span>Cadastrar Primeira Recorrência</span>
+                      </button>}
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                recurring.map((rec) => {
                 const cat = resolveCategory(allWorkspaceCategories, rec.category_id);
                 const card = allWorkspaceCreditCards.find((c) => c.id === rec.credit_card_id);
                 const acc = allWorkspaceAccounts.find((a) => a.id === rec.account_id);
@@ -400,7 +435,7 @@ export default function RecurringPage() {
 
                     <td className="py-4 pl-3 pr-6 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button
+                        {!isWorkspaceReadOnly && <button
                           onClick={() => toggleRecurring(rec.id)}
                           title={rec.active ? 'Pausar recorrência' : 'Reativar recorrência'}
                           className="rounded-lg p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
@@ -410,30 +445,32 @@ export default function RecurringPage() {
                           ) : (
                             <ToggleLeft className="h-5 w-5 text-slate-400" />
                           )}
-                        </button>
-                        <button
+                        </button>}
+                        {!isWorkspaceReadOnly && <button
                           onClick={() => deleteRecurring(rec.id)}
                           title="Excluir recorrência"
                           className="rounded-lg p-1.5 text-slate-400 hover:text-rose-600"
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
+              })
+            )}
+          </tbody>
           </table>
         </div>
       </div>
 
       {/* Modal Nova Recorrência */}
-      {isNewRecOpen && (
+      {isNewRecOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Gasto Fixo / Assinatura</h3>
             <form onSubmit={handleCreate} className="mt-4 space-y-3">
+            {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-500">Tipo</label>
                 <div className="grid grid-cols-2 gap-2 mt-1">

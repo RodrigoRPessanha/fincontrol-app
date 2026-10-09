@@ -1,11 +1,12 @@
 import { FinancialGoal } from '../../types';
-import { toCents, fromCents } from '../../financial-engine';
+import { toCents, fromCents, normalizeMoney } from '../../financial-engine';
 import { FinanceActionDeps } from './types';
 
 export function addGoal(
   deps: FinanceActionDeps,
   goalData: Omit<FinancialGoal, 'id' | 'workspace_id' | 'created_at'>
 ): FinancialGoal {
+  goalData = { ...goalData, target_amount: normalizeMoney(goalData.target_amount, 'Valor da meta'), current_amount: normalizeMoney(goalData.current_amount ?? 0, 'Valor acumulado', 'nonnegative') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   const newGoal: FinancialGoal = {
@@ -28,6 +29,9 @@ export function updateGoal(
   id: string,
   data: Omit<Partial<FinancialGoal>, 'id' | 'workspace_id' | 'created_at'>
 ): void {
+  data = { ...data };
+  if (data.target_amount !== undefined) data.target_amount = normalizeMoney(data.target_amount, 'Valor da meta');
+  if (data.current_amount !== undefined) data.current_amount = normalizeMoney(data.current_amount, 'Valor acumulado', 'nonnegative');
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   deps.commit({
@@ -46,10 +50,8 @@ export function depositGoal(
   amount: number,
   accountId: string
 ): void {
+  amount = normalizeMoney(amount, 'Valor inválido para depósito na meta');
   const depositCents = toCents(amount);
-  if (!Number.isFinite(amount) || amount <= 0 || depositCents <= 0 || !Number.isSafeInteger(depositCents)) {
-    throw new Error('Valor inválido para depósito na meta.');
-  }
 
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
@@ -74,7 +76,7 @@ export function depositGoal(
     if (g.id === goalId && g.workspace_id === targetWsId) {
       return {
         ...g,
-        current_amount: fromCents(newCurrentCents),
+        current_amount: normalizeMoney(fromCents(newCurrentCents), 'Valor acumulado', 'nonnegative'),
         status: isCompleted ? ('completed' as const) : g.status,
       };
     }
@@ -83,7 +85,7 @@ export function depositGoal(
 
   const nextAccounts = state.allAccounts.map((a) =>
     a.id === accountId && a.workspace_id === targetWsId
-      ? { ...a, current_balance: fromCents(toCents(a.current_balance) - depositCents) }
+      ? { ...a, current_balance: normalizeMoney(fromCents(toCents(normalizeMoney(a.current_balance, 'Saldo', 'signed')) - depositCents), 'Saldo', 'signed') }
       : a
   );
 

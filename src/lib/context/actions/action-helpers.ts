@@ -88,14 +88,30 @@ export function validateTransactionSplits(
   targetWsId: string,
   paidByMemberId?: string | null,
   splits?: TransactionSplit[],
-  splitType?: SplitType | null
+  splitType?: SplitType | null,
+  paidByPersonId?: string | null,
+  historical?: { paid_by_person_id?: string | null; splits?: TransactionSplit[] }
 ): void {
   const state = deps.getState();
   const wsMembers = state.allWorkspaceMembers.filter((m) => m.workspace_id === targetWsId);
   const memberIds = new Set(wsMembers.map((m) => m.id));
+  const wsPeople = (state.allPeople || []).filter((p) => p.workspace_id === targetWsId);
+  const personIds = new Set(wsPeople.map((p) => p.id));
+
+  if (paidByMemberId && paidByPersonId) {
+    throw new Error('Transação não pode ter pagador membro e pagador pessoa simultaneamente.');
+  }
 
   if (paidByMemberId && !memberIds.has(paidByMemberId)) {
     throw new Error('O membro pagador informado não pertence ao workspace ativo.');
+  }
+
+  if (paidByPersonId && !personIds.has(paidByPersonId)) {
+    throw new Error('A pessoa pagadora informada não pertence ao workspace ativo.');
+  }
+  if (paidByPersonId && wsPeople.find((p) => p.id === paidByPersonId)?.archived &&
+      paidByPersonId !== historical?.paid_by_person_id) {
+    throw new Error('Pessoa arquivada não pode receber nova associação como pagadora.');
   }
 
   const effectiveSplitType: SplitType = splitType || 'individual';
@@ -118,21 +134,45 @@ export function validateTransactionSplits(
   const totalCents = toCents(totalAmount);
 
   for (const split of splits) {
-    if (!split.member_id || !memberIds.has(split.member_id)) {
+    const hasMember = Boolean(split.member_id);
+    const hasPerson = Boolean(split.person_id);
+
+    if (hasMember && hasPerson) {
+      throw new Error('Divisão de despesa não pode ter membro e pessoa simultaneamente.');
+    }
+    if (!hasMember && !hasPerson) {
       throw new Error('Membro informado no rateio não pertence ao workspace ativo.');
     }
-    if (seen.has(split.member_id)) {
+
+    const participantKey = hasPerson ? `person:${split.person_id}` : `member:${split.member_id}`;
+    if (hasMember && !memberIds.has(split.member_id!)) {
+      throw new Error('Membro informado no rateio não pertence ao workspace ativo.');
+    }
+    if (hasPerson && !personIds.has(split.person_id!)) {
+      throw new Error('Pessoa informada no rateio não pertence ao workspace ativo.');
+    }
+    if (hasPerson && wsPeople.find((p) => p.id === split.person_id)?.archived &&
+        !historical?.splits?.some((previous) => previous.person_id === split.person_id)) {
+      throw new Error('Pessoa arquivada não pode receber nova associação no rateio.');
+    }
+
+    if (seen.has(participantKey)) {
       throw new Error('Membros duplicados identificados no rateio.');
     }
-    seen.add(split.member_id);
+    seen.add(participantKey);
 
     if (typeof split.amount !== 'number' || !Number.isFinite(split.amount) || split.amount < 0) {
       throw new Error('O valor de rateio atribuído a cada membro não pode ser negativo ou inválido.');
     }
 
     // Na regra 100% de outra pessoa: o pagador não pode possuir fração atribuída a si mesmo
-    if (effectiveSplitType === 'full_other' && paidByMemberId && split.member_id === paidByMemberId && split.amount > 0) {
-      throw new Error('Na regra 100% de outra pessoa, o pagador não pode possuir fração atribuída a si mesmo.');
+    if (effectiveSplitType === 'full_other') {
+      if (paidByMemberId && split.member_id === paidByMemberId && split.amount > 0) {
+        throw new Error('Na regra 100% de outra pessoa, o pagador não pode possuir fração atribuída a si mesmo.');
+      }
+      if (paidByPersonId && split.person_id === paidByPersonId && split.amount > 0) {
+        throw new Error('Na regra 100% de outra pessoa, o pagador não pode possuir fração atribuída a si mesmo.');
+      }
     }
 
     sumCents += toCents(split.amount);
@@ -144,30 +184,32 @@ export function validateTransactionSplits(
     );
   }
 
-  // Validação canônica estrita para 'equal' e 'full_other' (P1-01 V36 Semântica)
-  if (effectiveSplitType === 'equal') {
-    const effectivePayer = paidByMemberId || wsMembers[0]?.id;
-    const canonical = calculateExpenseSplits(totalAmount, 'equal', wsMembers, effectivePayer);
+  // Validação canônica estrita para 'equal' e 'full_other' (apenas se todos forem membros e nenhum person_id estiver envolvido)
+  const hasAnyPerson = splits.some((s) => s.person_id) || Boolean(paidByPersonId);
+  if (!hasAnyPerson) {
+    if (effectiveSplitType === 'equal') {
+      const effectivePayer = paidByMemberId || wsMembers[0]?.id;
+      const selectedMembers = wsMembers.filter((m) => splits.some((split) => split.member_id === m.id));
+      const canonical = calculateExpenseSplits(totalAmount, 'equal', selectedMembers, effectivePayer);
 
-    if (splits.length !== canonical.length) {
-      throw new Error(
-        `A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'.`
-      );
-    }
-
-    for (const c of canonical) {
-      const received = splits.find((s) => s.member_id === c.member_id);
-      const receivedCents = received ? toCents(received.amount) : 0;
-      if (receivedCents !== toCents(c.amount)) {
+      if (splits.length !== canonical.length) {
         throw new Error(
           `A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'.`
         );
       }
-    }
-  } else if (effectiveSplitType === 'full_other') {
-    const effectivePayer = paidByMemberId || wsMembers[0]?.id;
-    if (effectivePayer && wsMembers.length > 0) {
-      const canonical = calculateExpenseSplits(totalAmount, 'full_other', wsMembers, effectivePayer);
+
+      for (const c of canonical) {
+        const received = splits.find((s) => s.member_id === c.member_id)!;
+        if (toCents(received.amount) !== toCents(c.amount)) {
+          throw new Error(
+            `A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'.`
+          );
+        }
+      }
+    } else if (effectiveSplitType === 'full_other') {
+      const effectivePayer = paidByMemberId || wsMembers[0]?.id;
+      const selectedMembers = wsMembers.filter((m) => m.id === effectivePayer || splits.some((split) => split.member_id === m.id));
+      const canonical = calculateExpenseSplits(totalAmount, 'full_other', selectedMembers, effectivePayer);
 
       if (splits.length !== canonical.length) {
         throw new Error(
@@ -176,9 +218,8 @@ export function validateTransactionSplits(
       }
 
       for (const c of canonical) {
-        const received = splits.find((s) => s.member_id === c.member_id);
-        const receivedCents = received ? toCents(received.amount) : 0;
-        if (receivedCents !== toCents(c.amount)) {
+        const received = splits.find((s) => s.member_id === c.member_id)!;
+        if (toCents(received.amount) !== toCents(c.amount)) {
           throw new Error(
             `A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'.`
           );

@@ -10,37 +10,50 @@ export interface MemberBalancesProps {
   balances: MemberNetBalance[];
   currentMembers: WorkspaceMember[];
   getMemberName: (id?: string | null) => string;
+  participantsCount?: number;
 }
 
 export function MemberBalances({
   balances,
   currentMembers,
   getMemberName,
+  participantsCount,
 }: MemberBalancesProps) {
+  const count = participantsCount !== undefined ? participantsCount : currentMembers.length;
+
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
           <h2 className="text-base font-bold text-slate-900 dark:text-white">
-            Balanço Individual por Membro
+            Balanço Individual por Participante
           </h2>
         </div>
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-          {currentMembers.length} membro{currentMembers.length > 1 ? 's' : ''} participante{currentMembers.length > 1 ? 's' : ''}
+          {count} participante{count > 1 ? 's' : ''}
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div
+        className={`mt-4 grid gap-4 ${
+          count === 1
+            ? 'grid-cols-1'
+            : count === 2
+            ? 'grid-cols-1 md:grid-cols-2'
+            : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+        }`}
+      >
         {balances.map((b) => {
           const isCreditor = b.net_balance > 0;
           const isDebtor = b.net_balance < 0;
-          const memberName = getMemberName(b.member_id);
+          const participantId = b.participant_id || b.member_id;
+          const memberName = b.name || getMemberName(participantId);
 
           return (
             <div
-              key={b.member_id}
-              className={`rounded-2xl border p-4.5 transition ${
+              key={participantId}
+              className={`rounded-2xl border p-5 transition ${
                 isCreditor
                   ? 'border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-950/20'
                   : isDebtor
@@ -48,12 +61,19 @@ export function MemberBalances({
                   : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-800/40'
               }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-slate-900 dark:text-white">
-                  {memberName}
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="break-words text-sm font-bold text-slate-900 dark:text-white">
+                    {memberName}
+                  </span>
+                  {b.participant_type === 'person' && (
+                    <span className="shrink-0 rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                      Pessoa
+                    </span>
+                  )}
+                </div>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                     isCreditor
                       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
                       : isDebtor

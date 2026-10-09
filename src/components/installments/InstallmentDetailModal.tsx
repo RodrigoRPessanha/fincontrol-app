@@ -10,6 +10,7 @@ import { Purchase, Installment } from '@/lib/types';
 
 interface InstallmentDetailModalProps {
   isOpen: boolean;
+  isReadOnly?: boolean;
   onClose: () => void;
   purchase: Purchase | null;
   onPayInstallment: (inst: Installment, purchase: Purchase) => void;
@@ -17,11 +18,13 @@ interface InstallmentDetailModalProps {
 
 export function InstallmentDetailModal({
   isOpen,
+  isReadOnly = false,
   onClose,
   purchase,
   onPayInstallment,
 }: InstallmentDetailModalProps) {
-  const { installments, allWorkspaceCreditCards, allWorkspaceCategories } = useFinance();
+  const { installments, allWorkspaceCreditCards, allWorkspaceCategories, isWorkspaceReadOnly } = useFinance();
+  const readOnly = isReadOnly || isWorkspaceReadOnly;
 
   if (!isOpen || !purchase) return null;
 
@@ -141,7 +144,7 @@ export function InstallmentDetailModal({
                         >
                           Na Fatura
                         </span>
-                      ) : (
+                      ) : !readOnly ? (
                         <button
                           onClick={() => {
                             onClose();
@@ -151,7 +154,7 @@ export function InstallmentDetailModal({
                         >
                           Pagar
                         </button>
-                      )
+                      ) : null
                     )}
                   </div>
                 </div>

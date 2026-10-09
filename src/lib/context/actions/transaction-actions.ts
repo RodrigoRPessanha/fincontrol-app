@@ -1,3 +1,4 @@
+import { findOperationReceipt } from './operation-receipts';
 import { format } from 'date-fns';
 import {
   Transaction,
@@ -15,9 +16,10 @@ import {
   calculateCardBillDates,
   reconcileBillAfterItemDeletion,
   calculateExpenseSplits,
+  normalizeMoney,
+  resolveOrCreateCreditCardBill,
 } from '../../financial-engine';
 import {
-  getOrCreateAndAddItemToBill,
   validateActiveCategory,
   resolveAndValidateCreditCard,
   validateTransactionSplits,
@@ -28,8 +30,11 @@ export function addTransaction(
   deps: FinanceActionDeps,
   txData: Omit<Transaction, 'id' | 'workspace_id' | 'created_at'>
 ): Transaction {
+  txData = { ...txData, amount: normalizeMoney(txData.amount, 'Valor da transação') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allTransactions, targetWsId, txData.operation_key, txData);
+  if (receipt) return receipt;
 
   const effectiveAccountId = resolveTransactionAccountId(
     txData.payment_method_id,
@@ -43,7 +48,15 @@ export function addTransaction(
     state.allPaymentMethods,
     targetWsId
   );
-  validateTransactionSplits(deps, txData.amount, targetWsId, txData.paid_by_member_id, txData.splits, txData.split_type);
+  validateTransactionSplits(
+    deps,
+    txData.amount,
+    targetWsId,
+    txData.paid_by_member_id,
+    txData.splits,
+    txData.split_type,
+    txData.paid_by_person_id
+  );
 
   if (effectiveAccountId) {
     const a = state.allAccounts.find((acc) => acc.id === effectiveAccountId && acc.workspace_id === targetWsId);
@@ -51,32 +64,41 @@ export function addTransaction(
     if (a.active === false) throw new Error('A conta bancária informada está inativa.');
   }
 
-  const cardId = resolveAndValidateCreditCard(deps, targetWsId, txData.payment_method_id, txData.credit_card_id);
+  const explicitBill = txData.credit_card_bill_id
+    ? state.allCreditCardBills.find((b) => b.id === txData.credit_card_bill_id && b.workspace_id === targetWsId)
+    : undefined;
+  if (txData.credit_card_bill_id && !explicitBill) throw new Error('Fatura não encontrada no workspace ativo.');
+  const cardId = resolveAndValidateCreditCard(deps, targetWsId, txData.payment_method_id, txData.credit_card_id || explicitBill?.credit_card_id);
   if (txData.type === 'income' && cardId) {
     throw new Error('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
   }
   validateActiveCategory(deps, targetWsId, txData.category_id);
 
   let billId: string | null = txData.credit_card_bill_id || null;
+  let nextBills = state.allCreditCardBills;
+  let dueDate = txData.due_date;
 
-  if (cardId && !billId) {
-    const card = state.allCreditCards.find((c) => c.id === cardId && c.workspace_id === targetWsId);
-    if (card) {
-      const billDates = calculateCardBillDates(
-        txData.transaction_date,
-        card.closing_day,
-        card.due_day
-      );
-      billId = getOrCreateAndAddItemToBill(
-        deps,
-        card.id,
-        billDates.referenceMonth,
-        billDates.closingDate,
-        billDates.dueDate,
-        txData.amount,
-        targetWsId
-      );
+  if (cardId) {
+    if (txData.status === 'paid') throw new Error('Despesas de cartão devem ser pagas pela fatura.');
+    const card = state.allCreditCards.find((c) => c.id === cardId && c.workspace_id === targetWsId)!;
+    const billDates = calculateCardBillDates(
+      txData.transaction_date,
+      card.closing_day,
+      card.due_day
+    );
+    if (explicitBill && (explicitBill.credit_card_id !== cardId || explicitBill.reference_month !== billDates.referenceMonth)) {
+      throw new Error('Fatura informada não corresponde ao ciclo do cartão.');
     }
+    const preview = resolveOrCreateCreditCardBill({
+      bills: state.allCreditCardBills, cardId, workspaceId: targetWsId,
+      ...billDates, amount: txData.amount,
+    });
+    billId = preview.billId;
+    nextBills = preview.updatedBills.map((b) => b.id === billId ? {
+      ...b, total_amount: normalizeMoney(b.total_amount, 'Total da fatura', 'nonnegative'),
+      paid_amount: normalizeMoney(b.paid_amount, 'Valor pago da fatura', 'nonnegative'),
+    } : b);
+    dueDate = nextBills.find((b) => b.id === billId)!.due_date;
   }
 
   const effectiveSplitType: SplitType = txData.split_type || 'individual';
@@ -89,13 +111,14 @@ export function addTransaction(
     account_id: effectiveAccountId,
     credit_card_id: cardId,
     credit_card_bill_id: billId,
+    due_date: dueDate,
     split_type: effectiveSplitType,
     splits: effectiveSplits,
     paid_amount: txData.status === 'paid' ? txData.amount : (txData.paid_amount || 0),
     created_at: deps.now().toISOString(),
   };
 
-  // Atualiza com estado corrente após possível criação/adição de fatura
+  // Fatura, transação e possíveis pagamentos só são publicados após todas as validações.
   const currentState = deps.getState();
   const activeWs = currentState.allWorkspaces.find((w) => w.id === targetWsId);
   const isExpenseTracker = activeWs?.tracking_mode === 'expense_tracker';
@@ -104,6 +127,7 @@ export function addTransaction(
   let nextPayments = currentState.allPayments;
 
   if (newTx.status === 'paid' && !newTx.credit_card_id) {
+    const userId = deps.getUserId();
     const shouldMutateAccount = !!(newTx.account_id && !isExpenseTracker);
 
     if (shouldMutateAccount) {
@@ -115,7 +139,7 @@ export function addTransaction(
 
       nextAccounts = currentState.allAccounts.map((acc) => {
         if (acc.id === newTx.account_id) {
-          return { ...acc, current_balance: fromCents(currentCents + diffCents) };
+          return { ...acc, current_balance: normalizeMoney(fromCents(currentCents + diffCents), 'Saldo resultante', 'signed') };
         }
         return acc;
       });
@@ -129,7 +153,7 @@ export function addTransaction(
       payment_method_id: newTx.payment_method_id || undefined,
       amount: newTx.amount,
       payment_date: format(deps.now(), 'yyyy-MM-dd'),
-      created_by: 'usr-1',
+      created_by: userId,
       created_at: deps.now().toISOString(),
       affects_balance: shouldMutateAccount,
     };
@@ -139,6 +163,7 @@ export function addTransaction(
   deps.commit({
     ...currentState,
     allTransactions: [newTx, ...currentState.allTransactions],
+    allCreditCardBills: nextBills,
     allAccounts: nextAccounts,
     allPayments: nextPayments,
   });
@@ -151,6 +176,7 @@ export function updateTransaction(
   id: string,
   data: UpdateTransactionDTO
 ): void {
+  if (data.amount !== undefined) data = { ...data, amount: normalizeMoney(data.amount, 'Valor da transação') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
   const existing = state.allTransactions.find((t) => t.id === id && t.workspace_id === targetWsId);
@@ -175,18 +201,24 @@ export function updateTransaction(
 
   const willChangeAmount = data.amount !== undefined && data.amount !== existing.amount;
   const willChangeSplitType = data.split_type !== undefined && data.split_type !== existing.split_type;
-  const willChangePayer = data.paid_by_member_id !== undefined && data.paid_by_member_id !== existing.paid_by_member_id;
+  const willChangePayer =
+    (data.paid_by_member_id !== undefined && data.paid_by_member_id !== existing.paid_by_member_id) ||
+    (data.paid_by_person_id !== undefined && data.paid_by_person_id !== existing.paid_by_person_id);
 
   const targetAmount = data.amount !== undefined ? data.amount : existing.amount;
   const targetSplitType = data.split_type !== undefined ? data.split_type : existing.split_type;
   const targetPayer = data.paid_by_member_id !== undefined ? data.paid_by_member_id : existing.paid_by_member_id;
+  const targetPersonPayer = data.paid_by_person_id !== undefined ? data.paid_by_person_id : existing.paid_by_person_id;
+  if (willChangePayer) {
+    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, undefined, 'individual', targetPersonPayer, existing);
+  }
 
   let reconciledSplits: TransactionSplit[] | undefined = undefined;
 
   const isTargetDivided = targetSplitType && targetSplitType !== 'individual';
 
   if (data.splits !== undefined) {
-    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, data.splits, targetSplitType);
+    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, data.splits, targetSplitType, targetPersonPayer, existing);
     reconciledSplits = data.splits;
   } else if (!isTargetDivided) {
     reconciledSplits = [];
@@ -194,9 +226,21 @@ export function updateTransaction(
     const wsMembers = state.allWorkspaceMembers.filter((m) => m.workspace_id === targetWsId);
     const effectivePayer = targetPayer || wsMembers[0]?.id;
     if (willChangeAmount || willChangeSplitType || willChangePayer || !existing.splits || existing.splits.length === 0) {
-      reconciledSplits = calculateExpenseSplits(targetAmount, targetSplitType, wsMembers, effectivePayer);
+      const payerId = targetPersonPayer || effectivePayer;
+      const participants = existing.splits?.length ? existing.splits.map((split) => ({
+        id: (split.person_id || split.member_id)!, type: split.person_id ? 'person' as const : 'member' as const,
+      })) : wsMembers.map((m) => ({ id: m.id, type: 'member' as const }));
+      const previousPayerId = existing.paid_by_person_id || existing.paid_by_member_id;
+      if (previousPayerId && !participants.some((p) => p.id === previousPayerId)) {
+        participants.push({ id: previousPayerId, type: existing.paid_by_person_id ? 'person' : 'member' });
+      }
+      if (!participants.some((p) => p.id === payerId)) participants.push({ id: payerId, type: targetPersonPayer ? 'person' : 'member' });
+      const participantOrder = [...wsMembers.map((m) => m.id), ...(state.allPeople || []).filter((p) => p.workspace_id === targetWsId).map((p) => p.id)];
+      participants.sort((a, b) => participantOrder.indexOf(a.id) - participantOrder.indexOf(b.id));
+      reconciledSplits = calculateExpenseSplits(targetAmount, targetSplitType, participants, { id: payerId, type: targetPersonPayer ? 'person' : 'member' });
+      validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, reconciledSplits, targetSplitType, targetPersonPayer, existing);
     } else {
-      validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType);
+      validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType, targetPersonPayer, existing);
     }
   } else if (targetSplitType === 'custom') {
     if (willChangeAmount || willChangeSplitType || willChangePayer || !existing.splits || existing.splits.length === 0) {
@@ -204,7 +248,7 @@ export function updateTransaction(
         'Ao alterar o valor total, pagador ou regra de uma transação com divisão personalizada, é obrigatório fornecer os novos valores de rateio correspondentes.'
       );
     }
-    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType);
+    validateTransactionSplits(deps, targetAmount, targetWsId, targetPayer, existing.splits, targetSplitType, targetPersonPayer, existing);
   }
 
   const nextTxs = state.allTransactions.map((t) => {
@@ -218,6 +262,7 @@ export function updateTransaction(
         transaction_date: data.transaction_date !== undefined ? data.transaction_date : t.transaction_date,
         notes: data.notes !== undefined ? data.notes : t.notes,
         paid_by_member_id: data.paid_by_member_id !== undefined ? data.paid_by_member_id : t.paid_by_member_id,
+        paid_by_person_id: data.paid_by_person_id !== undefined ? data.paid_by_person_id : t.paid_by_person_id,
         split_type: targetSplitType,
         splits: reconciledSplits !== undefined ? (reconciledSplits.length > 0 ? reconciledSplits : undefined) : t.splits,
         updated_at: deps.now().toISOString(),
@@ -281,7 +326,7 @@ export function deleteTransaction(
       const diff = accountAdjustments.get(acc.id);
       if (diff) {
         const currentCents = toCents(acc.current_balance);
-        return { ...acc, current_balance: fromCents(currentCents + diff) };
+        return { ...acc, current_balance: normalizeMoney(fromCents(currentCents + diff), 'Saldo resultante', 'signed') };
       }
       return acc;
     });
@@ -321,6 +366,7 @@ export function duplicateTransaction(
     paid_at: null,
     notes: tx.notes,
     paid_by_member_id: tx.paid_by_member_id,
+    paid_by_person_id: tx.paid_by_person_id,
     split_type: tx.split_type,
     splits: tx.splits ? [...tx.splits] : undefined,
   });

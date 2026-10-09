@@ -1,5 +1,7 @@
 'use client';
 
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
 import React, { useState } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -20,7 +22,7 @@ import { Installment, Purchase } from '@/lib/types';
 import { QuickAddModal } from '@/components/transactions/QuickAddModal';
 
 export default function InstallmentsPage() {
-  const { purchases, installments, allWorkspaceCreditCards, allWorkspaceCategories } = useFinance();
+  const { purchases, installments, allWorkspaceCreditCards, allWorkspaceCategories, isWorkspaceReadOnly } = useFinance();
 
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
@@ -48,6 +50,7 @@ export default function InstallmentsPage() {
 
   return (
     <div className="space-y-6">
+      <ContextualHelp slug="parcelamentos" label="Como registrar e acompanhar compras parceladas" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -59,13 +62,13 @@ export default function InstallmentsPage() {
           </p>
         </div>
 
-        <button
+        {!isWorkspaceReadOnly && <button
           onClick={() => setIsQuickAddOpen(true)}
           className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-500 self-start sm:self-auto"
         >
           <Plus className="h-4 w-4 stroke-[2.5]" />
           <span>Nova Compra Parcelada</span>
-        </button>
+        </button>}
       </div>
 
       {/* Resumo Geral dos Parcelamentos */}
@@ -192,6 +195,7 @@ export default function InstallmentsPage() {
         isOpen={!!selectedPurchase}
         onClose={() => setSelectedPurchase(null)}
         purchase={selectedPurchase}
+        isReadOnly={isWorkspaceReadOnly}
         onPayInstallment={(inst, pur) => {
           setPaymentTarget({
             type: 'installment',
@@ -204,13 +208,13 @@ export default function InstallmentsPage() {
         }}
       />
 
-      <PaymentModal
+      {!isWorkspaceReadOnly && <PaymentModal
         isOpen={!!paymentTarget}
         onClose={() => setPaymentTarget(null)}
         target={paymentTarget}
-      />
+      />}
 
-      <QuickAddModal isOpen={isQuickAddOpen} onClose={() => setIsQuickAddOpen(false)} />
+      <QuickAddModal isOpen={isQuickAddOpen && !isWorkspaceReadOnly} onClose={() => setIsQuickAddOpen(false)} />
     </div>
   );
 }

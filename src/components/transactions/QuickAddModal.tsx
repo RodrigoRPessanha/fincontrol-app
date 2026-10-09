@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import {
   X,
@@ -8,8 +9,8 @@ import {
   ChevronUp,
   AlertCircle,
 } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
-import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits } from '@/lib/financial-engine';
+import { formatCurrency, parseCurrencyInput } from '@/lib/utils';
+import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits, resolveSplitParticipants } from '@/lib/financial-engine';
 import { SplitType, TransactionSplit } from '@/lib/types';
 import { format } from 'date-fns';
 import { TransactionFields } from './quick-add/TransactionFields';
@@ -25,16 +26,22 @@ interface QuickAddModalProps {
 export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
   const {
     activeWorkspace,
+    isWorkspaceReadOnly,
     categories,
     paymentMethods,
     accounts,
     creditCards,
     workspaceMembers,
-    addTransaction,
-    createInstallmentPurchase,
-    createTransfer,
+    people = [],
+    addPerson,
+    addTransactionAsync,
+    createInstallmentPurchaseAsync,
+    createTransferAsync,
   } = useFinance();
 
+  const pending = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const attempt = useOperationAttempt(activeWorkspace.id, 'quick-add');
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
 
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>('expense');
@@ -47,8 +54,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
 
   // Rateio de Despesas (Splitwise)
   const [paidByMemberId, setPaidByMemberId] = useState('');
+  const [paidByPersonId, setPaidByPersonId] = useState('');
   const [splitType, setSplitType] = useState<SplitType>('individual');
   const [customSplits, setCustomSplits] = useState<Record<string, number>>({});
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
 
   // Transferência
   const [fromAccountId, setFromAccountId] = useState('');
@@ -110,7 +119,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     ? calculateCardBillDates(transactionDate, selectedCard.closing_day, selectedCard.due_day)
     : null;
 
-  const numAmount = parseFloat(amountStr.replace(/\./g, '').replace(',', '.')) || 0;
+  const numAmount = parseCurrencyInput(amountStr) || 0;
 
   const splitPreview =
     isCreditCardSelected && installmentCount > 1 && selectedCard && numAmount > 0
@@ -130,8 +139,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     setInstallmentCount(1);
     setPaidInstallmentsCount(0);
     setPaidByMemberId('');
+    setPaidByPersonId('');
     setSplitType('individual');
     setCustomSplits({});
+    setSelectedParticipantIds([]);
     setFromAccountId('');
     setToAccountId('');
     setTransactionDate(format(new Date(), 'yyyy-MM-dd'));
@@ -144,8 +155,9 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     onClose();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pending.current) return;
     setErrorMessage(null);
     if (numAmount <= 0) {
       setErrorMessage('O valor da transação deve ser maior que zero.');
@@ -158,7 +170,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           setErrorMessage('Selecione contas de origem e destino distintas.');
           return;
         }
-        createTransfer(fromAccountId, toAccountId, numAmount, transactionDate, notes);
+        pending.current = true;
+        setIsSubmitting(true);
+        await createTransferAsync(fromAccountId, toAccountId, numAmount, transactionDate, notes, await attempt.getKey([fromAccountId, toAccountId, numAmount, transactionDate, notes]));
+        attempt.complete();
         resetAndClose();
         return;
       }
@@ -168,19 +183,43 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
         return;
       }
 
-      const effectivePayerId = paidByMemberId || workspaceMembers[0]?.id;
+      const effectivePayerId = paidByPersonId
+        ? paidByPersonId
+        : (paidByMemberId || workspaceMembers[0]?.id || (people[0]?.id ?? ''));
+
+      const isPayerPerson = Boolean(paidByPersonId || people.some((p) => p.id === effectivePayerId));
+
+      const activeParticipants = resolveSplitParticipants(workspaceMembers, people, selectedParticipantIds, effectivePayerId);
+
+      const isSplitActive = type === 'expense' && splitType !== 'individual' && activeParticipants.length > 1 && !!effectivePayerId;
+      const effectiveSplitType = isSplitActive ? splitType : 'individual';
+
       let resolvedSplits: TransactionSplit[] | undefined = undefined;
 
-      if (type === 'expense' && splitType !== 'individual' && workspaceMembers.length > 1 && effectivePayerId) {
-        const customList = splitType === 'custom'
-          ? workspaceMembers.map((m) => ({ member_id: m.id, amount: customSplits[m.id] || 0 }))
+      if (isSplitActive) {
+        const customList = effectiveSplitType === 'custom'
+          ? activeParticipants.map((p) => ({
+              id: p.id,
+              type: p.type,
+              member_id: p.type === 'member' ? p.id : null,
+              person_id: p.type === 'person' ? p.id : null,
+              amount: customSplits[p.id] || 0,
+            }))
           : undefined;
-        resolvedSplits = calculateExpenseSplits(numAmount, splitType, workspaceMembers, effectivePayerId, customList);
+        resolvedSplits = calculateExpenseSplits(
+          numAmount,
+          effectiveSplitType,
+          activeParticipants,
+          { id: effectivePayerId, type: isPayerPerson ? 'person' : 'member' },
+          customList
+        );
       }
 
+      pending.current = true;
+      setIsSubmitting(true);
       if (isCreditCardSelected && installmentCount > 1 && selectedCard) {
         // Compra Parcelada Atômica com suporte a parcelas já pagas
-        createInstallmentPurchase({
+        const payload = {
           description: description.trim() || 'Compra Parcelada',
           total_amount: numAmount,
           installment_count: installmentCount,
@@ -190,13 +229,15 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           payment_method_id: paymentMethodId || undefined,
           account_id: accountId || selectedPaymentMethod?.linked_account_id || selectedCard.linked_payment_account_id || undefined,
           paid_installments_count: paidInstallmentsCount,
-          paid_by_member_id: effectivePayerId,
-          split_type: splitType !== 'individual' ? splitType : undefined,
+          paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
+          paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
+          split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
           splits: resolvedSplits,
-        });
+        };
+        await createInstallmentPurchaseAsync({ ...payload, operation_key: await attempt.getKey(payload) });
       } else {
         // Transação Avulsa
-        addTransaction({
+        const payload = {
           description: description.trim() || (type === 'expense' ? 'Despesa' : 'Receita'),
           amount: numAmount,
           type: type,
@@ -206,22 +247,28 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           account_id: accountId || selectedPaymentMethod?.linked_account_id || undefined,
           transaction_date: transactionDate,
           due_date: isCreditCardSelected && billPreview ? billPreview.dueDate : dueDate,
-          status: isAlreadyPaid ? 'paid' : 'pending',
+          status: isAlreadyPaid ? ('paid' as const) : ('pending' as const),
           paid_at: isAlreadyPaid ? new Date().toISOString() : null,
           notes: notes || undefined,
-          paid_by_member_id: effectivePayerId,
-          split_type: splitType !== 'individual' ? splitType : undefined,
+          paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
+          paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
+          split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
           splits: resolvedSplits,
-        });
+        };
+        await addTransactionAsync({ ...payload, operation_key: await attempt.getKey(payload) });
       }
 
+      attempt.complete();
       resetAndClose();
     } catch (err: any) {
       setErrorMessage(err.message || 'Erro ao processar o registro financeiro.');
+    } finally {
+      pending.current = false;
+      setIsSubmitting(false);
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || isWorkspaceReadOnly) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
@@ -306,9 +353,14 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
 
           {/* Valor Principal */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Valor
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Valor
+              </label>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                Aceita vírgula ou ponto (ex: 12,34 ou 12.34)
+              </span>
+            </div>
             <div className="relative mt-1.5">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">
                 R$
@@ -372,15 +424,32 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
             <SplitFields
               type={type}
               workspaceMembers={workspaceMembers}
+              people={people}
               paidByMemberId={paidByMemberId}
               onPaidByMemberIdChange={setPaidByMemberId}
+              paidByPersonId={paidByPersonId}
+              onPaidByPersonIdChange={setPaidByPersonId}
               splitType={splitType}
               onSplitTypeChange={setSplitType}
               customSplits={customSplits}
-              onCustomSplitChange={(mId, val) =>
-                setCustomSplits((prev) => ({ ...prev, [mId]: val }))
+              onCustomSplitChange={(id, val) =>
+                setCustomSplits((prev) => ({ ...prev, [id]: val }))
               }
               numAmount={numAmount}
+              onAddPerson={addPerson}
+              selectedParticipantIds={selectedParticipantIds}
+              onToggleParticipant={(id) => {
+                setSelectedParticipantIds((prev) => {
+                  const payerId = paidByPersonId || paidByMemberId || workspaceMembers[0]?.id || people[0]?.id || '';
+                  const current = resolveSplitParticipants(workspaceMembers, people, prev, payerId).map((p) => p.id);
+                  if (current.includes(id)) {
+                    if (current.length <= 1) return current;
+                    return current.filter((item) => item !== id);
+                  } else {
+                    return [...current, id];
+                  }
+                });
+              }}
             />
           )}
 
@@ -458,7 +527,12 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
                           {a.name} ({formatCurrency(a.current_balance)})
                         </option>
                       ))}
-                    </select>
+                      </select>
+                      {isCreditCardSelected && (
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Esta conta não será debitada agora. A despesa de cartão será paga pela fatura.
+                        </p>
+                      )}
                   </div>
                 )}
 
@@ -489,7 +563,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
               Cancelar
             </button>
             <button
-              type="submit"
+              type="submit" disabled={isSubmitting} aria-busy={isSubmitting}
               className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-500 active:scale-95"
             >
               Salvar Registro

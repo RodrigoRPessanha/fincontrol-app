@@ -1,0 +1,263 @@
+import { loadCloudEnvironment, assertStagingTarget, getStagingServiceRoleKey, runSupabaseCli, STAGING_PROJECT_REF } from './cloud-test-safety.mjs';
+import { createClient } from '@supabase/supabase-js';
+import { parseSupabaseQueryOutput } from './parse-supabase-query-output.mjs';
+import fs from 'fs';
+import path from 'path';
+
+const cloudEnv = loadCloudEnvironment();
+try { assertStagingTarget(cloudEnv, { requireApi: true }); } catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+const supabaseUrl = cloudEnv.NEXT_PUBLIC_SUPABASE_URL;
+const anonKey = cloudEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || cloudEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const stagingOrigin = 'https://fincontrol-app-git-staging-rodrigos-projects-a1635617.vercel.app';
+
+// Obtém a service_role key em memória diretamente da CLI autenticada (sem gravar em arquivo nem expor em logs)
+function getServiceRoleKey() { return getStagingServiceRoleKey(cloudEnv); }
+
+// Helper para consultas estritamente READ-ONLY (SELECT) no banco remoto
+function runReadOnlySql(sql) {
+  if (!sql.trim().toUpperCase().startsWith('SELECT')) {
+    throw new Error('Segurança: runReadOnlySql aceita exclusivamente instruções SELECT.');
+  }
+  const tmpFile = path.resolve(
+    process.cwd(),
+    'scripts',
+    `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.sql`
+  );
+  fs.writeFileSync(tmpFile, sql, 'utf8');
+  try {
+    const out = runSupabaseCli(['db', 'query', '--linked', '--project-ref', STAGING_PROJECT_REF, '--output-format', 'json', '--file', tmpFile], { env: cloudEnv });
+    return parseSupabaseQueryOutput(out);
+  } finally {
+    if (fs.existsSync(tmpFile)) {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch (_) {}
+    }
+  }
+}
+
+async function runAuthGate() {
+  console.log('================================================================');
+  console.log('  TESTE DE AUTENTICAÇÃO REAL NO SUPABASE CLOUD (fincontrol-staging)');
+  console.log('  Modo: 100% via Token Criptográfico (Sem envio SMTP / Sem Bounces)');
+  console.log('================================================================\n');
+
+  // 1. Verificação Estrita de Credenciais Administrativas
+  console.log('1. Verificando disponibilidade da credencial administrativa (service_role)...');
+  const serviceRoleKey = getServiceRoleKey();
+  if (!serviceRoleKey) {
+    console.error('\n❌ BLOQUEIO DE SEGURANÇA:');
+    console.error('A credencial administrativa (service_role) é obrigatória para testar links e tokens sem disparar e-mails SMTP.');
+    console.error('Nenhum fallback com envio de e-mail ou alteração SQL em auth.users é permitido.');
+    process.exit(1);
+  }
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const anonClient = createClient(supabaseUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  if (!adminClient?.auth?.admin?.generateLink) {
+    console.error('\n❌ ERRO: admin.generateLink não está disponível no cliente administrativo.');
+    process.exit(1);
+  }
+  console.log('   OK: Credencial administrativa validada com sucesso.');
+
+  const testEmail = `test.gate.${Date.now()}.${Math.random().toString(36).slice(2, 7)}@fincontrol.app`;
+  const initialPassword = 'InitialPassword123!';
+  const updatedPassword = 'UpdatedPassword456!';
+
+  let userId = null;
+
+  try {
+    // 2. Cadastro e Emissão Criptográfica do Link de Confirmação (Zero SMTP)
+    console.log(`\n2. Criando usuário e gerando link de confirmação para ${testEmail}...`);
+    const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      type: 'signup',
+      email: testEmail,
+      password: initialPassword,
+      options: { data: { name: 'Gate Test User' }, redirectTo: stagingOrigin + '/auth/callback' },
+    });
+
+    if (linkError || !linkData.user?.id) {
+      throw new Error(`Falha ao gerar link de cadastro via admin.generateLink: ${linkError?.message}`);
+    }
+
+    userId = linkData.user.id;
+    if (linkData.properties?.redirect_to !== stagingOrigin + '/auth/callback') throw new Error('Redirect de confirmação não corresponde ao frontend staging.');
+    const confirmationTokenHash = linkData.properties?.hashed_token;
+
+    if (!confirmationTokenHash) {
+      throw new Error('Falha: admin.generateLink não retornou hashed_token para confirmação.');
+    }
+
+    console.log(`   OK: Usuário criado no Cloud Auth (ID: ${userId}).`);
+    console.log('   OK: Link de confirmação e token_hash gerados criptograficamente pelo GoTrue Cloud (0 e-mails enviados).');
+
+    // 3. Validação do Bloqueio por E-mail Não Confirmado
+    console.log('\n3. Validando Bloqueio de Login com E-mail Não Confirmado...');
+    const { error: unconfError } = await anonClient.auth.signInWithPassword({
+      email: testEmail,
+      password: initialPassword,
+    });
+    if (!unconfError) {
+      throw new Error('Falha de segurança: login foi aceito antes da confirmação do e-mail.');
+    }
+    console.log(`   OK: Bloqueio validado com sucesso pelo GoTrue Cloud (${unconfError.message}).`);
+
+    // 4. Confirmação do E-mail via Token Hash (verifyOtp - Simulação Exata do Clique no Link)
+    console.log('\n4. Testando Confirmação de E-mail via Token de Verificação (verifyOtp)...');
+    const clientAfterConfirm = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { data: verifyData, error: verifyError } = await clientAfterConfirm.auth.verifyOtp({
+      token_hash: confirmationTokenHash,
+      type: 'signup',
+    });
+
+    if (verifyError || !verifyData.user?.email_confirmed_at) {
+      throw new Error(`Falha ao verificar token do link de cadastro: ${verifyError?.message}`);
+    }
+    console.log(`   OK: Token do link validado pelo GoTrue Cloud em ${verifyData.user.email_confirmed_at}.`);
+    console.log('   OK: Sessão pós-confirmação estabelecida com sucesso.');
+
+    // 5. Login com Usuário Confirmado
+    console.log('\n5. Testando Login (signInWithPassword) com usuário confirmado...');
+    const { data: signInData, error: signInError } = await anonClient.auth.signInWithPassword({
+      email: testEmail,
+      password: initialPassword,
+    });
+    if (signInError || !signInData.session?.access_token) {
+      throw new Error(`Falha no login com usuário confirmado: ${signInError?.message}`);
+    }
+    console.log('   OK: Login autenticado com sucesso no Supabase Cloud GoTrue.');
+    console.log(`   OK: Sessão JWT gerada (Token Type: bearer, Expira em: ${signInData.session.expires_in}s).`);
+
+    // 6. Verificação de Sessão Ativa
+    console.log('\n6. Verificando Validação de Sessão (getUser) no Cloud...');
+    const userSessionClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    await userSessionClient.auth.setSession({
+      access_token: signInData.session.access_token,
+      refresh_token: signInData.session.refresh_token,
+    });
+
+    const { data: userData, error: userError } = await userSessionClient.auth.getUser();
+    if (userError || !userData.user) {
+      throw new Error(`Falha ao obter usuário autenticado via token: ${userError?.message}`);
+    }
+    console.log(`   OK: Token validado pelo Cloud Auth (Usuário: ${userData.user.email}, ID: ${userData.user.id}).`);
+
+    // 7. Logout (signOut) com Verificação Explícita de Invalidação
+    console.log('\n7. Testando Logout (signOut) e Verificação de Invalidação de Sessão...');
+    const { error: signOutError } = await userSessionClient.auth.signOut();
+    if (signOutError) {
+      throw new Error(`Falha no signOut: ${signOutError.message}`);
+    }
+
+    const { data: postSignOutData } = await userSessionClient.auth.getUser();
+    if (postSignOutData?.user) {
+      throw new Error('Falha de logout: usuário ainda consta como ativo após signOut.');
+    }
+    console.log('   OK: Sessão finalizada com sucesso (getUser retorna nulo / sessão encerrada).');
+
+    // 8. Recovery token, allowed redirect and password update through the API.
+    console.log('\n8. Testando Fluxo de Recuperação por Link Oficial e Redefinição...');
+    const { data: recLinkData, error: recLinkError } = await adminClient.auth.admin.generateLink({
+      type: 'recovery',
+      email: testEmail,
+      options: { redirectTo: stagingOrigin + '/auth/callback?type=recovery' },
+    });
+    if (recLinkError) {
+      throw new Error(`Falha ao gerar link de recuperação via admin: ${recLinkError.message}`);
+    }
+
+    const recoveryTokenHash = recLinkData.properties?.hashed_token;
+    if (recLinkData.properties?.redirect_to !== stagingOrigin + '/auth/callback?type=recovery') throw new Error('Redirect de recuperação não corresponde ao frontend staging.');
+    if (!recoveryTokenHash) {
+      throw new Error('Falha: link de recuperação não retornou hashed_token.');
+    }
+    console.log('   OK: Link de recuperação e token_hash emitidos criptograficamente pelo GoTrue Cloud (0 e-mails enviados).');
+
+    // Verify the OTP API contract; the SSR PKCE callback/UI requires its own browser test.
+    const recoveryClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { data: recVerifyData, error: recVerifyError } = await recoveryClient.auth.verifyOtp({
+      token_hash: recoveryTokenHash,
+      type: 'recovery',
+    });
+    if (recVerifyError || !recVerifyData.session) {
+      throw new Error(`Falha ao validar token de recuperação via verifyOtp: ${recVerifyError?.message}`);
+    }
+    console.log('   OK: Token de recuperação validado pelo GoTrue Cloud (sessão temporária concedida).');
+
+    // Aplica a nova senha nessa sessão temporária (fluxo da tela /auth/reset-password)
+    const { error: updatePassError } = await recoveryClient.auth.updateUser({
+      password: updatedPassword,
+    });
+    if (updatePassError) {
+      throw new Error(`Falha ao definir nova senha: ${updatePassError.message}`);
+    }
+    console.log('   OK: Nova senha gravada com sucesso via sessão de recuperação.');
+
+    // 9. Validação Cruzada de Senhas pós-alteração
+    console.log('\n9. Testando Validação Cruzada de Senhas pós-alteração...');
+    const { error: oldLoginError } = await anonClient.auth.signInWithPassword({
+      email: testEmail,
+      password: initialPassword,
+    });
+    if (!oldLoginError) {
+      throw new Error('Falha de segurança: senha antiga ainda foi aceita.');
+    }
+    console.log(`   OK: Senha antiga rejeitada pelo Cloud GoTrue (${oldLoginError.message}).`);
+
+    const { data: newLoginData, error: newLoginError } = await anonClient.auth.signInWithPassword({
+      email: testEmail,
+      password: updatedPassword,
+    });
+    if (newLoginError || !newLoginData.session) {
+      throw new Error(`Falha no login com nova senha: ${newLoginError?.message}`);
+    }
+    console.log('   OK: Login com nova senha autenticado com sucesso no Cloud.');
+
+    // 10. Teardown e Limpeza Exclusivamente via API Administrativa
+    console.log('\n10. Teardown e Limpeza no Staging Cloud via Admin API...');
+    const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
+    if (deleteError) {
+      throw new Error(`Falha ao remover usuário via admin.deleteUser: ${deleteError.message}`);
+    }
+
+    // Verificação de limpeza por consulta somente-leitura (SELECT)
+    const finalCheck = runReadOnlySql(`SELECT count(*) FROM auth.users WHERE id = '${userId}';`);
+    const remainingCount = Number(finalCheck?.rows?.[0]?.count || 0);
+    if (remainingCount !== 0) {
+      throw new Error('Falha na limpeza: usuário ainda consta em auth.users.');
+    }
+    console.log('   OK: Usuário de teste removido do staging via Admin API (0 registros restantes).');
+
+    console.log('\n================================================================');
+    console.log('  API DE AUTH E REDIRECTS HOMOLOGADOS NO SUPABASE CLOUD! ✅');
+    console.log('  Sem SMTP; callback SSR/PKCE e interface têm homologação própria.');
+    console.log('================================================================');
+  } catch (err) {
+    console.error('\n❌ ERRO NO TESTE DE AUTH CLOUD:', err.message);
+    if (userId && adminClient) {
+      try {
+        await adminClient.auth.admin.deleteUser(userId);
+      } catch (_) {}
+    }
+    process.exit(1);
+  }
+}
+
+runAuthGate().catch(error => { console.error(error.message); process.exitCode = 1; });

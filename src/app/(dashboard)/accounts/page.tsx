@@ -1,6 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import { ContextualHelp } from '@/components/help/ContextualHelp';
+
+import React, { useState, useRef } from 'react';
+import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import {
   Wallet,
@@ -15,7 +18,7 @@ import {
   Eye,
   DollarSign,
 } from 'lucide-react';
-import { formatCurrency, formatDate, formatMonthYear } from '@/lib/utils';
+import { parseMoneyField, formatCurrency, formatDate, formatMonthYear } from '@/lib/utils';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { BillInspectorModal } from '@/components/accounts/BillInspectorModal';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
@@ -34,11 +37,13 @@ export default function AccountsPage() {
     updateAccount,
     deleteAccount,
     addCreditCard,
-    createTransfer,
+    createTransferAsync,
     activeWorkspace,
+    isWorkspaceReadOnly,
   } = useFinance();
 
   const isExpenseTracker = activeWorkspace?.tracking_mode === 'expense_tracker';
+  const [formError, setFormError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'accounts' | 'cards' | 'bills' | 'transfers'>('accounts');
   const [showInactiveAccounts, setShowInactiveAccounts] = useState(false);
 
@@ -71,6 +76,9 @@ export default function AccountsPage() {
   const [cardDueDay, setCardDueDay] = useState(10);
   const [cardAccountId, setCardAccountId] = useState('');
 
+  const transferPending = useRef(false);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const transferAttempt = useOperationAttempt(activeWorkspace.id, 'transfer');
   // Transfer state
   const [fromAcc, setFromAcc] = useState('');
   const [toAcc, setToAcc] = useState('');
@@ -83,68 +91,91 @@ export default function AccountsPage() {
 
   const handleCreateAccount = (e: React.FormEvent) => {
     e.preventDefault();
-    const bal = isExpenseTracker ? 0 : (parseFloat(accBalance.replace(/\./g, '').replace(',', '.')) || 0);
-    if (!accName.trim()) return;
+    setFormError(null);
+    try {
+      const bal = isExpenseTracker ? 0 : parseMoneyField(accBalance, 'Saldo inicial', 'signed', true);
+      if (!accName.trim()) return;
 
-    addAccount({
-      name: accName.trim(),
-      type: accType,
-      institution: accInstitution.trim() || 'Outro',
-      initial_balance: bal,
-      current_balance: bal,
-      color: accColor,
-      active: true,
-    });
+      addAccount({
+        name: accName.trim(),
+        type: accType,
+        institution: accInstitution.trim() || 'Outro',
+        initial_balance: bal,
+        current_balance: bal,
+        color: accColor,
+        active: true,
+      });
 
-    setAccName('');
-    setAccInstitution('');
-    setAccBalance('');
-    setIsNewAccountOpen(false);
+      setAccName('');
+      setAccInstitution('');
+      setAccBalance('');
+      setIsNewAccountOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    }
   };
 
   const handleCreateCard = (e: React.FormEvent) => {
     e.preventDefault();
-    const lim = parseFloat(cardLimit.replace(/\./g, '').replace(',', '.')) || 0;
-    if (!cardName.trim() || lim <= 0) return;
+    setFormError(null);
+    try {
+      const lim = parseMoneyField(cardLimit, 'Limite do cartão');
+      if (!cardName.trim() || lim <= 0) return;
 
-    addCreditCard({
-      name: cardName.trim(),
-      institution: cardInstitution.trim() || 'Cartão',
-      last_four_digits: cardLastDigits.trim() || undefined,
-      credit_limit: lim,
-      closing_day: Number(cardClosingDay) || 1,
-      due_day: Number(cardDueDay) || 10,
-      linked_payment_account_id: cardAccountId || undefined,
-      color: '#6366f1',
-      active: true,
-    });
+      addCreditCard({
+        name: cardName.trim(),
+        institution: cardInstitution.trim() || 'Cartão',
+        last_four_digits: cardLastDigits.trim() || undefined,
+        credit_limit: lim,
+        closing_day: Number(cardClosingDay) || 1,
+        due_day: Number(cardDueDay) || 10,
+        linked_payment_account_id: cardAccountId || undefined,
+        color: '#6366f1',
+        active: true,
+      });
 
-    setCardName('');
-    setCardInstitution('');
-    setCardLastDigits('');
-    setCardLimit('');
-    setCardAccountId('');
-    setIsNewCardOpen(false);
+      setCardName('');
+      setCardInstitution('');
+      setCardLastDigits('');
+      setCardLimit('');
+      setCardAccountId('');
+      setIsNewCardOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    }
   };
 
-  const handleTransfer = (e: React.FormEvent) => {
+  const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amt = parseFloat(transferAmount.replace(/\./g, '').replace(',', '.')) || 0;
-    if (!fromAcc || !toAcc || amt <= 0) return;
-
+    if (transferPending.current) return;
+    setFormError(null);
     try {
-      createTransfer(fromAcc, toAcc, amt);
-      setTransferAmount('');
-      setFromAcc('');
-      setToAcc('');
-      setIsTransferOpen(false);
-    } catch (err: any) {
-      alert(err.message || 'Erro ao realizar transferência.');
+      const amt = parseMoneyField(transferAmount, 'Transferência');
+      if (!fromAcc || !toAcc || amt <= 0) return;
+
+        transferPending.current = true;
+        setIsTransferring(true);
+        await createTransferAsync(fromAcc, toAcc, amt, undefined, undefined, await transferAttempt.getKey([fromAcc, toAcc, amt]));
+        transferAttempt.complete();
+        setTransferAmount('');
+        setFromAcc('');
+        setToAcc('');
+        setIsTransferOpen(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    } finally {
+      transferPending.current = false;
+      setIsTransferring(false);
     }
   };
 
   return (
     <div className="space-y-6">
+      {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
+      <div className="flex flex-wrap gap-x-6">
+        <ContextualHelp slug="contas-e-cartoes" label="Como cadastrar contas e cartões" />
+        <ContextualHelp slug="pagar-faturas" label="Como conferir e pagar faturas" />
+      </div>
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -163,8 +194,8 @@ export default function AccountsPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          {!isExpenseTracker && (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {!isExpenseTracker && !isWorkspaceReadOnly && (
             <button
               onClick={() => setIsTransferOpen(true)}
               className="flex items-center gap-1.5 rounded-2xl bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm border border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
@@ -174,7 +205,7 @@ export default function AccountsPage() {
             </button>
           )}
 
-          {activeTab === 'accounts' && (
+          {!isWorkspaceReadOnly && activeTab === 'accounts' && (
             <button
               onClick={() => setIsNewAccountOpen(true)}
               className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-500"
@@ -184,7 +215,7 @@ export default function AccountsPage() {
             </button>
           )}
 
-          {activeTab === 'cards' && (
+          {!isWorkspaceReadOnly && activeTab === 'cards' && (
             <button
               onClick={() => setIsNewCardOpen(true)}
               className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-500"
@@ -197,10 +228,10 @@ export default function AccountsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab('accounts')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'accounts'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -212,7 +243,7 @@ export default function AccountsPage() {
 
         <button
           onClick={() => setActiveTab('cards')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'cards'
               ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -224,7 +255,7 @@ export default function AccountsPage() {
 
         <button
           onClick={() => setActiveTab('bills')}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
             activeTab === 'bills'
               ? 'border-blue-600 text-blue-600 dark:text-blue-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -237,7 +268,7 @@ export default function AccountsPage() {
         {!isExpenseTracker && (
           <button
             onClick={() => setActiveTab('transfers')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+            className={`flex shrink-0 whitespace-nowrap items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
               activeTab === 'transfers'
                 ? 'border-purple-600 text-purple-600 dark:text-purple-400'
                 : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -327,7 +358,7 @@ export default function AccountsPage() {
                       </div>
                     )}
 
-                    {isInactive && (
+                    {!isWorkspaceReadOnly && isInactive && (
                       <button
                         onClick={() => updateAccount(acc.id, { active: true })}
                         className="rounded-xl bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 transition"
@@ -407,8 +438,8 @@ export default function AccountsPage() {
       {/* Conteúdo da Tab 3: Faturas */}
       {activeTab === 'bills' && (
         <div className="overflow-hidden rounded-3xl bg-white shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+          <div className="overflow-x-auto w-full max-w-full touch-pan-x overscroll-x-contain">
+            <table className="w-full min-w-[700px] text-left text-xs">
               <thead className="border-b border-slate-100 bg-slate-50/70 uppercase tracking-wider text-slate-400 dark:border-slate-800 dark:bg-slate-800/40">
                 <tr>
                   <th className="py-3.5 pl-6 pr-3">Cartão & Mês</th>
@@ -454,7 +485,7 @@ export default function AccountsPage() {
                           >
                             Inspecionar
                           </button>
-                          {bill.status !== 'paid' && (
+                          {!isWorkspaceReadOnly && bill.status !== 'paid' && (
                             <button
                               onClick={() =>
                                 setPaymentTarget({
@@ -490,13 +521,13 @@ export default function AccountsPage() {
               <h3 className="text-base font-bold text-slate-900 dark:text-white">Histórico de Transferências</h3>
               <p className="text-xs text-slate-500">Rastreabilidade completa de movimentações entre suas contas.</p>
             </div>
-            <button
+            {!isWorkspaceReadOnly && <button
               onClick={() => setIsTransferOpen(true)}
               className="flex items-center gap-1.5 rounded-2xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-blue-500"
             >
               <ArrowRightLeft className="h-4 w-4" />
               <span>Nova Transferência</span>
-            </button>
+            </button>}
           </div>
 
           {transfers.length === 0 ? (
@@ -504,8 +535,8 @@ export default function AccountsPage() {
               Nenhuma transferência registrada neste workspace.
             </div>
           ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-xs">
+            <div className="mt-4 overflow-x-auto w-full max-w-full touch-pan-x overscroll-x-contain">
+              <table className="w-full min-w-[550px] text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-400 dark:border-slate-800">
                     <th className="pb-3 font-semibold">Data</th>
@@ -539,11 +570,12 @@ export default function AccountsPage() {
       )}
 
       {/* Modal Nova Conta */}
-      {isNewAccountOpen && (
+      {isNewAccountOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Nova Conta</h3>
             <form onSubmit={handleCreateAccount} className="mt-4 space-y-3">
+            {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-500">Nome da Conta</label>
                 <input
@@ -613,11 +645,12 @@ export default function AccountsPage() {
       )}
 
       {/* Modal Novo Cartão */}
-      {isNewCardOpen && (
+      {isNewCardOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Cartão de Crédito</h3>
             <form onSubmit={handleCreateCard} className="mt-4 space-y-3">
+            {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-500">Nome do Cartão</label>
                 <input
@@ -700,11 +733,12 @@ export default function AccountsPage() {
       )}
 
       {/* Modal Transferência */}
-      {isTransferOpen && (
+      {isTransferOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Transferência entre Contas</h3>
             <form onSubmit={handleTransfer} className="mt-4 space-y-3">
+            {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-500">Conta Origem (Saída)</label>
                 <select
@@ -759,7 +793,7 @@ export default function AccountsPage() {
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="submit" disabled={isTransferring} aria-busy={isTransferring}
                   className="rounded-xl bg-blue-600 px-5 py-2 text-xs font-bold text-white hover:bg-blue-500"
                 >
                   Confirmar Transferência
@@ -787,11 +821,11 @@ export default function AccountsPage() {
         }}
       />
 
-      <PaymentModal
+      {!isWorkspaceReadOnly && <PaymentModal
         isOpen={!!paymentTarget}
         onClose={() => setPaymentTarget(null)}
         target={paymentTarget}
-      />
+      />}
     </div>
   );
 }

@@ -1,5 +1,7 @@
+import { findOperationReceipt } from './operation-receipts';
 import { Payment } from '../../types';
 import {
+  normalizeMoney,
   toCents,
   fromCents,
   validatePaymentAccount,
@@ -10,6 +12,7 @@ import { FinanceActionDeps } from './types';
 export function recordPayment(
   deps: FinanceActionDeps,
   data: {
+    operation_key?: string;
     transaction_id?: string;
     installment_id?: string;
     credit_card_bill_id?: string;
@@ -34,8 +37,11 @@ export function recordPayment(
     throw new Error('Informe exatamente uma obrigação de destino para o pagamento.');
   }
 
+  data = { ...data, amount: normalizeMoney(data.amount, 'Pagamento') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
+  const receipt = findOperationReceipt(state.allPayments, targetWsId, data.operation_key, data);
+  if (receipt) return receipt;
   const activeWs = state.allWorkspaces.find((w) => w.id === targetWsId);
   const isExpenseTracker = activeWs?.tracking_mode === 'expense_tracker';
   const currentAccounts = state.allAccounts;
@@ -45,6 +51,8 @@ export function recordPayment(
     const pm = state.allPaymentMethods.find((p) => p.id === data.payment_method_id && p.workspace_id === targetWsId);
     if (!pm) throw new Error('Método de pagamento não pertence ao workspace ativo.');
   }
+
+  const userId = deps.getUserId();
 
   // 1. Transação avulsa
   if (data.transaction_id) {
@@ -71,6 +79,7 @@ export function recordPayment(
     const finalAmount = fromCents(paymentCents);
     const shouldMutateAccount = !!(acc && data.account_id && !isExpenseTracker);
     const newPay: Payment = {
+      operation_key: data.operation_key,
       id: deps.generateId('pay'),
       workspace_id: targetWsId,
       transaction_id: data.transaction_id,
@@ -79,7 +88,7 @@ export function recordPayment(
       amount: finalAmount,
       payment_date: data.payment_date,
       notes: data.notes,
-      created_by: 'usr-1',
+      created_by: userId,
       created_at: deps.now().toISOString(),
       affects_balance: shouldMutateAccount,
     };
@@ -101,7 +110,7 @@ export function recordPayment(
           if (a.id === data.account_id) {
             const currentBalanceCents = toCents(a.current_balance);
             const diffCents = tx.type === 'expense' ? -paymentCents : paymentCents;
-            return { ...a, current_balance: fromCents(currentBalanceCents + diffCents) };
+            return { ...a, current_balance: normalizeMoney(fromCents(currentBalanceCents + diffCents), 'Saldo resultante', 'signed') };
           }
           return a;
         })
@@ -145,6 +154,7 @@ export function recordPayment(
     const finalAmount = fromCents(paymentCents);
     const shouldMutateAccount = !!(acc && data.account_id && !isExpenseTracker);
     const newPay: Payment = {
+      operation_key: data.operation_key,
       id: deps.generateId('pay'),
       workspace_id: targetWsId,
       installment_id: data.installment_id,
@@ -153,7 +163,7 @@ export function recordPayment(
       amount: finalAmount,
       payment_date: data.payment_date,
       notes: data.notes,
-      created_by: 'usr-1',
+      created_by: userId,
       created_at: deps.now().toISOString(),
       affects_balance: shouldMutateAccount,
     };
@@ -173,7 +183,7 @@ export function recordPayment(
     const nextAccounts = shouldMutateAccount
       ? currentAccounts.map((a) =>
           a.id === data.account_id
-            ? { ...a, current_balance: fromCents(toCents(a.current_balance) - paymentCents) }
+            ? { ...a, current_balance: normalizeMoney(fromCents(toCents(normalizeMoney(a.current_balance, 'Saldo', 'signed')) - paymentCents), 'Saldo', 'signed') }
             : a
         )
       : currentAccounts;
@@ -190,7 +200,7 @@ export function recordPayment(
 
   // 3. Fatura de cartão
   if (data.credit_card_bill_id) {
-    return payCreditCardBill(deps, data.credit_card_bill_id, data.account_id, data.amount, data.payment_date, data.notes);
+    return payCreditCardBill(deps, data.credit_card_bill_id, data.account_id, data.amount, data.payment_date, data.notes, data.operation_key);
   }
 
   throw new Error('Tipo de pagamento não suportado.');

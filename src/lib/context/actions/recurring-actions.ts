@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { RecurringTransaction } from '../../types';
 import {
   validateRecurringAmount,
+  normalizeMoney,
   isValidCustomInterval,
   resolveTransactionAccountId,
   validateTransactionBusinessRules,
@@ -46,6 +47,7 @@ export function addRecurring(
   data: Omit<RecurringTransaction, 'id' | 'workspace_id' | 'created_at'>,
   onProcessed?: () => void
 ): RecurringTransaction {
+  data = { ...data, amount: normalizeMoney(data.amount, 'Recorrência') };
   validateRecurringAmount(data.amount);
   if (data.frequency === 'custom') {
     if (!isValidCustomInterval(data.interval_days)) {
@@ -110,10 +112,12 @@ export function toggleRecurring(
   deps: FinanceActionDeps,
   id: string,
   onProcessed?: () => void
-): void {
+): RecurringTransaction | undefined {
   const state = deps.getState();
   const todayStr = format(deps.now(), 'yyyy-MM-dd');
   const targetWsId = state.activeWorkspaceId;
+
+  let updatedRec: RecurringTransaction | undefined;
 
   const updateFn = (r: RecurringTransaction) => {
     if (r.id === id && r.workspace_id === targetWsId) {
@@ -122,12 +126,13 @@ export function toggleRecurring(
       if (willBeActive && nextOcc < todayStr) {
         nextOcc = calculateCatchUpOccurrence(nextOcc, r.start_date, r.frequency, r.interval_days, todayStr);
       }
-      return {
+      updatedRec = {
         ...r,
         active: willBeActive,
         next_occurrence: nextOcc,
         suspended_reason: willBeActive ? null : r.suspended_reason,
       };
+      return updatedRec;
     }
     return r;
   };
@@ -142,6 +147,8 @@ export function toggleRecurring(
   } else {
     processPendingRecurring(deps);
   }
+
+  return updatedRec;
 }
 
 export function deleteRecurring(

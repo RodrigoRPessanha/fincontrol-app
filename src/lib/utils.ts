@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format, parseISO, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { normalizeMoney } from './financial-engine/money';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -79,4 +80,86 @@ export function sanitizeCsvCell(val: string | number | undefined | null): string
     str = `'${str}`;
   }
   return `"${str}"`;
+}
+
+/**
+ * Valida e sanitiza caminhos de redirecionamento interno.
+ * Impede Open Redirects (ex: //evil.com, @evil.example, https://...),
+ * ataques baseados em esquemas javascript: ou caracteres de controle,
+ * garantindo retorno de um caminho estritamente relativo interno que começa com '/'.
+ */
+export function getSafeRedirectPath(target: string | null | undefined, fallback: string = '/'): string {
+  if (!target || typeof target !== 'string') {
+    return fallback;
+  }
+  const trimmed = target.trim();
+  // Deve iniciar com uma única '/' e não '//' ou '/\'
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.startsWith('/\\')) {
+    return fallback;
+  }
+  // Não pode conter '@' (impede http://localhost:3000@evil.com)
+  if (trimmed.includes('@')) {
+    return fallback;
+  }
+  // Não pode conter caracteres de controle ASCII
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) {
+    return fallback;
+  }
+  // Verifica se a codificação de URI é válida
+  try {
+    decodeURI(trimmed);
+  } catch {
+    return fallback;
+  }
+  try {
+    const dummyOrigin = 'http://localhost';
+    const parsed = new URL(trimmed, dummyOrigin);
+    if (parsed.origin !== dummyOrigin) {
+      return fallback;
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Converte entradas de moeda em número, suportando:
+ * - Padrão brasileiro com vírgula decimal (ex: 1.234,56 ou 12,34)
+ * - Padrão com ponto decimal (ex: 1,234.56 ou 12.34)
+ * - Inteiros puros (ex: 1234)
+ */
+export function parseCurrencyInput(val: string): number {
+  const trimmed = val.trim();
+  if (!trimmed) return NaN;
+
+  // 1. Formato brasileiro com vírgula decimal (ex: 1.234,56 ou 1234,56 ou 12,34)
+  if (/^\d{1,3}(\.\d{3})*,\d{1,2}$/.test(trimmed) || /^\d+,\d{1,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  // 2. Formato internacional com ponto decimal (ex: 1,234.56 ou 1234.56 ou 12.34)
+  if (/^\d{1,3}(,\d{3})*\.\d{1,2}$/.test(trimmed) || /^\d+\.\d{1,2}$/.test(trimmed)) {
+    const normalized = trimmed.replace(/,/g, '');
+    const num = parseFloat(normalized);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  // 3. Inteiro puro (ex: 20 ou 1000)
+  if (/^\d+$/.test(trimmed)) {
+    const num = parseFloat(trimmed);
+    return Number.isFinite(num) ? num : NaN;
+  }
+
+  return NaN;
+}
+
+export function parseMoneyField(value: string, label: string, rule: 'positive' | 'nonnegative' | 'signed' = 'positive', blankZero = false): number {
+  const text = value.trim();
+  if (!text && blankZero) return 0;
+  const negative = rule === 'signed' && text.startsWith('-');
+  const parsed = parseCurrencyInput(negative ? text.slice(1) : text);
+  return normalizeMoney(negative ? -parsed : parsed, label, rule);
 }

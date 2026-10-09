@@ -369,6 +369,7 @@ describe('FinanceProvider - Recorrências', () => {
         commit: (next: any) => { state = next; },
         generateId: (p = 'rec') => `${p}-test-${Date.now()}`,
         now: () => new Date('2026-08-20T12:00:00Z'),
+        getUserId: () => 'usr-1',
       };
 
       // 1. addRecurring sem onProcessed -> deve cair no else (processPendingRecurring, linha 103)

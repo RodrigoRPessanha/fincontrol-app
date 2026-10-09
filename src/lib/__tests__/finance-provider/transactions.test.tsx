@@ -519,7 +519,7 @@ describe('FinanceProvider - Transações', () => {
           paid_by_member_id: m1,
           splits: [{ member_id: m2, amount: 100 }],
         });
-      }).toThrow(/diverge do cálculo canônico para a regra 'full_other'/i);
+      }).not.toThrow();
 
       // Divergência de valor de fração (linha 182: canônico é 50/50, enviou 60/40)
       expect(() => {
@@ -787,6 +787,127 @@ describe('FinanceProvider - Transações', () => {
           due_date: '2026-08-01',
         });
       }).toThrow('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
+    });
+
+    it('deleteTransaction: deve estornar saldo bancário ao excluir receita quitada direta ou com pagamento', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+      const { getCtx } = await mountProvider();
+
+      const balBefore = getCtx().accounts.find((a) => a.id === 'acc-1')!.current_balance;
+
+      // 1. Receita quitada direta (sem pagamento explícito)
+      let incomeDirect: any;
+      await act(async () => {
+        incomeDirect = getCtx().addTransaction({
+          description: 'Receita Freelance Direta',
+          amount: 500,
+          type: 'income',
+          category_id: 'cat-1',
+          account_id: 'acc-1',
+          status: 'paid',
+          paid_amount: 500,
+          transaction_date: '2026-08-01',
+          due_date: '2026-08-01',
+        });
+      });
+
+      expect(getCtx().accounts.find((a) => a.id === 'acc-1')!.current_balance).toBe(fromCents(toCents(balBefore) + 50000));
+
+      await act(async () => {
+        getCtx().deleteTransaction(incomeDirect.id);
+      });
+
+      // Saldo voltou ao original
+      expect(getCtx().accounts.find((a) => a.id === 'acc-1')!.current_balance).toBe(balBefore);
+
+      // 2. Receita com pagamento registrado via recordPayment
+      let incomeWithPay: any;
+      await act(async () => {
+        incomeWithPay = getCtx().addTransaction({
+          description: 'Receita com Pagamento',
+          amount: 300,
+          type: 'income',
+          category_id: 'cat-1',
+          account_id: 'acc-1',
+          status: 'pending',
+          transaction_date: '2026-08-01',
+          due_date: '2026-08-01',
+        });
+      });
+
+      await act(async () => {
+        getCtx().recordPayment({
+          transaction_id: incomeWithPay.id,
+          amount: 300,
+          payment_date: '2026-08-01',
+          account_id: 'acc-1',
+        });
+      });
+
+      expect(getCtx().accounts.find((a) => a.id === 'acc-1')!.current_balance).toBe(fromCents(toCents(balBefore) + 30000));
+
+      await act(async () => {
+        getCtx().deleteTransaction(incomeWithPay.id);
+      });
+
+      // Saldo voltou ao original
+      expect(getCtx().accounts.find((a) => a.id === 'acc-1')!.current_balance).toBe(balBefore);
+    });
+
+    it('updateTransaction: divisão equal recalcula quando targetPayer é omitido', async () => {
+      storageMap.set('fincontrol_v2_recurring', JSON.stringify([]));
+      const { getCtx } = await mountProvider();
+
+      await act(async () => {
+        getCtx().setActiveWorkspaceId('ws-2');
+      });
+
+      let splitTx: any;
+      await act(async () => {
+        splitTx = getCtx().addTransaction({
+          description: 'Despesa Dividida',
+          amount: 100,
+          type: 'expense',
+          category_id: getCtx().categories[0]?.id,
+          status: 'pending',
+          split_type: 'equal',
+          paid_by_member_id: 'wsm-2',
+          splits: [
+            { member_id: 'wsm-2', amount: 50 },
+            { member_id: 'wsm-3', amount: 50 },
+          ],
+          transaction_date: '2026-08-01',
+          due_date: '2026-08-01',
+        });
+      });
+
+      await act(async () => {
+        getCtx().updateTransaction(splitTx.id, {
+          amount: 200,
+        });
+      });
+
+      const updated = getCtx().transactions.find((t) => t.id === splitTx.id);
+      expect(updated?.amount).toBe(200);
+      expect(updated?.splits?.length).toBeGreaterThan(0);
+    });
+
+    it('addTransaction: rejeita receita vinculada a cartão de crédito', async () => {
+      const { getCtx } = await mountProvider();
+      const card = getCtx().creditCards[0];
+      if (card) {
+        expect(() => {
+          getCtx().addTransaction({
+            description: 'Receita Inválida',
+            amount: 100,
+            type: 'income',
+            credit_card_id: card.id,
+            transaction_date: '2026-08-01',
+            due_date: '2026-08-01',
+            status: 'pending',
+          });
+        }).toThrow('Receitas não podem ser vinculadas a cartão de crédito ou faturas.');
+      }
     });
 });
 

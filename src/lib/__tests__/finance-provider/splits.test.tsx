@@ -546,7 +546,8 @@ describe('FinanceProvider - Rateios e Acertos', () => {
       expect(trioMembers).toHaveLength(3);
       const [mA, mB, mC] = trioMembers.map((m) => m.id);
 
-      // Prova 7: equal omitindo terceiro membro (A=50, B=50; C omitido) deve ser rejeitado
+      // Prova 7: equal omitindo terceiro membro (A=50, B=50; C omitido) deve ser aceito
+      await act(async () => {
       expect(() => {
         getCtx().addTransaction({
           description: 'Equal omitindo C',
@@ -562,7 +563,7 @@ describe('FinanceProvider - Rateios e Acertos', () => {
           due_date: '2026-09-18',
           status: 'pending',
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'/i);
+      }).not.toThrow();
 
       expect(() => {
         getCtx().createInstallmentPurchase({
@@ -577,9 +578,9 @@ describe('FinanceProvider - Rateios e Acertos', () => {
             { member_id: mB, amount: 50 },
           ],
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'equal'/i);
+      }).not.toThrow();
 
-      // Prova 8: full_other omitindo outro não pagador (A paga, B=100; C omitido) deve ser rejeitado
+      // Prova 8: full_other omitindo outro não pagador (A paga, B=100; C omitido) deve ser aceito
       expect(() => {
         getCtx().addTransaction({
           description: 'Full Other omitindo C',
@@ -594,7 +595,7 @@ describe('FinanceProvider - Rateios e Acertos', () => {
           due_date: '2026-09-18',
           status: 'pending',
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'/i);
+      }).not.toThrow();
 
       expect(() => {
         getCtx().createInstallmentPurchase({
@@ -608,7 +609,12 @@ describe('FinanceProvider - Rateios e Acertos', () => {
             { member_id: mB, amount: 100 },
           ],
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'/i);
+      }).not.toThrow();
+      });
+      expect(getCtx().transactions.find((t) => t.description === 'Equal omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mA, 50], [mB, 50]]);
+      expect(getCtx().purchases.find((p) => p.description === 'Parcelamento Equal omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mA, 50], [mB, 50]]);
+      expect(getCtx().transactions.find((t) => t.description === 'Full Other omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mB, 100]]);
+      expect(getCtx().purchases.find((p) => p.description === 'Parcelamento Full Other omitindo C')?.splits?.map((split) => [split.member_id, split.amount])).toEqual([[mB, 100]]);
     });
 
     it('recordSettlement com payment_account_id: valida que conta pertence ao workspace e está ativa', async () => {
@@ -862,7 +868,7 @@ describe('FinanceProvider - Rateios e Acertos', () => {
           transaction_date: '2026-08-01',
           due_date: '2026-08-01',
         });
-      }).toThrow(/A distribuição de frações informada diverge do cálculo canônico para a regra 'full_other'/);
+      }).not.toThrow();
 
       // 3b. splits.length (2) correto e soma correta (100), mas valores divergentes (70/30 vs 50/50 canônico) -> cobre linha 182
       expect(() => {
@@ -969,6 +975,376 @@ describe('FinanceProvider - Rateios e Acertos', () => {
         100
       );
       expect(billIdFallbackWs).toBeDefined();
+    });
+
+    it('gerencia pessoas (addPerson, updatePerson, deletePerson) e validações no FinanceProvider', async () => {
+      const { getCtx } = await mountProvider();
+
+      let ws: any;
+      await act(async () => {
+        ws = getCtx().createWorkspace('Workspace Pessoas Test');
+      });
+
+      await act(async () => {
+        getCtx().setActiveWorkspaceId(ws.id);
+      });
+
+      // 1. addPerson com string
+      let p1: any;
+      await act(async () => {
+        p1 = getCtx().addPerson('Lucas Lima');
+      });
+      expect(p1.id).toBeDefined();
+      expect(p1.name).toBe('Lucas Lima');
+      expect(p1.workspace_id).toBe(ws.id);
+
+      // addPerson com objeto
+      let p2: any;
+      await act(async () => {
+        p2 = getCtx().addPerson({ name: 'Mariana Costa' });
+      });
+      expect(p2.name).toBe('Mariana Costa');
+
+      // Rejeita nome duplicado
+      await act(async () => {
+        expect(() => {
+          getCtx().addPerson('lucas lima');
+        }).toThrow(/já existe/i);
+      });
+
+      // Rejeita nome vazio
+      await act(async () => {
+        expect(() => {
+          getCtx().addPerson('   ');
+        }).toThrow(/vazio/i);
+      });
+
+      // 2. updatePerson
+      await act(async () => {
+        getCtx().updatePerson(p1.id, { name: 'Lucas Lima Jr.' });
+      });
+      expect(getCtx().people.find((p) => p.id === p1.id)?.name).toBe('Lucas Lima Jr.');
+
+      // updatePerson pessoa inexistente
+      await act(async () => {
+        expect(() => {
+          getCtx().updatePerson('inexistent-p', { name: 'Novo' });
+        }).toThrow(/não encontrada/i);
+      });
+
+      // 3. deletePerson sem histórico (sucesso)
+      await act(async () => {
+        getCtx().deletePerson(p2.id);
+      });
+      expect(getCtx().people.some((p) => p.id === p2.id)).toBe(false);
+
+      // deletePerson pessoa inexistente
+      await act(async () => {
+        expect(() => {
+          getCtx().deletePerson('inexistent-p');
+        }).toThrow(/não encontrada/i);
+      });
+
+      // 4. Cria transação com rateio para Lucas e verifica bloqueio de deletePerson
+      await act(async () => {
+        getCtx().addTransaction({
+          description: 'Café com Lucas',
+          amount: 20,
+          type: 'expense',
+          split_type: 'custom',
+          splits: [
+            { member_id: getCtx().workspaceMembers[0].id, amount: 10 },
+            { person_id: p1.id, amount: 10 },
+          ],
+          transaction_date: '2026-09-20',
+          due_date: '2026-09-20',
+          status: 'paid',
+        });
+      });
+
+      await act(async () => {
+        expect(() => {
+          getCtx().deletePerson(p1.id);
+        }).toThrow(/histórico/i);
+      });
+
+      // 5. Registra acerto de contas com Pessoa (Lucas paga o membro)
+      const currentMemberId = getCtx().workspaceMembers[0].id;
+      let settlement: any;
+      await act(async () => {
+        settlement = getCtx().recordSettlement({
+          from_person_id: p1.id,
+          to_member_id: currentMemberId,
+          amount: 10,
+          settlement_date: '2026-09-20',
+          notes: 'Lucas pagou café',
+        });
+      });
+      expect(settlement.from_person_id).toBe(p1.id);
+      expect(settlement.to_member_id).toBe(currentMemberId);
+
+      // Rejeita acerto sem pagador ou sem recebedor
+      await act(async () => {
+        expect(() => {
+          getCtx().recordSettlement({
+            amount: 10,
+          });
+        }).toThrow(/devedor e credor devem ser informados/i);
+      });
+
+      // Rejeita acerto com múltiplos pagadores (membro E pessoa)
+      await act(async () => {
+        expect(() => {
+          getCtx().recordSettlement({
+            from_member_id: currentMemberId,
+            from_person_id: p1.id,
+            to_member_id: currentMemberId,
+            amount: 10,
+          });
+        }).toThrow(/não pode ser simultaneamente membro e pessoa/i);
+      });
+
+      // Rejeita acerto com mesmo pagador e recebedor (pessoa para pessoa)
+      await act(async () => {
+        expect(() => {
+          getCtx().recordSettlement({
+            from_person_id: p1.id,
+            to_person_id: p1.id,
+            amount: 10,
+          });
+        }).toThrow(/não podem ser a mesma/i);
+      });
+    });
+
+    it('registra acerto no modo expense_tracker sem exigir conta bancária e sem alterar saldos', async () => {
+      const { getCtx } = await mountProvider();
+
+      let ws: any;
+      await act(async () => {
+        ws = getCtx().createWorkspace('Modo Tracker', 'expense_tracker');
+      });
+
+      await act(async () => {
+        getCtx().setActiveWorkspaceId(ws.id);
+      });
+
+      let p: any;
+      await act(async () => {
+        p = getCtx().addPerson('Amigo Tracker');
+      });
+
+      const memberId = getCtx().workspaceMembers[0].id;
+
+      // Cria despesa rateada
+      await act(async () => {
+        getCtx().addTransaction({
+          description: 'Lanche Tracker',
+          amount: 50,
+          type: 'expense',
+          paid_by_member_id: memberId,
+          split_type: 'equal',
+          splits: [
+            { member_id: memberId, amount: 25 },
+            { person_id: p.id, amount: 25 },
+          ],
+          transaction_date: '2026-09-21',
+          due_date: '2026-09-21',
+          status: 'paid',
+        });
+      });
+
+      // Registra acerto no modo expense_tracker
+      let s: any;
+      await act(async () => {
+        s = getCtx().recordSettlement({
+          from_person_id: p.id,
+          to_member_id: memberId,
+          amount: 25,
+          settlement_date: '2026-09-21',
+        });
+      });
+
+      expect(s.amount).toBe(25);
+      expect(s.payment_account_id).toBeFalsy();
+      expect(getCtx().accounts.length).toBe(0);
+    });
+
+    it('cobre branches de erro de splits com pessoas e validações em action-helpers e person-actions', async () => {
+      const { getCtx } = await mountProvider();
+
+      let ws: any;
+      await act(async () => {
+        ws = getCtx().createWorkspace('Workspace Branches');
+      });
+      await act(async () => {
+        getCtx().setActiveWorkspaceId(ws.id);
+      });
+
+      let p1: any;
+      let p2: any;
+      await act(async () => {
+        p1 = getCtx().addPerson('Pessoa 1');
+        p2 = getCtx().addPerson('Pessoa 2');
+      });
+
+      const memberId = getCtx().workspaceMembers[0].id;
+
+      // 1. action-helpers linha 136: split com member_id e person_id simultaneamente
+      await act(async () => {
+        expect(() => {
+          getCtx().addTransaction({
+            description: 'Split inválido simultâneo',
+            amount: 50,
+            type: 'expense',
+            status: 'pending',
+            split_type: 'custom',
+            splits: [
+              { member_id: memberId, person_id: p1.id, amount: 50 } as any,
+            ],
+            transaction_date: '2026-09-22',
+            due_date: '2026-09-22',
+          });
+        }).toThrow(/não pode ter membro e pessoa simultaneamente/i);
+      });
+
+      // 2. action-helpers linha 139: split sem member_id e sem person_id
+      await act(async () => {
+        expect(() => {
+          getCtx().addTransaction({
+            description: 'Split vazio de participante',
+            amount: 50,
+            type: 'expense',
+            status: 'pending',
+            split_type: 'custom',
+            splits: [
+              { amount: 50 } as any,
+            ],
+            transaction_date: '2026-09-22',
+            due_date: '2026-09-22',
+          });
+        }).toThrow(/não pertence ao workspace ativo/i);
+      });
+
+      // 3. action-helpers linha 147: split com pessoa de outro workspace ou inexistente
+      await act(async () => {
+        expect(() => {
+          getCtx().addTransaction({
+            description: 'Split pessoa de fora',
+            amount: 50,
+            type: 'expense',
+            status: 'pending',
+            split_type: 'custom',
+            splits: [
+              { person_id: 'person-inexistente', amount: 50 },
+            ],
+            transaction_date: '2026-09-22',
+            due_date: '2026-09-22',
+          });
+        }).toThrow(/Pessoa informada no rateio não pertence ao workspace ativo/i);
+      });
+
+      // 4. action-helpers linha 165: full_other onde paidByPersonId tem fração atribuída a si mesma
+      await act(async () => {
+        expect(() => {
+          getCtx().addTransaction({
+            description: 'Full other inválido pessoa',
+            amount: 50,
+            type: 'expense',
+            status: 'pending',
+            paid_by_person_id: p1.id,
+            split_type: 'full_other',
+            splits: [
+              { person_id: p1.id, amount: 50 },
+            ],
+            transaction_date: '2026-09-22',
+            due_date: '2026-09-22',
+          });
+        }).toThrow(/o pagador não pode possuir fração atribuída a si mesmo/i);
+      });
+
+      // 5. person-actions linha 67: updatePerson com nome vazio
+      await act(async () => {
+        expect(() => {
+          getCtx().updatePerson(p1.id, { name: '   ' });
+        }).toThrow(/não pode ser vazio/i);
+      });
+
+      // 6. person-actions linha 84: updatePerson com nome duplicado de outra pessoa ativa
+      await act(async () => {
+        expect(() => {
+          getCtx().updatePerson(p1.id, { name: 'Pessoa 2' });
+        }).toThrow(/já existe uma pessoa ativa/i);
+      });
+
+      // 7. settlement-actions linha 34: to_member_id e to_person_id simultaneamente
+      await act(async () => {
+        expect(() => {
+          getCtx().recordSettlement({
+            from_person_id: p1.id,
+            to_member_id: memberId,
+            to_person_id: p2.id,
+            amount: 10,
+          });
+        }).toThrow(/O recebedor não pode ser simultaneamente membro e pessoa/i);
+      });
+
+      // 8. settlement-actions linhas 43-44 e 53-54: passagem legacy de person_id em from_member_id / to_member_id
+      // Cria dívida de P1 para P2
+      await act(async () => {
+        getCtx().addTransaction({
+          description: 'P2 pagou conta de P1',
+          amount: 40,
+          type: 'expense',
+          paid_by_person_id: p2.id,
+          split_type: 'full_other',
+          splits: [{ person_id: p1.id, amount: 40 }],
+          transaction_date: '2026-09-22',
+          due_date: '2026-09-22',
+          status: 'paid',
+        });
+      });
+
+      let legSettlement: any;
+      await act(async () => {
+        legSettlement = getCtx().recordSettlement({
+          from_member_id: p1.id, // auto-detecta como pessoa
+          to_member_id: p2.id,   // auto-detecta como pessoa
+          amount: 40,
+          settlement_date: '2026-09-22',
+        });
+      });
+      expect(legSettlement.from_person_id).toBe(p1.id);
+      expect(legSettlement.to_person_id).toBe(p2.id);
+
+      // 9. person-actions linha 118: deletePerson bloqueado quando pessoa está em settlement
+      await act(async () => {
+        expect(() => {
+          getCtx().deletePerson(p1.id);
+        }).toThrow(/histórico financeiro/i);
+      });
+
+      // 10. Atualiza e exclui pessoa sem vínculos através do contexto (cobrindo persistência remota em handleUpdatePerson e handleDeletePerson)
+      let pAvulsa: any;
+      await act(async () => {
+        pAvulsa = getCtx().addPerson({ name: 'Pessoa Desvinculada' });
+      });
+      await act(async () => {
+        await getCtx().waitForPendingMutations();
+      });
+
+      await act(async () => {
+        getCtx().updatePerson(pAvulsa.id, { name: 'Pessoa Desvinculada Atualizada' });
+      });
+      await act(async () => {
+        await getCtx().waitForPendingMutations();
+      });
+
+      await act(async () => {
+        getCtx().deletePerson(pAvulsa.id);
+      });
+      await act(async () => {
+        await getCtx().waitForPendingMutations();
+      });
     });
 });
 

@@ -112,17 +112,54 @@ export type TransactionType = 'income' | 'expense';
 
 export type SplitType = 'individual' | 'equal' | 'full_other' | 'custom';
 
+export interface Person {
+  id: string;
+  workspace_id: string;
+  name: string;
+  archived?: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface SplitParticipant {
+  id: string;
+  name: string;
+  is_member?: boolean;
+  type?: 'member' | 'person';
+  member_id?: string | null;
+  person_id?: string | null;
+  email?: string;
+  avatar_url?: string;
+}
+
 export interface TransactionSplit {
-  member_id: string;
+  id?: string;
+  workspace_id?: string;
+  transaction_id?: string;
+  member_id?: string | null;
+  person_id?: string | null;
+  amount: number;
+  percentage?: number;
+}
+
+export interface PurchaseSplit {
+  id?: string;
+  workspace_id?: string;
+  purchase_id?: string;
+  member_id?: string | null;
+  person_id?: string | null;
   amount: number;
   percentage?: number;
 }
 
 export interface Settlement {
+  operation_key?: string;
   id: string;
   workspace_id: string;
-  from_member_id: string;
-  to_member_id: string;
+  from_member_id?: string | null;
+  to_member_id?: string | null;
+  from_person_id?: string | null;
+  to_person_id?: string | null;
   amount: number;
   settlement_date: string;
   notes?: string | null;
@@ -131,6 +168,7 @@ export interface Settlement {
 }
 
 export interface Transaction {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   account_id?: string | null;
@@ -140,6 +178,7 @@ export interface Transaction {
   credit_card_bill_id?: string | null;
   recurring_transaction_id?: string | null;
   paid_by_member_id?: string | null;
+  paid_by_person_id?: string | null;
   split_type?: SplitType | null;
   splits?: TransactionSplit[];
   description: string;
@@ -169,11 +208,13 @@ export type UpdateTransactionDTO = {
   transaction_date?: string;
   notes?: string | null;
   paid_by_member_id?: string | null;
+  paid_by_person_id?: string | null;
   split_type?: SplitType | null;
   splits?: TransactionSplit[];
 };
 
 export interface Payment {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   transaction_id?: string | null;
@@ -190,6 +231,7 @@ export interface Payment {
 }
 
 export interface Purchase {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   account_id?: string | null;
@@ -201,6 +243,7 @@ export interface Purchase {
   installment_count: number;
   paid_installments_count?: number;
   paid_by_member_id?: string | null;
+  paid_by_person_id?: string | null;
   split_type?: SplitType | null;
   splits?: TransactionSplit[];
   purchase_date: string;
@@ -229,6 +272,7 @@ export interface Installment {
 }
 
 export interface Transfer {
+  operation_key?: string;
   id: string;
   workspace_id: string;
   from_account_id: string;
