@@ -50,6 +50,7 @@ jobs:
       - name: Export and send encrypted archive
         env:
           BACKUP_SOURCE: ${{ inputs.source || 'staging' }}
+          BACKUP_ALLOW_CRON_LOG_DELETE: ${{ vars.BACKUP_ALLOW_CRON_LOG_DELETE }}
           PGHOST: ${{ vars.BACKUP_PGHOST }}
           PGPORT: '5432'
           PGDATABASE: postgres
