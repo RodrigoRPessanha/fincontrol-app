@@ -1,7 +1,9 @@
 # Backups do FinControl no Cloudflare R2
 
-Status: preparação implementada, **sem execução Cloud, sem agendamento diário e sem
-restauração homologada**. Não substitui o gate de recuperação antes da V14.
+Status em 09/10/2026: exportações de staging e produção concluídas no R2 com
+checksum validado. O backup de staging foi recuperado em Supabase Docker isolado,
+com 355 testes SQL e 13 verificações Auth/API aprovados. O arquivo específico de
+produção ainda não foi restaurado. Agendamento diário continua desativado.
 
 ## Fluxo e escopo
 
@@ -55,6 +57,7 @@ Em **cada environment**, configurar:
 | Tipo | Nome | Valor |
 |---|---|---|
 | Variable | `BACKUP_ENABLED` | `true` somente após preparar acesso e chave |
+| Variable | `BACKUP_ALLOW_CRON_LOG_DELETE` | Produção: `true` somente com aceite explícito do mantenedor |
 | Variable | `BACKUP_PGHOST` | Host do Connect → Session pooler do projeto correto |
 | Variable | `BACKUP_PGUSER` | `backup_reader.<project-ref>` (direta: `backup_reader`) |
 | Variable | `R2_ACCOUNT_ID` | Account ID Cloudflare, 32 caracteres hexadecimais |
@@ -87,15 +90,54 @@ GRANT individual. A tentativa em `supabase/operations/harden_backup_cron_acl.sql
 não removeu o privilégio e foi abortada pela checagem ativa. O mantenedor autorizou
 prosseguir com staging: o runner aceita somente DELETE, sem grant option, nessa
 tabela regular pertencente a supabase_admin. Qualquer outra escrita/objeto bloqueia
-o export, e produção não recebe essa exceção. O manifesto criptografado registra
-a exceção quando presente. Corrigir o grant original antes da automação Production.
-Não usar postgres como contorno; produção não provisionada.
+o export. Produção só aceita a mesma exceção com BACKUP_ALLOW_CRON_LOG_DELETE=true;
+o mantenedor autorizou esse escopo em 09/10/2026. O manifesto criptografado registra
+o ambiente e a exceção quando presente. Manter a remoção do grant original como
+pendência de hardening, sem ocultar permissões adicionais.
+Não usar postgres como contorno.
 
 Após validar a exceção em staging, o operador define senha independente e LOGIN em sessão
 privada e cadastra essa senha no secret do environment correspondente. Nunca salvar
 SQL com senha no Git/editor compartilhado/logs. Não conceder membership de postgres,
 authenticated ou service_role. Restauração usa credencial administrativa separada.
 Reauditar privilégios depois de atualizações das extensões.
+
+### Preparação de produção — 09/10/2026
+
+Conferência atual: PostgreSQL17.6, migrations001–034, dados financeiros/Auth vazios.
+Role backup_reader criada inicialmente sem login/senha; o operador definiu senha
+exclusiva e habilitou LOGIN para a primeira exportação, mantendo as restrições
+verificadas em staging. Session pooler confirmado no painel:
+`aws-0-ca-central-1.pooler.supabase.com:5432`, usuário
+`backup_reader.exvjusubjjvjcdxtjfgf`. CA/hostname e round-trip da chave age exclusiva
+de produção foram validados; chave privada permanece no Ubuntu, fora do Git.
+
+backup-production continua restrito somente à branch main. Como backup.yml ainda
+não existe na default branch, o primeiro backup pré-V14 foi uma execução nativa
+local, com prompts ocultos e sem salvar credenciais. Não liberar staging para
+acessar o environment de produção nem promover V14 para apenas habilitar dispatch.
+Depois de homologar e publicar o workflow em main, revisar ativação/schedule.
+R2 e recipient/host/usuário/exceção estão preparados; confirmar a presença da senha
+no environment antes de habilitar o workflow. Não reaproveitar a senha de staging
+ou de postgres. A exportação inicial resultou em um arquivo criptografado de1,43MB.
+
+## Diagnóstico e limites de conexão
+
+O runner informa as etapas sem mostrar dados, senhas ou comandos completos. Os
+processos não recebem stdin interativo; PostgreSQL usa --no-password para impedir
+prompts ocultos. Erros conhecidos mostram somente categorias (auth, TLS, timeout,
+limite de conexões etc.); a saída original do servidor continua protegida.
+
+As conexões usam connect_timeout20s, keepalives e tcp_user_timeout30s, além do
+timeout total por comando. O limite TCP vale para dados transmitidos sem ACK,
+não limita toda exportação a30s. Muitos objetos e latência podem levar minutos.
+
+Um diagnóstico nativo em WSL encontrou retransmissões TCP enquanto o servidor
+estava idle-in-transaction/ClientRead, sem bloqueios. A tentativa posterior por
+outro endereço do pooler concluiu; isso não comprova a causa-raiz da rede. Não
+desativar TLS/Firewall nem fixar esse IP em configuração de produção. PGHOSTADDR é
+opcional apenas para diagnóstico: precisa pertencer ao DNS atual de PGHOST, e o
+hostname original continua sendo validado pela CA. Não é configurado no Actions.
 
 ## Primeira homologação e recuperação
 
@@ -108,8 +150,8 @@ Primeiro exportar staging, confirmar o objeto privado e o tamanho real. Baixar a
 cópia, descriptografar com a identidade privada, verificar os hashes do manifesto
 e inspecionar `pg_restore --list database.dump`. **Isso ainda não testa restauração.**
 
-Restaurar somente em projeto Supabase Cloud descartável separado, após revisar o
-TOC. Não aplicar cegamente um dump completo sobre schemas/roles gerenciados do
+Restaurar somente em Supabase local Docker isolado ou projeto Cloud descartável
+separado, após revisar o TOC. Não aplicar cegamente um dump completo sobre schemas/roles gerenciados do
 Supabase, nem usar `--clean`/`--create` em staging ou produção. Preparar um roteiro
 específico que preserve Auth, FKs, triggers personalizados em Auth, RLS, grants,
 default ACLs, event triggers, migrations, extensões e cron. Recriar a configuração

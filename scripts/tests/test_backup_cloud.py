@@ -43,11 +43,28 @@ class BackupTests(unittest.TestCase):
             module.backup({**self.env, 'PGPASSWORD': ''})
         execute.assert_not_called()
 
+    def test_diagnostic_address_must_match_current_supabase_dns(self):
+        addresses = [(module.socket.AF_INET, module.socket.SOCK_STREAM, 6, '', ('203.0.113.10', 5432))]
+        with patch.object(module.socket, 'getaddrinfo', return_value=addresses):
+            module.configuration({**self.env, 'PGHOSTADDR': '203.0.113.10'})
+            with self.assertRaisesRegex(ValueError, 'not in current Supabase DNS'):
+                module.configuration({**self.env, 'PGHOSTADDR': '203.0.113.11'})
+
     def test_process_error_does_not_disclose_private_output(self):
         with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess(
                 ['pg_dump'], 1, b'', b'password or private row')):
             with self.assertRaisesRegex(RuntimeError, '^pg_dump failed; private output suppressed$'):
                 module.execute(['pg_dump'], {})
+
+    def test_connection_diagnostics_never_echo_server_text(self):
+        for message, expected in [
+            (b'password authentication failed for private-user', 'authentication rejected'),
+            (b'certificate verify failed: private-path', 'TLS certificate verification failed'),
+            (b'connection timed out: private-host', 'network timeout'),
+            (b'tenant or user not found: private-user', 'pooler user/project not found'),
+        ]:
+            with self.subTest(expected=expected):
+                self.assertEqual(module.connection_error_kind(message), expected)
 
     def fake_execute(self, args, env, timeout=600):
         self.calls.append((args, env))
@@ -56,6 +73,9 @@ class BackupTests(unittest.TestCase):
             self.assertNotIn('AWS_SECRET_ACCESS_KEY', env)
         if '--version' in args:
             return f'{tool} (PostgreSQL) 17.6'.encode()
+        if tool in ('pg_dump', 'pg_dumpall', 'psql'):
+            self.assertIn('--no-password', args)
+            self.assertIn('tcp_user_timeout=30000', args[args.index('--dbname') + 1])
         if tool == 'psql':
             self.assertEqual(env['PGSSLMODE'], 'verify-full')
             self.assertEqual(env['PGSSLROOTCERT'], str(module.SSL_ROOT_CERT))
@@ -65,7 +85,7 @@ class BackupTests(unittest.TestCase):
                     'unsafe_memberships': 0, 'owned_objects': 0,
                     'database_create': False, 'schema_create': 0,
                     'writable_tables': 0, 'writable_sequences': 0, 'callable_definers': 0,
-                    'staging_cron_delete_only': 0,
+                    'cron_delete_only': 0,
                 }).encode()
             return b'170006\n'
         if tool == 'pg_restore':
@@ -139,18 +159,20 @@ class BackupTests(unittest.TestCase):
                 module.backup(self.env)
         self.assertEqual(list(Path(self.temp.name).iterdir()), [])
 
-    def test_cron_delete_exception_is_exact_and_staging_only(self):
-        for source, tables, accepted in [('staging', 1, True), ('staging', 2, False),
-                                         ('production', 1, False)]:
-            with self.subTest(source=source, tables=tables):
+    def test_cron_delete_exception_requires_production_opt_in(self):
+        for source, tables, flag, accepted in [('staging', 1, '', True), ('staging', 2, '', False),
+                                               ('production', 1, '', False), ('production', 1, 'true', True),
+                                               ('production', 2, 'true', False), ('production', 1, 'false', False)]:
+            with self.subTest(source=source, tables=tables, flag=flag):
                 self.calls = []
                 env = {**self.env, 'BACKUP_SOURCE': source,
+                       'BACKUP_ALLOW_CRON_LOG_DELETE': flag,
                        'PGUSER': f'backup_reader.{module.PROJECTS[source]}'}
                 def cron_permissions(args, process_env, timeout=600):
                     result = self.fake_execute(args, process_env, timeout)
                     if args[0] == 'psql' and 'json_build_object' in args[-1]:
                         parsed = json.loads(result)
-                        parsed.update(writable_tables=tables, staging_cron_delete_only=1)
+                        parsed.update(writable_tables=tables, cron_delete_only=1)
                         return json.dumps(parsed).encode()
                     return result
                 with patch.object(module, 'execute', side_effect=cron_permissions):
