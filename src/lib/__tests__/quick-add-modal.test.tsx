@@ -7,6 +7,23 @@ import * as FinanceContext from '@/lib/context/finance-context';
 import { WorkspaceMember, Workspace, CreditCard, PaymentMethod, Account, Category } from '@/lib/types';
 
 describe('QuickAddModal Comprehensive UI Tests', () => {
+  it('records an existing card directly without a duplicate payment method', async () => {
+    vi.mocked(FinanceContext.useFinance).mockReturnValue({ ...FinanceContext.useFinance(), paymentMethods: [] } as any);
+    const container = (globalThis as any).document.createElement('div'); const root = createRoot(container);
+    await act(async () => { root.render(<QuickAddModal isOpen onClose={mockOnClose} />); });
+    const cardOption = findNode(container, (node) => node.tagName === 'OPTION' && getReactProps(node)?.value?.startsWith('card:'));
+    expect(cardOption).toBeTruthy();
+    const methodSelect = cardOption.parentNode;
+    const cardChoice = getReactProps(cardOption).value;
+    await act(async () => {
+      getReactProps(methodSelect).onChange({ target: { value: cardChoice } });
+      getReactProps(findNode(container, (node) => node.tagName === 'INPUT' && getReactProps(node)?.placeholder === '0,00')).onChange({ target: { value: '50' } });
+      getReactProps(findNode(container, (node) => node.tagName === 'INPUT' && getReactProps(node)?.placeholder?.includes('Supermercado'))).onChange({ target: { value: 'Compra direta' } });
+    });
+    await act(async () => { await getReactProps(findNode(container, (node) => node.tagName === 'FORM')).onSubmit({ preventDefault() {} }); });
+    expect(mockAddTransaction).toHaveBeenCalledWith(expect.objectContaining({ credit_card_id: cardChoice.slice(5), payment_method_id: undefined }));
+    await act(async () => root.unmount());
+  });
   const mockAddTransaction = vi.fn();
   const mockCreateInstallmentPurchase = vi.fn();
   const mockCreateTransfer = vi.fn();

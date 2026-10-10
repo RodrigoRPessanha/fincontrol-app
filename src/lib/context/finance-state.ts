@@ -77,6 +77,9 @@ export interface FinanceContextType {
   paymentMethods: PaymentMethod[];
   allWorkspacePaymentMethods: PaymentMethod[];
   addPaymentMethod: (pm: Omit<PaymentMethod, 'id' | 'workspace_id' | 'created_at'>) => PaymentMethod;
+  addPaymentMethodAsync: (pm: Omit<PaymentMethod, 'id' | 'workspace_id' | 'created_at'>) => Promise<PaymentMethod>;
+  updatePaymentMethodAsync: (id: string, data: Partial<Pick<PaymentMethod, 'name' | 'type' | 'active'>>) => Promise<PaymentMethod>;
+  deletePaymentMethodAsync: (id: string) => Promise<void>;
 
   categories: Category[];
   allWorkspaceCategories: Category[];

@@ -67,6 +67,22 @@ function seedInstallment(
 }
 
 describe('LocalFinanceRepository', () => {
+  it('updates payment methods without clearing links and preserves used methods', async () => {
+    const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);
+    const method = await repo.savePaymentMethod({ workspace_id: 'ws-1', name: 'Unused', type: 'pix', active: true });
+    expect(await repo.updatePaymentMethod(method.id, 'ws-1', { name: ' Renamed ', active: false })).toMatchObject({ name: 'Renamed', type: 'pix', active: false });
+    await expect(repo.updatePaymentMethod(method.id, 'foreign', {})).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(repo.savePaymentMethod({ ...method, workspace_id: 'foreign' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    const state = (await repo.loadSnapshot('ws-1'));
+    state.allRecurring.push({ id: 'history', workspace_id: 'ws-1', payment_method_id: method.id } as any);
+    saveFinanceSnapshot(storage, state);
+    await expect(repo.deletePaymentMethod(method.id)).rejects.toThrow(/histórico/);
+    await expect(repo.updatePaymentMethod(method.id, 'ws-1', { type: 'cash' })).rejects.toThrow(/tipo/);
+    await repo.updatePaymentMethod(method.id, 'ws-1', { active: true });
+    const unused = await repo.savePaymentMethod({ workspace_id: 'ws-1', name: 'Cash', type: 'cash', active: true });
+    await repo.deletePaymentMethod(unused.id);
+    expect((await repo.getPaymentMethods('ws-1')).some((pm) => pm.id === unused.id)).toBe(false);
+  });
   let storage: Storage;
   let repo: LocalFinanceRepository;
 

@@ -404,8 +404,20 @@ export class SupabaseFinanceRepository implements FinanceRepository {
   }
 
   async deletePaymentMethod(id: string): Promise<void> {
-    const { error } = await this.client.from('payment_methods').delete().eq('id', id);
+    const { error } = await this.client.from('payment_methods').delete().eq('id', id).select('id').single();
     if (error) throw RepositoryError.fromPostgrestError(error, 'payment_methods');
+  }
+
+  async updatePaymentMethod(id: string, workspaceId: string, changes: Partial<Pick<PaymentMethod, 'name' | 'type' | 'active'>>): Promise<PaymentMethod> {
+    const payload = {
+      ...(changes.name !== undefined ? { name: changes.name.trim() } : {}),
+      ...(changes.type !== undefined ? { type: changes.type } : {}),
+      ...(changes.active !== undefined ? { active: changes.active } : {}),
+    };
+    const { data, error } = await this.client.from('payment_methods').update(payload)
+      .eq('id', id).eq('workspace_id', workspaceId).select().single();
+    if (error) throw RepositoryError.fromPostgrestError(error, 'payment_methods');
+    return mapPaymentMethodRowToDomain(data);
   }
 
   // ==========================================

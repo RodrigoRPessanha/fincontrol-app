@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency, parseCurrencyInput } from '@/lib/utils';
 import { calculateCardBillDates, splitInstallments, toCents, fromCents, calculateExpenseSplits, resolveSplitParticipants } from '@/lib/financial-engine';
+import { paymentChoices, persistedPaymentMethodId } from '@/lib/payment-methods';
 import { SplitType, TransactionSplit } from '@/lib/types';
 import { format } from 'date-fns';
 import { TransactionFields } from './quick-add/TransactionFields';
@@ -79,14 +80,16 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     (c) => c.type === (type === 'transfer' ? 'expense' : type)
   );
 
+  const choices = useMemo(() => paymentChoices(paymentMethods, creditCards), [paymentMethods, creditCards]);
+
   const filteredPaymentMethods = useMemo(() => {
     if (type === 'income') {
-      return paymentMethods.filter((p) => p.type !== 'credit_card' && !p.credit_card_id);
+      return choices.filter((p) => p.type !== 'credit_card' && !p.credit_card_id);
     }
-    return paymentMethods;
-  }, [paymentMethods, type]);
+    return choices;
+  }, [choices, type]);
 
-  const selectedPaymentMethod = paymentMethods.find((p) => p.id === paymentMethodId);
+  const selectedPaymentMethod = choices.find((p) => p.id === paymentMethodId);
   const isCreditCardSelected =
     type === 'expense' &&
     (selectedPaymentMethod?.type === 'credit_card' || !!selectedPaymentMethod?.credit_card_id);
@@ -226,7 +229,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           purchase_date: transactionDate,
           credit_card_id: selectedCard.id,
           category_id: categoryId || undefined,
-          payment_method_id: paymentMethodId || undefined,
+          payment_method_id: persistedPaymentMethodId(paymentMethodId),
           account_id: accountId || selectedPaymentMethod?.linked_account_id || selectedCard.linked_payment_account_id || undefined,
           paid_installments_count: paidInstallmentsCount,
           paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
@@ -242,7 +245,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           amount: numAmount,
           type: type,
           category_id: categoryId || undefined,
-          payment_method_id: paymentMethodId || undefined,
+          payment_method_id: persistedPaymentMethodId(paymentMethodId),
           credit_card_id: isCreditCardSelected && selectedCard ? selectedCard.id : undefined,
           account_id: accountId || selectedPaymentMethod?.linked_account_id || undefined,
           transaction_date: transactionDate,

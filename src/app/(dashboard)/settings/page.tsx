@@ -15,10 +15,11 @@ import {
   Laptop,
   Palette,
 } from 'lucide-react';
+import { PaymentMethodsSettings } from '@/components/settings/PaymentMethodsSettings';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 
 export default function SettingsPage() {
-  const { categories, paymentMethods, addCategory, addPaymentMethod, isWorkspaceReadOnly } = useFinance();
+  const { categories, allWorkspacePaymentMethods, activeWorkspace, addCategory, isWorkspaceReadOnly } = useFinance();
   const { theme, setTheme, resolvedTheme } = useTheme();
 
   const [activeTab, setActiveTab] = useState<'categories' | 'payments' | 'appearance'>('categories');
@@ -30,12 +31,6 @@ export default function SettingsPage() {
   const [catIcon, setCatIcon] = useState('tag');
   const [catColor, setCatColor] = useState('#10b981');
   const [isNewCatOpen, setIsNewCatOpen] = useState(false);
-
-  // Payment method creation
-  const [pmName, setPmName] = useState('');
-  const [pmType, setPmType] = useState<any>('pix');
-  const [isNewPmOpen, setIsNewPmOpen] = useState(false);
-
 
   const handleCreateCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,20 +48,6 @@ export default function SettingsPage() {
     setCatName('');
     setCatParentId('');
     setIsNewCatOpen(false);
-  };
-
-  const handleCreatePaymentMethod = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pmName.trim()) return;
-
-    addPaymentMethod({
-      name: pmName.trim(),
-      type: pmType,
-      active: true,
-    });
-
-    setPmName('');
-    setIsNewPmOpen(false);
   };
 
   return (
@@ -106,7 +87,7 @@ export default function SettingsPage() {
           }`}
         >
           <CreditCard className="h-4 w-4" />
-          <span>Métodos de Pagamento ({paymentMethods.length})</span>
+          <span>Métodos de Pagamento ({allWorkspacePaymentMethods.length})</span>
         </button>
 
         <button
@@ -181,42 +162,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Tab 2: Métodos de Pagamento */}
-      {activeTab === 'payments' && (
-        <div className="space-y-4">
-          <div className="flex justify-end">
-            {!isWorkspaceReadOnly && <button
-              onClick={() => setIsNewPmOpen(true)}
-              className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-indigo-500"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Novo Método</span>
-            </button>}
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {paymentMethods.map((pm) => (
-              <div
-                key={pm.id}
-                className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 font-bold text-xs">
-                    <CreditCard className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">{pm.name}</h4>
-                    <span className="text-[10px] text-slate-400 uppercase font-semibold">{pm.type}</span>
-                  </div>
-                </div>
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                  Ativo
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {activeTab === 'payments' && <PaymentMethodsSettings key={activeWorkspace.id} />}
 
       {/* Tab 3: Aparência & Tema */}
       {activeTab === 'appearance' && (
@@ -381,60 +327,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Modal Novo Método */}
-      {isNewPmOpen && !isWorkspaceReadOnly && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Método de Pagamento</h3>
-            <form onSubmit={handleCreatePaymentMethod} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500">Nome do Método</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: PIX Banco Inter, Cartão C6"
-                  value={pmName}
-                  onChange={(e) => setPmName(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
-                />
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500">Tipo</label>
-                <select
-                  value={pmType}
-                  onChange={(e) => setPmType(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
-                >
-                  <option value="pix">PIX</option>
-                  <option value="credit_card">Cartão de Crédito</option>
-                  <option value="debit_card">Cartão de Débito</option>
-                  <option value="cash">Dinheiro em Espécie</option>
-                  <option value="boleto">Boleto Bancário</option>
-                  <option value="automatic_debit">Débito Automático</option>
-                  <option value="other">Outro</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsNewPmOpen(false)}
-                  className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white hover:bg-indigo-500"
-                >
-                  Salvar Método
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
