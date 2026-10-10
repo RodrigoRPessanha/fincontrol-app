@@ -2,6 +2,7 @@
 
 import { ContextualHelp } from '@/components/help/ContextualHelp';
 
+import { paymentChoices, persistedPaymentMethodId } from '@/lib/payment-methods';
 import React, { useState } from 'react';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -57,12 +58,13 @@ export default function RecurringPage() {
   const [freq, setFreq] = useState<RecurrenceFrequency>('monthly');
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
+  const choices = paymentChoices(paymentMethods, creditCards);
   const filteredCategories = categories.filter((c) => c.type === recType);
-  const filteredPaymentMethods = paymentMethods.filter((p) =>
+  const filteredPaymentMethods = choices.filter((p) =>
     recType === 'income' ? p.type !== 'credit_card' && !p.credit_card_id : true
   );
 
-  const selectedPm = paymentMethods.find((p) => p.id === paymentMethodId);
+  const selectedPm = choices.find((p) => p.id === paymentMethodId);
   const fixedCard = selectedPm?.credit_card_id
     ? creditCards.find((c) => c.id === selectedPm.credit_card_id)
     : null;
@@ -80,7 +82,7 @@ export default function RecurringPage() {
 
   const handleMethodChange = (pmId: string) => {
     setPaymentMethodId(pmId);
-    const pm = paymentMethods.find((p) => p.id === pmId);
+    const pm = choices.find((p) => p.id === pmId);
     if (pm) {
       if (pm.credit_card_id) {
         setCreditCardId(pm.credit_card_id);
@@ -116,7 +118,7 @@ export default function RecurringPage() {
         type: recType,
         category_id: catId || undefined,
         account_id: recType === 'expense' && (fixedCard || creditCardId) ? undefined : accountId || undefined,
-        payment_method_id: paymentMethodId || undefined,
+        payment_method_id: persistedPaymentMethodId(paymentMethodId),
         credit_card_id: recType === 'income' ? undefined : (fixedCard?.id || creditCardId) || undefined,
         frequency: freq,
         start_date: startDate,

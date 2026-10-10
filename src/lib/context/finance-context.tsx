@@ -1412,14 +1412,15 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     [executePayCreditCardBill]
   );
 
-  const handleAddPaymentMethod = useCallback(
+  const executeAddPaymentMethod = useCallback(
     (pmData: Omit<PaymentMethod, 'id' | 'workspace_id' | 'created_at'>) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      return runMutation(
+      return runMutationInternal(
         () => actions.addPaymentMethod(deps, pmData),
-        async (res) => {
+        async (res, acknowledge) => {
           const saved = await effectiveRepository.savePaymentMethod({
-            ...pmData,
+            ...res,
+            id: undefined,
             workspace_id: resolveCanonicalId(targetWorkspaceId),
           });
           registerCanonicalId(res.id, saved.id);
@@ -1427,14 +1428,54 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
           if (current.activeWorkspaceId === resolveCanonicalId(targetWorkspaceId)) {
             commitState({
               ...current,
-              allPaymentMethods: current.allPaymentMethods.map((p) => (p.id === res.id ? saved : p)),
+              allPaymentMethods: current.allPaymentMethods.map((p) => (p.id === res.id ?
+                (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...p, id: saved.id, workspace_id: saved.workspace_id } : saved) : p)),
             });
           }
+          acknowledge?.({ allPaymentMethods: [saved] });
+          return saved;
         },
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
+    [deps, effectiveRepository, runMutationInternal, commitState, registerCanonicalId, resolveCanonicalId]
+  );
+
+  const handleAddPaymentMethod = useCallback(
+    (data: Omit<PaymentMethod, 'id' | 'workspace_id' | 'created_at'>) => executeAddPaymentMethod(data).result,
+    [executeAddPaymentMethod]
+  );
+  const handleAddPaymentMethodAsync = useCallback(
+    async (data: Omit<PaymentMethod, 'id' | 'workspace_id' | 'created_at'>) => executeAddPaymentMethod(data).done,
+    [executeAddPaymentMethod]
+  );
+  const handleUpdatePaymentMethodAsync = useCallback(
+    async (id: string, data: Partial<Pick<PaymentMethod, 'name' | 'type' | 'active'>>) => {
+      const workspaceId = stateRef.current.activeWorkspaceId;
+      return runMutationInternal(
+        () => actions.updatePaymentMethod(deps, resolveCanonicalId(id), data),
+        async (result, acknowledge) => {
+          const saved = await effectiveRepository.updatePaymentMethod(resolveCanonicalId(id), resolveCanonicalId(workspaceId), {
+            ...data, ...(data.name !== undefined ? { name: result.name } : {}),
+          });
+          const current = stateRef.current;
+          if (current.activeWorkspaceId === resolveCanonicalId(workspaceId)) {
+            commitState({ ...current, allPaymentMethods: current.allPaymentMethods.map((pm) =>
+              resolveCanonicalId(pm.id) === saved.id ? (pendingEntityIdsRef.current.get(id)! > 1 ? { ...saved, ...pm, id: saved.id } : saved) : pm) });
+          }
+          acknowledge?.({ allPaymentMethods: [saved] });
+          return saved;
+        }, workspaceId, id
+      ).done;
+    }, [deps, effectiveRepository, runMutationInternal, resolveCanonicalId, commitState]
+  );
+  const handleDeletePaymentMethodAsync = useCallback(
+    async (id: string) => runMutationInternal(
+      () => actions.deletePaymentMethod(deps, resolveCanonicalId(id)),
+      () => effectiveRepository.deletePaymentMethod(resolveCanonicalId(id)),
+      stateRef.current.activeWorkspaceId, id
+    ).done,
+    [deps, effectiveRepository, runMutationInternal, resolveCanonicalId]
   );
 
   const handleAddCategory = useCallback(
@@ -2156,6 +2197,9 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         paymentMethods,
         allWorkspacePaymentMethods,
         addPaymentMethod: handleAddPaymentMethod,
+        addPaymentMethodAsync: handleAddPaymentMethodAsync,
+        updatePaymentMethodAsync: handleUpdatePaymentMethodAsync,
+        deletePaymentMethodAsync: handleDeletePaymentMethodAsync,
 
         categories,
         allWorkspaceCategories,

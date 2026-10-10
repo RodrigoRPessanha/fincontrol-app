@@ -26,6 +26,20 @@ function createMockSupabaseClient() {
 }
 
 describe('SupabaseFinanceRepository', () => {
+  it('patches only edited method fields, scopes the workspace and exposes backend errors', async () => {
+    const { client, queryBuilder } = createMockSupabaseClient();
+    queryBuilder.single.mockResolvedValue({ data: { id: 'pm', workspace_id: 'ws', name: 'Pix', type: 'pix', active: false }, error: null });
+    const repo = new SupabaseFinanceRepository(client);
+    await repo.updatePaymentMethod('pm', 'ws', { active: false });
+    expect(queryBuilder.update).toHaveBeenLastCalledWith({ active: false });
+    expect(queryBuilder.eq).toHaveBeenCalledWith('workspace_id', 'ws');
+    await repo.updatePaymentMethod('pm', 'ws', { name: ' Pix ', type: 'pix' });
+    expect(queryBuilder.update).toHaveBeenLastCalledWith({ name: 'Pix', type: 'pix' });
+    queryBuilder.single.mockResolvedValueOnce({ data: null, error: { code: '23514', message: 'Método com histórico' } });
+    await expect(repo.updatePaymentMethod('pm', 'ws', { type: 'cash' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    queryBuilder.single.mockResolvedValueOnce({ data: null, error: { code: 'PGRST116', message: 'No deleted row' } });
+    await expect(repo.deletePaymentMethod('foreign-or-forbidden')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
   it.each(['deleted', 'absent', 'concurrent', 'denied', 'lookup-error', 'delete-error', 'confirmation-error'])('confirms recurring deletion outcome: %s', async (kind) => {
     const { client } = createMockSupabaseClient();
     const lookup = (data: unknown, error: unknown = null) => ({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data, error }) });
@@ -602,8 +616,8 @@ describe('SupabaseFinanceRepository', () => {
     await repo.savePaymentMethod({ id: 'pm-1', workspace_id: 'ws-1', name: 'Pix Atualizado', type: 'pix', active: true });
 
     (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
+      delete: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { id: 'pm-1' }, error: null }),
     });
     await expect(repo.deletePaymentMethod('pm-1')).resolves.toBeUndefined();
 
@@ -1930,7 +1944,7 @@ describe('SupabaseFinanceRepository', () => {
     (client.from as any).mockReturnValueOnce({ select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: null, error: postgrestErr }) });
     await expect(repo.getPaymentMethods('ws-1')).rejects.toThrow(RepositoryError);
 
-    (client.from as any).mockReturnValueOnce({ delete: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ error: postgrestErr }) });
+    (client.from as any).mockReturnValueOnce({ delete: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: null, error: postgrestErr }) });
     await expect(repo.deletePaymentMethod('pm-1')).rejects.toThrow(RepositoryError);
 
     (client.from as any).mockReturnValueOnce({ delete: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ error: postgrestErr }) });
