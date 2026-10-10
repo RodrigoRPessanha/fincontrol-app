@@ -163,11 +163,20 @@ financeiros no destino; impedir que cron restaurado ou e-mails de teste produzam
 efeitos externos. Registrar tempo de recuperação e resultado. O script não contém
 comando de restauração para evitar sobrescrita acidental.
 
-## Rotina diária (ainda desativada)
+## Rotina diária
 
-Após ensaio aprovado, adicionar `schedule` diário no workflow da default branch,
-fixando origem production e environment backup-production; preservar dispatch
-manual pré-migration. Habilitar notificações de falhas do Actions e documentar
+O workflow da default branch agenda produção diariamente às **06:17 UTC
+(03:17 em Brasília)**. O evento `schedule` fixa origem `production` e environment
+`backup-production`; não depende do valor padrão do dispatch manual. O environment
+permite somente `main` e precisa de `BACKUP_ENABLED=true`. O dispatch manual
+continua disponível para staging ou produção, respeitando as branches permitidas.
+O trigger temporário de push em staging foi removido.
+
+Para pausar os exports, defina `BACKUP_ENABLED=false` no environment correspondente.
+Para retomar, restaure `true`. A chave age privada não fica no Actions; conserve uma
+cópia protegida fora da máquina principal e teste a recuperação periodicamente.
+
+Habilitar notificações de falhas do Actions e documentar
 quem verifica ausência de execução: um workflow que não iniciou não gera falha.
 Schedules podem atrasar ou ser desativados por inatividade em repositórios públicos.
 Backup diário implica perda potencial de aproximadamente um dia de gravações;

@@ -1,11 +1,9 @@
 name: Encrypted Supabase Backup
 
 on:
-  # Bootstrap validation before this workflow exists on the default branch.
-  # Remove this trigger once workflow_dispatch is available from main.
-  push:
-    branches: [staging]
-    paths: ['.github/workflows/backup.yml']
+  schedule:
+    # Daily at 03:17 America/Sao_Paulo (UTC-3).
+    - cron: '17 6 * * *'
   workflow_dispatch:
     inputs:
       source:
@@ -14,14 +12,12 @@ on:
         type: choice
         options: [staging, production]
         default: staging
-  # Add a daily schedule only after a successful export AND restore rehearsal.
-  # Scheduled workflows run from the default branch, not staging.
 
 permissions:
   contents: read
 
 concurrency:
-  group: cloud-backup-${{ inputs.source || 'staging' }}
+  group: cloud-backup-${{ github.event_name == 'schedule' && 'production' || inputs.source }}
   cancel-in-progress: false
 
 jobs:
@@ -29,9 +25,12 @@ jobs:
     name: Export, encrypt and verify R2 copy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: backup-${{ inputs.source || 'staging' }}
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    environment: backup-${{ github.event_name == 'schedule' && 'production' || inputs.source }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Test backup guards (no cloud access)
         run: python3 -m unittest discover -s scripts/tests -p 'test_backup_cloud.py'
       - name: Require operator activation
@@ -49,7 +48,7 @@ jobs:
           aws --version
       - name: Export and send encrypted archive
         env:
-          BACKUP_SOURCE: ${{ inputs.source || 'staging' }}
+          BACKUP_SOURCE: ${{ github.event_name == 'schedule' && 'production' || inputs.source }}
           BACKUP_ALLOW_CRON_LOG_DELETE: ${{ vars.BACKUP_ALLOW_CRON_LOG_DELETE }}
           PGHOST: ${{ vars.BACKUP_PGHOST }}
           PGPORT: '5432'
