@@ -15,6 +15,7 @@ import {
   RecurringTransaction,
   Settlement,
   Transaction,
+  UpdateTransactionDTO,
   Transfer,
   Workspace,
   WorkspaceMember,
@@ -669,6 +670,18 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       p_transaction_id: id,
     });
     if (rpcErr) throw RepositoryError.fromPostgrestError(rpcErr, 'transactions');
+  }
+
+  async patchTransaction(id: string, workspaceId: string, changes: UpdateTransactionDTO, expectedUpdatedAt?: string): Promise<Transaction> {
+    if (!expectedUpdatedAt) throw new RepositoryError('Atualize os dados antes de editar esta transação.', 'CONFLICT');
+    const { error } = await this.client.rpc('fn_patch_transaction', {
+      p_workspace_id: workspaceId, p_transaction_id: id, p_changes: changes as unknown as Json,
+      p_expected_updated_at: expectedUpdatedAt,
+    });
+    if (error) throw RepositoryError.fromPostgrestError(error, 'transactions');
+    const saved = (await this.getTransactions(workspaceId)).find((tx) => tx.id === id);
+    if (!saved) throw new RepositoryError('Transação salva, mas indisponível para leitura. Atualize os dados antes de tentar novamente.', 'NOT_FOUND');
+    return saved;
   }
 
   // ==========================================

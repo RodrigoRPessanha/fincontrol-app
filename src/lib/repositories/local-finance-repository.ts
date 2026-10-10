@@ -13,6 +13,7 @@ import {
   RecurringTransaction,
   Settlement,
   Transaction,
+  UpdateTransactionDTO,
   Transfer,
   Workspace,
   WorkspaceMember,
@@ -27,6 +28,8 @@ import { FinanceRepository } from './finance-repository';
 import { RepositoryError } from './repository-errors';
 import { processRecurringBatchState } from '../financial-engine/recurring';
 import { paymentMethodHasReferences } from '../payment-methods';
+import { updateTransaction } from '../context/actions/transaction-actions';
+import { assertTransactionPatch, reconcileEditedDueStatus } from '../transaction-edit';
 
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();
@@ -369,6 +372,18 @@ export class LocalFinanceRepository implements FinanceRepository {
   }
 
   // Transações
+  async patchTransaction(id: string, workspaceId: string, changes: UpdateTransactionDTO, expectedUpdatedAt?: string): Promise<Transaction> {
+    let state = this.getState();
+    const existing = state.allTransactions.find((tx) => tx.id === id && tx.workspace_id === workspaceId);
+    if (!existing) throw new RepositoryError('Transação não encontrada no workspace.', 'NOT_FOUND');
+    assertTransactionPatch(existing, changes, state.allPayments);
+    if (expectedUpdatedAt && existing.updated_at !== expectedUpdatedAt) throw new RepositoryError('Esta transação foi alterada. Atualize os dados.', 'CONFLICT');
+    updateTransaction({ getState: () => ({ ...state, activeWorkspaceId: workspaceId }),
+      commit: (next) => { state = next; }, now: () => new Date(), generateId, getUserId: String }, id, changes);
+    state.allTransactions = state.allTransactions.map((tx) => tx.id === id ? reconcileEditedDueStatus(tx, changes, new Date().toISOString().slice(0, 10)) : tx);
+    this.saveState(state);
+    return state.allTransactions.find((tx) => tx.id === id)!;
+  }
   async getTransactions(workspaceId: string): Promise<Transaction[]> {
     return this.getState().allTransactions.filter((t) => t.workspace_id === workspaceId);
   }

@@ -820,6 +820,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       root.render(<SplitsPage />);
     });
 
+    await act(async () => { getReactProps(findNode(container, (node) => node.tagName === 'INPUT' && getReactProps(node)?.id === 'split-month')).onChange({ target: { value: '2026-09' } }); });
     const fallbackNodes = findNodes(container, (n) => n.textContent?.includes('Membro não identificado'));
     expect(fallbackNodes.length).toBeGreaterThan(0);
 
@@ -909,7 +910,7 @@ describe('Splits Flow UI Tests (P2-01 Auditoria Externa V36)', () => {
       );
     });
 
-    const emptyText = findNodes(container, (n) => n.textContent?.includes('Nenhuma despesa dividida'));
+    const emptyText = findNodes(container, (n) => n.textContent?.includes('Nenhuma despesa com divisão neste período'));
     expect(emptyText.length).toBeGreaterThan(0);
 
     // 2. Lista com variações de tipo (equal com 3 membros, full_other, custom, default, e compra parcelada)

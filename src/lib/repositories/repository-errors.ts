@@ -38,7 +38,7 @@ export class RepositoryError extends Error {
       code = 'NOT_FOUND';
     } else if (pgCode === '42501') {
       code = 'FORBIDDEN';
-    } else if (pgCode === '23505') {
+    } else if (pgCode === '23505' || pgCode === '40001' || pgCode === 'PT409') {
       code = 'CONFLICT';
     } else if (pgCode === '23514' || pgCode === '23502' || pgCode === '22P02') {
       code = 'VALIDATION_FAILED';

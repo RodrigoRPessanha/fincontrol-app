@@ -1627,6 +1627,15 @@ export type Database = {
         Args: { p_rule?: string; p_value: number }
         Returns: number
       }
+      fn_patch_transaction: {
+        Args: {
+          p_changes: Json
+          p_expected_updated_at: string
+          p_transaction_id: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
       fn_record_goal_deposit: {
         Args: {
           p_account_id: string
