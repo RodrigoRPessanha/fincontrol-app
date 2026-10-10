@@ -13,6 +13,7 @@ import {
   RecurringTransaction,
   Settlement,
   Transaction,
+  UpdateTransactionDTO,
   Transfer,
   Workspace,
   WorkspaceMember,
@@ -69,6 +70,7 @@ export interface FinanceRepository {
   getTransactions(workspaceId: string): Promise<Transaction[]>;
   saveTransaction(transaction: Omit<Transaction, 'id' | 'created_at'> & { id?: string }): Promise<Transaction>;
   deleteTransaction(id: string): Promise<void>;
+  patchTransaction(id: string, workspaceId: string, changes: UpdateTransactionDTO, expectedUpdatedAt?: string): Promise<Transaction>;
 
   // Compras Parceladas e Parcelas
   getPurchases(workspaceId: string): Promise<Purchase[]>;

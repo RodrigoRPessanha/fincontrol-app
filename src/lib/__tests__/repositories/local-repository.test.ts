@@ -67,6 +67,15 @@ function seedInstallment(
 }
 
 describe('LocalFinanceRepository', () => {
+  it('patches local transactions, rejects foreign or stale versions and derives overdue state', async () => {
+    const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);
+    const tx = await repo.saveTransaction({ workspace_id: 'ws-1', description: 'Original', amount: 20, type: 'expense', status: 'pending', transaction_date: '2026-10-01', due_date: '2050-01-01', updated_at: '2026-10-01T00:00:00Z' });
+    await expect(repo.patchTransaction(tx.id, 'foreign', {})).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(repo.patchTransaction(tx.id, 'ws-1', {}, 'old')).rejects.toMatchObject({ code: 'CONFLICT' });
+    const changed = await repo.patchTransaction(tx.id, 'ws-1', { description: 'New', due_date: '2000-01-01' }, tx.updated_at);
+    expect(changed).toMatchObject({ description: 'New', status: 'overdue' });
+    expect(await repo.patchTransaction(tx.id, 'ws-1', { due_date: '2050-01-01' })).toMatchObject({ status: 'pending' });
+  });
   it('updates payment methods without clearing links and preserves used methods', async () => {
     const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);
     const method = await repo.savePaymentMethod({ workspace_id: 'ws-1', name: 'Unused', type: 'pix', active: true });

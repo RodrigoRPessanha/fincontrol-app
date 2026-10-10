@@ -89,6 +89,7 @@ export interface FinanceContextType {
   transactions: Transaction[];
   addTransaction: (tx: Omit<Transaction, 'id' | 'workspace_id' | 'created_at'>) => Transaction;
   updateTransaction: (id: string, tx: UpdateTransactionDTO) => void;
+  updateTransactionAsync: (id: string, tx: UpdateTransactionDTO, expectedUpdatedAt?: string) => Promise<void>;
   addTransactionAsync: (data: Parameters<FinanceContextType['addTransaction']>[0]) => Promise<Transaction>;
   deleteTransaction: (id: string) => void;
   duplicateTransaction: (id: string) => Transaction | null;

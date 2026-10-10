@@ -2,6 +2,7 @@
 
 import { isOperationReplay } from '../repositories/operation-result';
 import { normalizeMoney } from '../financial-engine';
+import { assertTransactionPatch, reconcileEditedDueStatus } from '../transaction-edit';
 import React, { createContext, useContext, useEffect, useLayoutEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   Account,
@@ -1623,6 +1624,42 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     [deps, effectiveRepository, runMutation, resolveCanonicalId]
   );
 
+  const handleUpdateTransactionAsync = useCallback(
+    async (id: string, changes: UpdateTransactionDTO, expectedUpdatedAt?: string): Promise<void> => {
+      const workspaceId = stateRef.current.activeWorkspaceId;
+      const original = stateRef.current.allTransactions.find((tx) => resolveCanonicalId(tx.id) === resolveCanonicalId(id) && tx.workspace_id === workspaceId);
+      if (!original) throw new Error('Transação não encontrada no workspace ativo.');
+      if (expectedUpdatedAt && original.updated_at !== expectedUpdatedAt) throw new Error('Esta transação foi alterada. Atualize os dados e abra a edição novamente.');
+      assertTransactionPatch(original, changes, stateRef.current.allPayments);
+      await runMutationInternal(() => {
+        actions.updateTransaction(deps, resolveCanonicalId(id), changes);
+        const state = deps.getState();
+        const current = state.allTransactions.find((tx) => resolveCanonicalId(tx.id) === resolveCanonicalId(id))!;
+        const updated = reconcileEditedDueStatus(current, changes, deps.now().toISOString().slice(0, 10));
+        if (updated !== current) deps.commit({ ...state, allTransactions: state.allTransactions.map((tx) => tx.id === current.id ? updated : tx) });
+        return updated;
+      }, async (updated, acknowledge) => {
+        const patch: UpdateTransactionDTO = { ...changes };
+        if (changes.amount !== undefined) patch.amount = updated.amount;
+        if (changes.description !== undefined) patch.description = updated.description;
+        if (changes.category_id !== undefined) patch.category_id = resolveCanonicalId(changes.category_id);
+        if (changes.paid_by_member_id !== undefined) patch.paid_by_member_id = resolveCanonicalId(changes.paid_by_member_id);
+        if (changes.paid_by_person_id !== undefined) patch.paid_by_person_id = resolveCanonicalId(changes.paid_by_person_id);
+        if (changes.amount !== undefined || changes.split_type !== undefined || changes.paid_by_member_id !== undefined || changes.paid_by_person_id !== undefined || changes.splits !== undefined) {
+          patch.splits = (updated.splits || []).map((split) => ({ ...split, member_id: resolveCanonicalId(split.member_id), person_id: resolveCanonicalId(split.person_id) }));
+        }
+        const saved = await effectiveRepository.patchTransaction(resolveCanonicalId(id), resolveCanonicalId(workspaceId), patch, expectedUpdatedAt ?? original.updated_at);
+        boundary.assertCurrent();
+        const current = stateRef.current;
+        if (current.activeWorkspaceId === resolveCanonicalId(workspaceId)) commitState({ ...current,
+          allTransactions: current.allTransactions.map((tx) => resolveCanonicalId(tx.id) === saved.id ?
+            (pendingEntityIdsRef.current.get(id)! > 1 ? { ...saved, ...tx, id: saved.id } : saved) : tx) });
+        acknowledge?.({ allTransactions: [saved] });
+        return saved;
+      }, workspaceId, id).done;
+    }, [deps, runMutationInternal, effectiveRepository, resolveCanonicalId, commitState, boundary]
+  );
+
   const handleDeleteTransaction = useCallback(
     (id: string) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
@@ -2210,6 +2247,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         addTransaction: handleAddTransaction,
         addTransactionAsync: handleAddTransactionAsync,
         updateTransaction: handleUpdateTransaction,
+        updateTransactionAsync: handleUpdateTransactionAsync,
         deleteTransaction: handleDeleteTransaction,
         duplicateTransaction: handleDuplicateTransaction,
 
