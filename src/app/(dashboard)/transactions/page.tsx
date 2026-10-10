@@ -14,6 +14,7 @@ import {
   Clock,
   AlertCircle,
   Copy,
+  Pencil,
   Trash2,
   Plus,
   Calendar,
@@ -27,6 +28,7 @@ import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
 import { CategoryIcon } from '@/components/shared/CategoryIcon';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
+import { EditTransactionModal } from '@/components/transactions/EditTransactionModal';
 import { QuickAddModal } from '@/components/transactions/QuickAddModal';
 import { Transaction } from '@/lib/types';
 import { format } from 'date-fns';
@@ -42,6 +44,7 @@ function TransactionsContent() {
     allWorkspaceAccounts,
     allWorkspaceCreditCards,
     isWorkspaceReadOnly,
+    activeWorkspace,
     deleteTransaction,
     duplicateTransaction,
   } = useFinance();
@@ -67,6 +70,8 @@ function TransactionsContent() {
   }, [urlStatus, statusFilter]);
 
   // Modais
+  const [editId, setEditId] = useState<string | null>(null);
+  const editing = transactions.find((tx) => tx.id === editId);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<{
     type: 'transaction';
@@ -364,6 +369,7 @@ function TransactionsContent() {
                               </button>
                             )
                           )}
+                          <button onClick={() => setEditId(tx.id)} title="Editar transação" aria-label={`Editar ${tx.description}`} className="min-h-11 min-w-11 rounded-lg sm:min-h-0 sm:min-w-0 p-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><Pencil className="h-3.5 w-3.5" /></button>
                           <button
                             onClick={() => duplicateTransaction(tx.id)}
                             title="Duplicar Transação"
@@ -390,6 +396,7 @@ function TransactionsContent() {
       </div>
 
       {/* Modais */}
+      {editing && <EditTransactionModal key={`${activeWorkspace.id}:${editing.id}`} target={editing} onClose={() => setEditId(null)} />}
       <QuickAddModal isOpen={isQuickAddOpen && !isWorkspaceReadOnly} onClose={() => setIsQuickAddOpen(false)} />
 
       {!isWorkspaceReadOnly && <PaymentModal

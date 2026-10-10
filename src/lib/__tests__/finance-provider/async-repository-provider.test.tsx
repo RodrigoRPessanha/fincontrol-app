@@ -236,6 +236,7 @@ function createMockRepository(snapshot: FinanceState) {
       created_at: '2026-01-01',
     } as any)),
     deleteCategory: vi.fn().mockResolvedValue(undefined),
+    patchTransaction: vi.fn().mockImplementation(async (id, workspaceId, changes) => ({ ...snapshot.allTransactions.find((tx) => tx.id === id && tx.workspace_id === workspaceId), ...changes })),
     getTransactions: vi.fn().mockImplementation(async () => snapshot.allTransactions),
     saveTransaction: vi.fn().mockImplementation(async (data) => ({
       ...data,
@@ -329,6 +330,34 @@ function createMockRepository(snapshot: FinanceState) {
 import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 
 describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
+  it('sends an empty split list when changing an unpaid expense back to individual', async () => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    Object.assign(snapshot.allTransactions[0], { updated_at: '2026-10-01T00:00:00Z', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 40 }, { member_id: 'wsm-2', amount: 40 }] });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { await getCtx().updateTransactionAsync('tx-1', { split_type: 'individual' }); });
+    expect(repo.patchTransaction).toHaveBeenCalledWith('tx-1', 'ws-1', { split_type: 'individual', splits: [] }, '2026-10-01T00:00:00Z');
+    expect(getCtx().transactions.find((entry) => entry.id === 'tx-1')?.split_type).toBe('individual');
+  });
+  it('awaits partial transaction edits, recalculates shares and rolls back a rejected remote patch', async () => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    Object.assign(snapshot.allTransactions[0], { updated_at: '2026-10-01T00:00:00Z', paid_by_member_id: 'wsm-1', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 40 }, { member_id: 'wsm-2', amount: 40 }] });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { await getCtx().updateTransactionAsync('tx-1', { description: ' Trimmed ', amount: 100, category_id: null, paid_by_member_id: 'wsm-1', paid_by_person_id: null }, '2026-10-01T00:00:00Z'); });
+    expect(repo.patchTransaction).toHaveBeenCalledWith('tx-1', 'ws-1', expect.objectContaining({ description: 'Trimmed', amount: 100, category_id: null, splits: expect.arrayContaining([expect.objectContaining({ member_id: 'wsm-1', amount: 50 })]) }), '2026-10-01T00:00:00Z');
+    expect(repo.saveTransaction).not.toHaveBeenCalled();
+    repo.patchTransaction = vi.fn().mockRejectedValue(new Error('Concurrent edit'));
+    await act(async () => { await expect(getCtx().updateTransactionAsync('tx-1', { notes: 'Rejected' })).rejects.toThrow('Concurrent edit'); });
+    expect(getCtx().transactions.find((tx) => tx.id === 'tx-1')?.notes).not.toBe('Rejected');
+    await expect(getCtx().updateTransactionAsync('foreign', {})).rejects.toThrow(/workspace/);
+    await expect(getCtx().updateTransactionAsync('tx-1', { description: 'Stale' }, 'old-version')).rejects.toThrow(/alterada/);
+  });
+  it('derives overdue state locally without changing payment history', async () => {
+    const { getCtx } = await mountTestProvider({ initialDataMode: 'local' });
+    let tx!: any;
+    await act(async () => { tx = getCtx().addTransaction({ description: 'Local edit', amount: 10, type: 'expense', status: 'pending', transaction_date: '2026-10-01', due_date: '2050-01-01' }); });
+    await act(async () => { await getCtx().updateTransactionAsync(tx.id, { due_date: '2000-01-01' }); });
+    expect(getCtx().transactions.find((entry) => entry.id === tx.id)?.status).toBe('overdue');
+  });
   it.each([false, true])('reconciles a method edit queued behind creation (rejected=%s)', async (rejectEdit) => {
     const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
     let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });

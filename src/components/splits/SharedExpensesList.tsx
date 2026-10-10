@@ -16,6 +16,7 @@ export interface SharedExpenseItem {
   splits: TransactionSplit[];
   isPurchase: boolean;
   installmentCount: number;
+  installmentNumber?: number;
 }
 
 export interface SharedExpensesListProps {
@@ -45,15 +46,15 @@ export function SharedExpensesList({
 
       {splitItems.length === 0 ? (
         <div className="py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-          Nenhuma despesa dividida registrada ainda. Adicione despesas com divisão no botão "Novo Registro".
+          Nenhuma despesa com divisão neste período. Registre uma despesa em "Nova Transação".
         </div>
       ) : (
         <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
           {splitItems.map((item) => (
             <div key={item.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="max-w-full break-words text-sm font-bold text-slate-900 dark:text-white">
                     {item.description}
                   </span>
                   <span className="rounded-md bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700 dark:bg-teal-950/60 dark:text-teal-400">
@@ -67,7 +68,7 @@ export function SharedExpensesList({
                   </span>
                   {item.isPurchase && (
                     <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400">
-                      {item.installmentCount}x parcelado
+                      {item.installmentNumber ? `Parcela ${item.installmentNumber}/${item.installmentCount}` : `${item.installmentCount}x parcelado`}
                     </span>
                   )}
                 </div>

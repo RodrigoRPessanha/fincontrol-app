@@ -3,6 +3,8 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
+import { monthlySharedExpenses } from '@/lib/financial-engine/monthly-splits';
+import { MonthlySplitOverview } from '@/components/splits/MonthlySplitOverview';
 import { calculateMemberNetBalances } from '@/lib/financial-engine';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -28,6 +30,8 @@ export default function SplitsPage() {
     allWorkspacePeople = people,
     transactions,
     purchases,
+    installments = [],
+    creditCardBills = [],
     settlements,
     recordSettlementAsync,
     deleteSettlement,
@@ -37,6 +41,7 @@ export default function SplitsPage() {
     isWorkspaceReadOnly,
   } = useFinance();
 
+  const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const settlementPending = useRef(false);
   const [isSettling, setIsSettling] = useState(false);
   const settlementAttempt = useOperationAttempt(activeWorkspace.id, 'settlement');
@@ -68,40 +73,8 @@ export default function SplitsPage() {
     return calculateMemberNetBalances(transactions, settlements, currentMembers, activeWorkspace.id, purchases, effectivePeople);
   }, [transactions, settlements, currentMembers, activeWorkspace.id, purchases, effectivePeople]);
 
-  // Itens com rateio no workspace (Transações avulsas e Compras parceladas)
-  const splitItems = useMemo(() => {
-    const txs = transactions
-      .filter((t) => t.workspace_id === activeWorkspace.id && t.type === 'expense' && t.split_type && t.split_type !== 'individual')
-      .map((t) => ({
-        id: t.id,
-        description: t.description,
-        amount: t.amount,
-        date: t.transaction_date,
-        paid_by_member_id: t.paid_by_member_id,
-        paid_by_person_id: t.paid_by_person_id,
-        split_type: t.split_type,
-        splits: t.splits || [],
-        isPurchase: false,
-        installmentCount: 1,
-      }));
-
-    const purs = purchases
-      .filter((p) => p.workspace_id === activeWorkspace.id && p.split_type && p.split_type !== 'individual')
-      .map((p) => ({
-        id: p.id,
-        description: p.description,
-        amount: p.total_amount,
-        date: p.purchase_date,
-        paid_by_member_id: p.paid_by_member_id,
-        paid_by_person_id: p.paid_by_person_id,
-        split_type: p.split_type,
-        splits: p.splits || [],
-        isPurchase: true,
-        installmentCount: p.installment_count,
-      }));
-
-    return [...txs, ...purs].sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, purchases, activeWorkspace.id]);
+  const monthly = useMemo(() => monthlySharedExpenses(activeWorkspace.id, month, transactions, purchases, installments, creditCardBills),
+    [activeWorkspace.id, month, transactions, purchases, installments, creditCardBills]);
 
   // Acertos realizados no workspace
   const workspaceSettlements = useMemo(() => {
@@ -267,7 +240,21 @@ export default function SplitsPage() {
         </div>
       )}
 
-      {/* Seção 1: Acertos Recomendados (Dívidas Consolidadas) */}
+      <MonthlySplitOverview month={month} onMonthChange={setMonth} items={monthly.items} responsibilities={monthly.responsibilities} warnings={monthly.warnings} getName={getParticipantName} />
+      <SharedExpensesList splitItems={monthly.items} currentMembers={currentMembers} getMemberName={getParticipantName} />
+
+      {/* Seção 4: Gerenciamento de Pessoas Cadastradas (Rateio por Nome) */}
+      <PeopleManager
+        people={effectivePeople}
+        onAddPerson={addPerson}
+        onUpdatePerson={updatePerson}
+        onDeletePerson={deletePerson}
+        readOnly={isWorkspaceReadOnly}
+      />
+
+      <details className="space-y-4 rounded-3xl border border-slate-200 p-4 dark:border-slate-800">
+        <summary className="cursor-pointer text-sm font-bold">Acertos e saldo acumulado — todos os meses</summary>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Inclui o valor total das compras, inclusive parcelas futuras, e todos os acertos registrados. O filtro mensal não altera esta dívida.</p>
       <SplitSummary
         pairwiseDebts={pairwiseDebts}
         getMemberName={getParticipantName}
@@ -283,22 +270,6 @@ export default function SplitsPage() {
         participantsCount={totalParticipantsCount}
       />
 
-      {/* Seção 3: Histórico de Despesas Rateadas */}
-      <SharedExpensesList
-        splitItems={splitItems}
-        currentMembers={currentMembers}
-        getMemberName={getParticipantName}
-      />
-
-      {/* Seção 4: Gerenciamento de Pessoas Cadastradas (Rateio por Nome) */}
-      <PeopleManager
-        people={effectivePeople}
-        onAddPerson={addPerson}
-        onUpdatePerson={updatePerson}
-        onDeletePerson={deletePerson}
-        readOnly={isWorkspaceReadOnly}
-      />
-
       {/* Seção 5: Histórico de Acertos / Liquidações Realizadas */}
       <SettlementHistory
         workspaceSettlements={workspaceSettlements}
@@ -310,6 +281,8 @@ export default function SplitsPage() {
           }
         }}
       />
+
+      </details>
 
       {/* Modal de Registro de Acerto de Contas */}
       {!isWorkspaceReadOnly && <SettlementModal

@@ -26,6 +26,20 @@ function createMockSupabaseClient() {
 }
 
 describe('SupabaseFinanceRepository', () => {
+  it('patches with a version, reads complete relations and reports conflicts without stale overwrites', async () => {
+    const { client } = createMockSupabaseClient(); const repo = new SupabaseFinanceRepository(client);
+    const loaded = vi.spyOn(repo, 'getTransactions').mockResolvedValue([{ id: 't', workspace_id: 'w', description: 'New', splits: [{ person_id: 'p', amount: 10 }] } as any]);
+    await expect(repo.patchTransaction('t', 'w', { description: 'New' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const saved = await repo.patchTransaction('t', 'w', { description: 'New' }, '2026-10-01T00:00:00Z');
+    expect(client.rpc).toHaveBeenCalledExactlyOnceWith('fn_patch_transaction', { p_workspace_id: 'w', p_transaction_id: 't', p_changes: { description: 'New' }, p_expected_updated_at: '2026-10-01T00:00:00Z' });
+    expect(saved.splits).toHaveLength(1); expect(loaded).toHaveBeenCalledWith('w');
+    for (const code of ['40001', 'PT409']) {
+      (client.rpc as any).mockResolvedValueOnce({ error: { code, message: 'Concurrent edit' } });
+      await expect(repo.patchTransaction('t', 'w', { description: 'Old' }, 'old')).rejects.toMatchObject({ code: 'CONFLICT' });
+    }
+    loaded.mockResolvedValueOnce([]);
+    await expect(repo.patchTransaction('t', 'w', { description: 'New' }, 'v')).rejects.toThrow(/indisponível/);
+  });
   it('patches only edited method fields, scopes the workspace and exposes backend errors', async () => {
     const { client, queryBuilder } = createMockSupabaseClient();
     queryBuilder.single.mockResolvedValue({ data: { id: 'pm', workspace_id: 'ws', name: 'Pix', type: 'pix', active: false }, error: null });

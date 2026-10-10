@@ -8,3 +8,4 @@ export * from './recurring';
 export * from './dashboard';
 export * from './splits';
 export * from './reports';
+export * from './monthly-splits';

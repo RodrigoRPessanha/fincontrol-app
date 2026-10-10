@@ -1498,4 +1498,23 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     await repo.deleteTransaction(expense.id);
     await repo.deleteCategory(cat.id);
   });
+  it('edits a transaction through the partial RPC and returns a clear HTTP conflict for a stale version', async () => {
+    const method = await repo.savePaymentMethod({ workspace_id: testWorkspaceId, name: 'Patch HTTP QA', type: 'pix', active: true });
+    let id = '';
+    try {
+      const tx = await repo.saveTransaction({ workspace_id: testWorkspaceId, description: 'Patch HTTP original', amount: 10,
+        type: 'expense', status: 'pending', transaction_date: fixtureDates.today, due_date: fixtureDates.future, payment_method_id: method.id });
+      id = tx.id;
+      const saved = await repo.patchTransaction(id, testWorkspaceId, { description: 'Patch HTTP saved' }, tx.updated_at);
+      expect(saved.description).toBe('Patch HTTP saved');
+      expect(saved.payment_method_id).toBe(method.id);
+      await expect(repo.patchTransaction(id, testWorkspaceId, { description: 'Stale write' }, tx.updated_at))
+        .rejects.toMatchObject({ code: 'CONFLICT', originalError: { code: 'PT409' } });
+      expect((await repo.getTransactions(testWorkspaceId)).find((row) => row.id === id)?.description).toBe('Patch HTTP saved');
+    } finally {
+      if (id) await repo.deleteTransaction(id);
+      await repo.deletePaymentMethod(method.id);
+    }
+  });
+
 });
