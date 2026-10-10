@@ -26,6 +26,7 @@ import {
 import { FinanceRepository } from './finance-repository';
 import { RepositoryError } from './repository-errors';
 import { processRecurringBatchState } from '../financial-engine/recurring';
+import { paymentMethodHasReferences } from '../payment-methods';
 
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();
@@ -228,6 +229,11 @@ export class LocalFinanceRepository implements FinanceRepository {
     if (method.id) {
       const index = state.allPaymentMethods.findIndex((m) => m.id === method.id);
       if (index !== -1) {
+        const existing = state.allPaymentMethods[index];
+        if (method.workspace_id !== existing.workspace_id) throw new RepositoryError('Workspace inválido.', 'VALIDATION_FAILED');
+        if (method.type !== existing.type && (paymentMethodHasReferences(state, existing.id) || existing.credit_card_id || existing.linked_account_id)) {
+          throw new RepositoryError('O tipo não pode mudar enquanto houver vínculos.', 'VALIDATION_FAILED');
+        }
         const updated: PaymentMethod = {
           ...state.allPaymentMethods[index],
           ...method,
@@ -254,12 +260,20 @@ export class LocalFinanceRepository implements FinanceRepository {
 
   async deletePaymentMethod(id: string): Promise<void> {
     const state = this.getState();
+    if (paymentMethodHasReferences(state, id)) throw new RepositoryError('Método com histórico não pode ser excluído. Desative-o.', 'VALIDATION_FAILED');
     const exists = state.allPaymentMethods.some((m) => m.id === id);
     if (!exists) {
       throw new RepositoryError(`Forma de pagamento com id ${id} não encontrada`, 'NOT_FOUND', undefined, 'payment_methods');
     }
     state.allPaymentMethods = state.allPaymentMethods.filter((m) => m.id !== id);
     this.saveState(state);
+  }
+
+  async updatePaymentMethod(id: string, workspaceId: string, changes: Partial<Pick<PaymentMethod, 'name' | 'type' | 'active'>>): Promise<PaymentMethod> {
+    const existing = this.getState().allPaymentMethods.find((method) => method.id === id && method.workspace_id === workspaceId);
+    if (!existing) throw new RepositoryError('Método não encontrado no workspace.', 'NOT_FOUND');
+    return this.savePaymentMethod({ ...existing, name: changes.name?.trim() ?? existing.name,
+      type: changes.type ?? existing.type, active: changes.active ?? existing.active });
   }
 
   // Cartões de Crédito e Faturas

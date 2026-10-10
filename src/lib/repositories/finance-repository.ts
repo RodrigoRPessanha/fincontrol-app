@@ -52,6 +52,7 @@ export interface FinanceRepository {
   getPaymentMethods(workspaceId: string): Promise<PaymentMethod[]>;
   savePaymentMethod(method: Omit<PaymentMethod, 'id' | 'created_at'> & { id?: string }): Promise<PaymentMethod>;
   deletePaymentMethod(id: string): Promise<void>;
+  updatePaymentMethod(id: string, workspaceId: string, changes: Partial<Pick<PaymentMethod, 'name' | 'type' | 'active'>>): Promise<PaymentMethod>;
 
   // Cartões de Crédito e Faturas
   getCreditCards(workspaceId: string): Promise<CreditCard[]>;

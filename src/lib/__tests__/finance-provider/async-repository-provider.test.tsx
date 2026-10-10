@@ -212,6 +212,9 @@ function createMockRepository(snapshot: FinanceState) {
     } as any)),
     deleteAccount: vi.fn().mockResolvedValue(undefined),
     getPaymentMethods: vi.fn().mockImplementation(async () => snapshot.allPaymentMethods),
+    updatePaymentMethod: vi.fn().mockImplementation(async (id, workspaceId, changes) => ({
+      ...snapshot.allPaymentMethods.find((method) => method.id === id && method.workspace_id === workspaceId), ...changes,
+    })),
     savePaymentMethod: vi.fn().mockImplementation(async (data) => ({
       ...data,
       id: data.id || 'pm-remote-created',
@@ -326,6 +329,48 @@ function createMockRepository(snapshot: FinanceState) {
 import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 
 describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
+  it.each([false, true])('reconciles a method edit queued behind creation (rejected=%s)', async (rejectEdit) => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
+    let persisted: any;
+    repo.savePaymentMethod = vi.fn().mockImplementation(async (data) => {
+      await gate; persisted = { ...data, id: 'canonical-method', created_at: '2026-01-01' }; return persisted;
+    });
+    repo.updatePaymentMethod = vi.fn().mockImplementation(async (id, workspaceId, changes) => {
+      if (rejectEdit) throw new Error('Edit rejected');
+      persisted = { ...persisted, ...changes, id, workspace_id: workspaceId }; return persisted;
+    });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    let edited!: Promise<unknown>;
+    await act(async () => {
+      const method = getCtx().addPaymentMethod({ name: 'Original', type: 'pix', active: true });
+      edited = getCtx().updatePaymentMethodAsync(method.id, { name: 'Changed', active: false });
+      edited.catch(() => {});
+    });
+    if (rejectEdit) repo.loadSnapshot = vi.fn().mockRejectedValue(new Error('Refresh offline'));
+    await act(async () => { release(); await edited.catch(() => {}); });
+    expect(repo.updatePaymentMethod).toHaveBeenCalledWith('canonical-method', 'ws-1', { name: 'Changed', active: false });
+    expect(getCtx().allWorkspacePaymentMethods.find((pm) => pm.id === 'canonical-method')).toMatchObject({
+      name: rejectEdit ? 'Original' : 'Changed', active: rejectEdit,
+    });
+  });
+  it('awaits payment method management, preserves links and rolls back rejected deletion', async () => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      await getCtx().addPaymentMethodAsync({ name: 'Cash', type: 'cash', active: true });
+    });
+    expect(getCtx().paymentMethods.some((pm) => pm.id === 'pm-remote-created')).toBe(true);
+    await act(async () => { await getCtx().updatePaymentMethodAsync('pm-1', { name: ' Pix novo ', active: false }); });
+    expect(repo.updatePaymentMethod).toHaveBeenLastCalledWith('pm-1', 'ws-1', { name: 'Pix novo', active: false });
+    expect(getCtx().paymentMethods.some((pm) => pm.id === 'pm-1')).toBe(false);
+    expect(getCtx().allWorkspacePaymentMethods.find((pm) => pm.id === 'pm-1')?.name).toBe('Pix novo');
+    repo.deletePaymentMethod = vi.fn().mockRejectedValueOnce(new Error('Remote history conflict')).mockResolvedValue(undefined);
+    await act(async () => { await expect(getCtx().deletePaymentMethodAsync('pm-1')).rejects.toThrow('Remote history conflict'); });
+    expect(getCtx().allWorkspacePaymentMethods.some((pm) => pm.id === 'pm-1')).toBe(true);
+    await act(async () => { await getCtx().deletePaymentMethodAsync('pm-1'); });
+    expect(getCtx().allWorkspacePaymentMethods.some((pm) => pm.id === 'pm-1')).toBe(false);
+  });
   setupFinanceHarness();
   const activeRoots: any[] = [];
   it('preserves a transaction edit queued behind creation instead of replacing it with the old reply', async () => {
