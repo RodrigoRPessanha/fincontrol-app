@@ -14,6 +14,8 @@ export default defineConfig({
       include: [
         'src/lib/financial-engine/**/*.ts',
         'src/lib/utils.ts',
+        'src/lib/workspace-maintenance.ts',
+        'src/components/workspaces/WorkspaceMaintenancePanel.tsx',
         'src/lib/context/finance-context.tsx',
         'src/lib/context/finance-storage.ts',
         'src/lib/context/actions/**/*.ts',

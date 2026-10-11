@@ -1498,6 +1498,47 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     await repo.deleteTransaction(expense.id);
     await repo.deleteCategory(cat.id);
   });
+  it('clears and deletes an owned workspace atomically with catalogs preserved, retry receipts and stale-preview protection', {timeout:60000}, async()=>{
+    const beforeIds=(await repo.getWorkspaces(testUserId)).map(w=>w.id).sort();
+    const ws=await repo.createWorkspace({name:'QA Workspace maintenance',owner_id:testUserId,currency:'BRL',tracking_mode:'full'});
+    let removed=false;
+    try {
+      const member=(await repo.getWorkspaceMembers(ws.id)).find(m=>m.user_id===testUserId)!;
+      const source=await repo.saveAccount({workspace_id:ws.id,name:'Source',type:'checking',institution:'QA',initial_balance:1000,current_balance:1000,color:'#000000',active:true});
+      const target=await repo.saveAccount({workspace_id:ws.id,name:'Target',type:'checking',institution:'QA',initial_balance:100,current_balance:100,color:'#000000',active:true});
+      const category=await repo.saveCategory({workspace_id:ws.id,name:'Category',type:'expense',icon:'tag',color:'#000000',active:true});
+      const method=await repo.savePaymentMethod({workspace_id:ws.id,name:'Pix',type:'pix',active:true,linked_account_id:source.id});
+      const card=await repo.saveCreditCard({workspace_id:ws.id,name:'Card',institution:'QA',credit_limit:5000,closing_day:20,due_day:10,color:'#000000',active:true});
+      const person=await repo.savePerson({workspace_id:ws.id,name:'Person'});
+      const purchaseData={workspace_id:ws.id,description:'600/3 with history',total_amount:600,installment_count:3,purchase_date:'2050-01-10',credit_card_id:card.id,paid_installments_count:1,paid_by_member_id:member.id,split_type:'equal' as const,splits:[{member_id:member.id,amount:300},{person_id:person.id,amount:300,repaid_installments_count:1}],operation_key:crypto.randomUUID()};
+      await repo.savePurchase(purchaseData);
+      await repo.saveTransaction({workspace_id:ws.id,description:'Paid expense',amount:100,type:'expense',status:'paid',transaction_date:fixtureDates.today,due_date:fixtureDates.today,account_id:source.id,payment_method_id:method.id,category_id:category.id});
+      await repo.saveTransfer({workspace_id:ws.id,from_account_id:source.id,to_account_id:target.id,amount:50,transfer_date:fixtureDates.today,created_by:testUserId});
+      const goal=await repo.saveGoal({workspace_id:ws.id,name:'Goal',target_amount:300,current_amount:0,icon:'flag',color:'#000000',status:'in_progress'});
+      await repo.recordGoalDeposit!(ws.id,goal.id,source.id,25,crypto.randomUUID());
+      await repo.saveBudget({workspace_id:ws.id,category_id:category.id,month:1,year:2050,planned_amount:100});
+      await repo.saveRecurring({workspace_id:ws.id,description:'Future recurring',amount:10,type:'expense',frequency:'monthly',start_date:'2050-01-01',next_occurrence:'2050-02-01',active:false,auto_create:false,account_id:source.id,category_id:category.id,payment_method_id:method.id});
+      await repo.saveSettlement({workspace_id:ws.id,from_person_id:person.id,to_member_id:member.id,amount:5,settlement_date:fixtureDates.today});
+      const preview=await repo.getWorkspaceMaintenancePreview(ws.id);
+      expect(preview).toMatchObject({can_delete:true,counts:{transactions:1,purchases:1,installments:3,payments:1,transfers:1,settlements:1,recurring:1,budgets:1,goals:1,goal_deposits:1},retained:{accounts:2,cards:1,methods:1,categories:1,people:1,members:1}});
+      const request={action:'clear' as const,confirmation_name:preview.name,expected_fingerprint:preview.fingerprint,operation_key:crypto.randomUUID()};
+      const results=await Promise.all([repo.maintainWorkspace(ws.id,request),repo.maintainWorkspace(ws.id,request)]);
+      expect(results.map(r=>r.replayed).sort()).toEqual([false,true]);
+      const after=await repo.loadSnapshot(ws.id);
+      for(const key of ['allTransactions','allPurchases','allInstallments','allPayments','allTransfers','allRecurring','allBudgets','allGoals','allSettlements','allCreditCardBills'] as const) expect(after[key]).toHaveLength(0);
+      expect(after.allAccounts.find(a=>a.id===source.id)?.current_balance).toBe(1000);expect(after.allAccounts.find(a=>a.id===target.id)?.current_balance).toBe(100);
+      expect(after.allCreditCards.map(c=>c.id)).toEqual([card.id]);expect(after.allPeople.map(p=>p.id)).toEqual([person.id]);
+      await expect(repo.savePurchase(purchaseData)).rejects.toThrow(/reutilizada|diferentes/);
+      const stale=await repo.getWorkspaceMaintenancePreview(ws.id);
+      await repo.saveTransaction({workspace_id:ws.id,description:'New after clear',amount:1,type:'expense',status:'pending',account_id:source.id,transaction_date:fixtureDates.today,due_date:fixtureDates.future});
+      expect(await repo.maintainWorkspace(ws.id,request)).toEqual({replayed:true});expect(await repo.getTransactions(ws.id)).toHaveLength(1);
+      await expect(repo.maintainWorkspace(ws.id,{...request,operation_key:crypto.randomUUID(),expected_fingerprint:stale.fingerprint})).rejects.toMatchObject({code:'CONFLICT'});
+      const final=await repo.getWorkspaceMaintenancePreview(ws.id);const deletion={action:'delete' as const,confirmation_name:final.name,expected_fingerprint:final.fingerprint,operation_key:crypto.randomUUID()};
+      expect(await repo.maintainWorkspace(ws.id,deletion)).toEqual({replayed:false});removed=true;
+      expect(await repo.maintainWorkspace(ws.id,deletion)).toEqual({replayed:true});
+      expect((await repo.getWorkspaces(testUserId)).map(w=>w.id).sort()).toEqual(beforeIds);
+    } finally {if(!removed) await repo.deleteWorkspace(ws.id);}
+  });
   it('atomically marks repayments through a month without touching future shares or financial payments', async () => {
     const ws = await repo.createWorkspace({ name: 'QA Monthly repayments', owner_id: testUserId, currency: 'BRL', tracking_mode: 'expense_tracker' });
     try {

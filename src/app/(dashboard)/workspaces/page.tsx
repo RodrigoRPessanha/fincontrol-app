@@ -16,6 +16,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { WorkspaceRole } from '@/lib/types';
+import { WorkspaceMaintenancePanel } from '@/components/workspaces/WorkspaceMaintenancePanel';
 import { ContextualHelp } from '@/components/help/ContextualHelp';
 
 export default function WorkspacesPage() {
@@ -245,6 +246,8 @@ export default function WorkspacesPage() {
       </div>
 
       {/* Modal Convidar Membro */}
+      <WorkspaceMaintenancePanel />
+
       {isInviteOpen && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">

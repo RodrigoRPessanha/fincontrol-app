@@ -47,6 +47,10 @@ export interface FinanceContextType {
   isLoaded: boolean;
   isLoading: boolean;
   isSaving: boolean;
+  isWorkspaceOwner: boolean;
+  isMaintainingWorkspace: boolean;
+  previewWorkspaceMaintenanceAsync: (id: string) => Promise<import('../workspace-maintenance').WorkspaceMaintenancePreview>;
+  maintainWorkspaceAsync: (id: string, request: import('../workspace-maintenance').WorkspaceMaintenanceRequest) => Promise<void>;
   isWorkspaceReadOnly: boolean;
   error: Error | null;
   clearError: () => void;

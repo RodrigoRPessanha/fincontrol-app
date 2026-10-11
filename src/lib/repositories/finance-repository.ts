@@ -1,3 +1,4 @@
+import { WorkspaceMaintenancePreview, WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult } from '../workspace-maintenance';
 import { MonthlyRepaymentChange } from '../monthly-repayments';
 import {
   Account,
@@ -37,6 +38,8 @@ export interface FinanceRepository {
   createWorkspace(workspace: Omit<Workspace, 'id' | 'created_at'>): Promise<Workspace>;
   updateWorkspace(id: string, updates: Partial<Workspace>): Promise<Workspace>;
   deleteWorkspace(id: string): Promise<void>;
+  getWorkspaceMaintenancePreview(id: string): Promise<WorkspaceMaintenancePreview>;
+  maintainWorkspace(id: string, request: WorkspaceMaintenanceRequest): Promise<WorkspaceMaintenanceResult>;
   getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]>;
   addWorkspaceMember(member: Omit<WorkspaceMember, 'id' | 'created_at'>): Promise<WorkspaceMember>;
   updateWorkspaceMemberRole(id: string, role: WorkspaceRole): Promise<WorkspaceMember>;

@@ -1,3 +1,4 @@
+import { WorkspaceMaintenancePreview, WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, localWorkspaceMaintenancePreview, validateWorkspaceMaintenance, applyWorkspaceMaintenance } from '../workspace-maintenance';
 import { MonthlyRepaymentChange, applyMonthlyRepayments } from '../monthly-repayments';
 import { PurchaseDateChange, reschedulePurchaseState } from '../financial-engine/purchase-dates';
 import { PurchaseRepaymentCount, withPurchaseRepayments } from '../purchase-repayments';
@@ -67,6 +68,7 @@ function generateId(): string {
  */
 export class LocalFinanceRepository implements FinanceRepository {
   private readonly storage: Storage;
+  private readonly maintenanceReceipts = new Map<string, string>();
 
   constructor(storage?: Storage) {
     if (storage) {
@@ -109,6 +111,7 @@ export class LocalFinanceRepository implements FinanceRepository {
       created_at: new Date().toISOString(),
     };
     state.allWorkspaces = [...state.allWorkspaces, newWs];
+    state.allWorkspaceMembers = [...state.allWorkspaceMembers, {id:generateId(),workspace_id:newWs.id,user_id:newWs.owner_id,role:'owner',created_at:newWs.created_at}];
     this.saveState(state);
     return newWs;
   }
@@ -129,14 +132,29 @@ export class LocalFinanceRepository implements FinanceRepository {
     return updated;
   }
 
-  async deleteWorkspace(id: string): Promise<void> {
-    const state = this.getState();
-    const exists = state.allWorkspaces.some((w) => w.id === id);
-    if (!exists) {
-      throw new RepositoryError(`Workspace com id ${id} não encontrado`, 'NOT_FOUND', undefined, 'workspaces');
+  async getWorkspaceMaintenancePreview(id: string): Promise<WorkspaceMaintenancePreview> {
+    try { return localWorkspaceMaintenancePreview(this.getState(),id); }
+    catch (cause) { throw new RepositoryError(cause instanceof Error ? cause.message : 'Workspace não encontrado.','NOT_FOUND'); }
+  }
+
+  async maintainWorkspace(id: string, request: WorkspaceMaintenanceRequest): Promise<WorkspaceMaintenanceResult> {
+    const signature = JSON.stringify([id,request.action,request.confirmation_name,request.expected_fingerprint,request.operation_key]);
+    const previous = this.maintenanceReceipts.get(request.operation_key);
+    if (previous) {
+      if (previous !== signature) throw new RepositoryError('Tentativa reutilizada com dados diferentes.','VALIDATION_FAILED');
+      return {replayed:true,snapshot:this.getState()};
     }
-    state.allWorkspaces = state.allWorkspaces.filter((w) => w.id !== id);
-    this.saveState(state);
+    const state = this.getState();
+    validateWorkspaceMaintenance(localWorkspaceMaintenancePreview(state,id),request);
+    const next = applyWorkspaceMaintenance(state,id,request.action);
+    this.saveState(next);
+    this.maintenanceReceipts.set(request.operation_key,signature);
+    return {replayed:false,snapshot:next};
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    const preview = await this.getWorkspaceMaintenancePreview(id);
+    await this.maintainWorkspace(id,{action:'delete',confirmation_name:preview.name,expected_fingerprint:preview.fingerprint,operation_key:generateId()});
   }
 
   async getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
