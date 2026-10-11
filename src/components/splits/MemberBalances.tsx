@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { MemberNetBalance } from '@/lib/financial-engine';
-import { WorkspaceMember } from '@/lib/types';
+import { Purchase, WorkspaceMember } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
 import { Users } from 'lucide-react';
 
@@ -11,6 +11,7 @@ export interface MemberBalancesProps {
   currentMembers: WorkspaceMember[];
   getMemberName: (id?: string | null) => string;
   participantsCount?: number;
+  purchases?: Purchase[];
 }
 
 export function MemberBalances({
@@ -18,6 +19,7 @@ export function MemberBalances({
   currentMembers,
   getMemberName,
   participantsCount,
+  purchases = [],
 }: MemberBalancesProps) {
   const count = participantsCount !== undefined ? participantsCount : currentMembers.length;
 
@@ -35,6 +37,7 @@ export function MemberBalances({
         </span>
       </div>
 
+      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">As despesas atribuídas incluem valores pendentes e parcelas futuras; não são o total quitado na conta ou fatura. Repasses e acertos abaixo explicam o saldo entre participantes.</p>
       <div
         className={`mt-4 grid gap-4 ${
           count === 1
@@ -87,7 +90,7 @@ export function MemberBalances({
 
               <div className="mt-3 space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
                 <div className="flex justify-between">
-                  <span>Total pago nos registros:</span>
+                  <span>Despesas atribuídas:</span>
                   <span className="font-semibold text-slate-900 dark:text-white">
                     {formatCurrency(b.total_paid)}
                   </span>
@@ -100,6 +103,19 @@ export function MemberBalances({
                 </div>
               </div>
 
+              <dl className="mt-3 space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                <div className="flex flex-wrap justify-between gap-2"><dt>Repasses enviados:</dt><dd className="font-semibold">{formatCurrency(b.repayments_sent || 0)}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2"><dt>Repasses recebidos:</dt><dd className="font-semibold">{formatCurrency(b.repayments_received || 0)}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2"><dt>Acertos enviados:</dt><dd className="font-semibold">{formatCurrency(b.settlements_sent || 0)}</dd></div>
+                <div className="flex flex-wrap justify-between gap-2"><dt>Acertos recebidos:</dt><dd className="font-semibold">{formatCurrency(b.settlements_received || 0)}</dd></div>
+              </dl>
+              <ul className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                {purchases.flatMap((purchase) => (purchase.splits || []).filter((share) => {
+                  const id = share.person_id || share.member_id;
+                  const payer = purchase.paid_by_person_id || purchase.paid_by_member_id;
+                  return (share.repaid_installments_count || 0) > 0 && id !== payer && (id === participantId || payer === participantId);
+                }).map((share) => <li key={`${purchase.id}:${share.person_id || share.member_id}`} className="break-words">{purchase.description}: {share.repaid_installments_count} de {purchase.installment_count} parcelas repassadas • {formatCurrency(share.repaid_amount || 0)}</li>))}
+              </ul>
               <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   Saldo Líquido:

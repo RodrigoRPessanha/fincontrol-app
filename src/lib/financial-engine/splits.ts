@@ -18,6 +18,10 @@ export interface MemberNetBalance {
   person_id?: string | null;
   total_paid: number;
   total_share: number;
+  repayments_sent?: number;
+  repayments_received?: number;
+  settlements_sent?: number;
+  settlements_received?: number;
   net_balance: number; // > 0: a receber (credor); < 0: a pagar (devedor)
 }
 
@@ -267,6 +271,8 @@ export function calculateMemberNetBalances(
   const shareMap = new Map<string, number>();
   const settledOutMap = new Map<string, number>();
   const settledInMap = new Map<string, number>();
+  const repaymentOutMap = new Map<string, number>();
+  const repaymentInMap = new Map<string, number>();
 
   participantsMap.forEach((_, id) => {
     paidMap.set(id, 0);
@@ -311,6 +317,8 @@ export function calculateMemberNetBalances(
         shareMap.set(splitId, (shareMap.get(splitId) || 0) + splitCents);
         if (splitId !== payerId) {
           const repaid = toCents(split.repaid_amount || 0);
+          repaymentOutMap.set(splitId, (repaymentOutMap.get(splitId) || 0) + repaid);
+          repaymentInMap.set(payerId, (repaymentInMap.get(payerId) || 0) + repaid);
           settledOutMap.set(splitId, (settledOutMap.get(splitId) || 0) + repaid);
           settledInMap.set(payerId, (settledInMap.get(payerId) || 0) + repaid);
         }
@@ -345,6 +353,10 @@ export function calculateMemberNetBalances(
       person_id: p.type === 'person' ? p.id : null,
       total_paid: fromCents(paid),
       total_share: fromCents(share),
+      repayments_sent: fromCents(repaymentOutMap.get(p.id) || 0),
+      repayments_received: fromCents(repaymentInMap.get(p.id) || 0),
+      settlements_sent: fromCents(settledOut - (repaymentOutMap.get(p.id) || 0)),
+      settlements_received: fromCents(settledIn - (repaymentInMap.get(p.id) || 0)),
       net_balance: fromCents(netCents),
     };
   });

@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
+import { expenseListRows } from '@/lib/expense-list';
 import { ContextualHelp } from '@/components/help/ContextualHelp';
 
-import React, { useState, useMemo, useEffect, Suspense } from 'react';
+import React, { useState, useMemo, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -39,6 +41,8 @@ function TransactionsContent() {
   const {
     isLoaded,
     transactions,
+    purchases = [],
+    installments = [],
     allWorkspaceCategories,
     allWorkspacePaymentMethods,
     allWorkspaceAccounts,
@@ -52,6 +56,7 @@ function TransactionsContent() {
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const urlStatus = searchParams.get('status');
+  const previousUrlStatus = useRef(urlStatus);
   const [statusFilter, setStatusFilter] = useState<string>(urlStatus || 'all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -60,14 +65,11 @@ function TransactionsContent() {
 
   // Sincronização reativa caso searchParams mude mantendo a página montada (reseta para 'all' se query for removida)
   useEffect(() => {
-    const targetStatus = urlStatus || 'all';
-    if (targetStatus !== statusFilter) {
-      const timer = setTimeout(() => {
-        setStatusFilter(targetStatus);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [urlStatus, statusFilter]);
+    if (previousUrlStatus.current === urlStatus) return;
+    previousUrlStatus.current = urlStatus;
+    const timer = setTimeout(() => setStatusFilter(urlStatus || 'all'), 0);
+    return () => clearTimeout(timer);
+  }, [urlStatus]);
 
   // Modais
   const [editId, setEditId] = useState<string | null>(null);
@@ -82,9 +84,11 @@ function TransactionsContent() {
     dueDate?: string;
   } | null>(null);
 
+  const listRows = useMemo(() => expenseListRows(activeWorkspace.id, transactions, purchases, installments), [activeWorkspace.id, transactions, purchases, installments]);
+
   // Filtragem dos dados
   const filteredTransactions = useMemo(() => {
-    return transactions.filter((tx) => {
+    return listRows.filter((tx) => {
       // Texto
       if (searchTerm && !tx.description.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false;
@@ -97,7 +101,7 @@ function TransactionsContent() {
       if (statusFilter !== 'all') {
         const todayStr = format(new Date(), 'yyyy-MM-dd');
         if (statusFilter === 'overdue') {
-          if (tx.status === 'paid' || tx.due_date >= todayStr) return false;
+          if (tx.status === 'paid' || tx.status === 'cancelled' || tx.due_date >= todayStr) return false;
         } else if (tx.status !== statusFilter) {
           return false;
         }
@@ -111,12 +115,12 @@ function TransactionsContent() {
         return false;
       }
       // Mês de Competência
-      if (monthFilter && !tx.transaction_date.startsWith(monthFilter)) {
+      if (monthFilter && !tx.period_date.startsWith(monthFilter)) {
         return false;
       }
       return true;
     });
-  }, [transactions, searchTerm, typeFilter, statusFilter, categoryFilter, paymentMethodFilter, monthFilter]);
+  }, [listRows, searchTerm, typeFilter, statusFilter, categoryFilter, paymentMethodFilter, monthFilter]);
 
   // Totais da listagem filtrada
   const totalIncomeCents = filteredTransactions
@@ -154,7 +158,7 @@ function TransactionsContent() {
             Transações & Movimentações
           </h2>
           <p className="text-xs text-slate-500">
-            Gerencie todas as despesas, receitas e contas a pagar.
+            Consulte receitas, despesas avulsas e as parcelas de cada período.
           </p>
         </div>
 
@@ -182,9 +186,11 @@ function TransactionsContent() {
             />
           </div>
 
-          {/* Mês de Competência */}
+          {/* Período de consulta */}
           <div>
+            <label htmlFor="transaction-list-month" className="mb-1 block text-xs font-semibold text-slate-500">Período {monthFilter ? '' : '— todos os meses'}</label>
             <input
+              id="transaction-list-month"
               type="month"
               value={monthFilter}
               onChange={(e) => setMonthFilter(e.target.value)}
@@ -192,6 +198,10 @@ function TransactionsContent() {
             />
           </div>
 
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setMonthFilter('')} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs dark:border-slate-700">Todos os meses</button>
+            <button type="button" onClick={() => setMonthFilter(format(new Date(), 'yyyy-MM'))} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs dark:border-slate-700">Mês atual</button>
+          </div>
           {/* Tipo */}
           <div>
             <select
@@ -221,6 +231,7 @@ function TransactionsContent() {
           </div>
         </div>
 
+        <p className="text-xs text-slate-500 dark:text-slate-400">Avulsas entram pela competência; parcelas, pelo vencimento. Cada parcela é listada uma vez, sem somar novamente o total da compra.</p>
         {/* Resumo da Filtragem */}
         <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold">
           <span className="text-slate-400">
@@ -259,7 +270,8 @@ function TransactionsContent() {
               {filteredTransactions.length === 0 ? (
                 <tr>
                   <td colSpan={isWorkspaceReadOnly ? 6 : 7} className="py-12 text-center text-slate-400">
-                    Nenhuma transação encontrada com os filtros selecionados.
+                    Nenhum registro encontrado neste período com os filtros selecionados.
+                    {monthFilter && <div className="mt-2"><button type="button" onClick={() => { setMonthFilter(''); setSearchTerm(''); setStatusFilter('all'); setTypeFilter('all'); setCategoryFilter('all'); setPaymentMethodFilter('all'); }} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs dark:border-slate-700">Limpar filtros e ver todos os registros</button></div>}
                   </td>
                 </tr>
               ) : (
@@ -271,7 +283,7 @@ function TransactionsContent() {
 
                   return (
                     <tr
-                      key={tx.id}
+                      key={`${tx.record_kind}:${tx.id}`}
                       className="transition hover:bg-slate-50/80 dark:hover:bg-slate-800/50"
                     >
                       {/* Descrição e Categoria */}
@@ -290,6 +302,7 @@ function TransactionsContent() {
                             <span className="font-bold text-slate-900 dark:text-white">
                               {tx.description}
                             </span>
+                            {tx.record_kind === 'installment' && <div className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">Parcela {tx.installment_number}/{tx.installment_count} • <Link href="/installments" aria-label={`Ver parcelas de ${tx.description}`} className="underline">Ver compra</Link></div>}
                             <div className="text-[11px] text-slate-400">
                               {cat?.displayName || 'Sem categoria'}
                               {tx.notes && <span> • {tx.notes}</span>}
@@ -312,7 +325,7 @@ function TransactionsContent() {
 
                       {/* Método de Pagamento / Conta */}
                       <td className="px-3 py-4 text-slate-500">
-                        <div>{pm?.name || 'Não especificado'}</div>
+                        <div>{allWorkspaceCreditCards.find((card) => card.id === tx.credit_card_id)?.name || pm?.name || 'Não especificado'}</div>
                         {acc && <div className="text-[10px] text-slate-400">{acc.name}</div>}
                       </td>
 
@@ -343,6 +356,7 @@ function TransactionsContent() {
                       {/* Ações */}
                       {!isWorkspaceReadOnly && <td className="py-4 pl-3 pr-6 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {tx.record_kind === 'transaction' && <>
                           {!isPaid && (
                             tx.credit_card_bill_id || tx.credit_card_id ? (
                               <span
@@ -384,6 +398,8 @@ function TransactionsContent() {
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
+                          </>}
+                          {tx.record_kind === 'installment' && <Link href="/installments" className="inline-flex min-h-11 items-center rounded-xl border border-indigo-200 px-3 text-xs font-semibold text-indigo-600 dark:border-indigo-800 dark:text-indigo-400">Ver parcelas</Link>}
                         </div>
                       </td>}
                     </tr>

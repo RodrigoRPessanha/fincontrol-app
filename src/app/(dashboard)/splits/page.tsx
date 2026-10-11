@@ -268,6 +268,7 @@ export default function SplitsPage() {
 
       {/* Seção 2: Balanço Consolidado por Participante */}
       <MemberBalances
+        purchases={purchases}
         balances={balances}
         currentMembers={currentMembers}
         getMemberName={getParticipantName}
