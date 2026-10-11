@@ -189,6 +189,8 @@ function createMockRepository(snapshot: FinanceState) {
       Object.assign(workspace, data);
       return structuredClone(workspace);
     }),
+    getWorkspaceMaintenancePreview: vi.fn(),
+    maintainWorkspace: vi.fn().mockResolvedValue({replayed:false}),
     deleteWorkspace: vi.fn().mockResolvedValue(undefined),
     getWorkspaceMembers: vi.fn().mockImplementation(async () => snapshot.allWorkspaceMembers),
     addWorkspaceMember: vi.fn().mockImplementation(async (data) => ({
@@ -3566,6 +3568,94 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     expect(ws2.owner_id).toBe('usr-1');
   });
 
+  it('denies maintenance while signed out without calling the repository',async()=>{
+    const repo=createMockRepository(createMockSnapshot());const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase'},{user:null});expect(getCtx().isWorkspaceOwner).toBe(false);
+    await expect(getCtx().previewWorkspaceMaintenanceAsync('')).rejects.toThrow(/proprietário/);
+    await expect(getCtx().maintainWorkspaceAsync('',{action:'delete',confirmation_name:'',expected_fingerprint:'hash',operation_key:'key'})).rejects.toThrow(/proprietário/);expect(repo.maintainWorkspace).not.toHaveBeenCalled();
+  });
+  it('does not overwrite another workspace updated in local storage after opening a maintenance preview',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const {saveFinanceSnapshot,loadFinanceSnapshot}=await import('../../context/finance-storage');const state=workspaceMaintenanceFixture();saveFinanceSnapshot(localStorage,state);
+    const repo=new LocalFinanceRepository(localStorage);const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'local'},{user:null,dataMode:'local'});const preview=await getCtx().previewWorkspaceMaintenanceAsync('w');
+    saveFinanceSnapshot(localStorage,{...state,allTransactions:state.allTransactions.map(t=>t.workspace_id==='foreign'?{...t,amount:99}:t)});
+    await act(async()=>{await getCtx().maintainWorkspaceAsync('w',{action:'clear',confirmation_name:preview.name,expected_fingerprint:preview.fingerprint,operation_key:'local-clear'});});
+    const saved=loadFinanceSnapshot(localStorage).snapshot;expect(saved.allPurchases).toHaveLength(0);expect(saved.allTransactions.find(t=>t.id==='foreign-tx')?.amount).toBe(99);
+  });
+  it('supports local owner maintenance without authentication and preserves new records on a replayed clear',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const {localWorkspaceMaintenancePreview}=await import('../../workspace-maintenance');const {saveFinanceSnapshot}=await import('../../context/finance-storage');const state=workspaceMaintenanceFixture();saveFinanceSnapshot(localStorage,state);
+    const repo=new LocalFinanceRepository(localStorage);const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'local'},{user:null,dataMode:'local'});
+    expect(getCtx().isWorkspaceOwner).toBe(true);const preview=await getCtx().previewWorkspaceMaintenanceAsync('w');expect(preview).toEqual(localWorkspaceMaintenancePreview(state,'w'));
+    const request={action:'clear' as const,confirmation_name:preview.name,expected_fingerprint:preview.fingerprint,operation_key:'local-clear'};
+    await act(async()=>{await getCtx().maintainWorkspaceAsync('w',request);});expect(getCtx().purchases).toHaveLength(0);expect(getCtx().accounts[0].current_balance).toBe(1000);
+    await act(async()=>{getCtx().addTransaction({description:'New after clear',amount:1,type:'expense',status:'pending',transaction_date:'2050-01-01',due_date:'2050-01-01',account_id:'account'});});
+    vi.spyOn(repo,'loadSnapshot').mockRejectedValueOnce(new Error('Offline'));
+    await act(async()=>{await expect(getCtx().maintainWorkspaceAsync('w',request)).rejects.toThrow(/Operação concluída/);});expect(getCtx().transactions).toHaveLength(1);
+  });
+  it('previews and clears a workspace only after remote confirmation, blocking new writes and workspace switches',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');
+    const {applyWorkspaceMaintenance,localWorkspaceMaintenancePreview}=await import('../../workspace-maintenance');
+    const state=workspaceMaintenanceFixture();const repo=createMockRepository(state);const canonical=applyWorkspaceMaintenance(state,'w','clear');
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase',initialWorkspaceId:'w'});
+    const preview=localWorkspaceMaintenancePreview(state,'w');repo.getWorkspaceMaintenancePreview=vi.fn().mockResolvedValue(preview);
+    expect(getCtx().isWorkspaceOwner).toBe(true);expect(await getCtx().previewWorkspaceMaintenanceAsync('w')).toEqual(preview);
+    let release!:(v:any)=>void;repo.maintainWorkspace=vi.fn().mockImplementation(()=>new Promise(r=>{release=r;}));repo.loadSnapshot=vi.fn().mockResolvedValue(canonical);
+    const request={action:'clear' as const,confirmation_name:preview.name,expected_fingerprint:preview.fingerprint,operation_key:'clear'};
+    let pending!:Promise<void>;await act(async()=>{pending=getCtx().maintainWorkspaceAsync('w',request);});
+    expect(getCtx().isMaintainingWorkspace).toBe(true);expect(getCtx().purchases).toHaveLength(1);getCtx().processPendingRecurring();expect(repo.materializeRecurring).not.toHaveBeenCalled();
+    expect(()=>getCtx().updateAccount('account',{name:'Blocked'})).toThrow(/Aguarde/);
+    await expect(getCtx().setActiveWorkspaceId('other')).rejects.toThrow(/Aguarde/);
+    await expect(getCtx().previewWorkspaceMaintenanceAsync('w')).rejects.toThrow(/Aguarde/);
+    await expect(getCtx().maintainWorkspaceAsync('w',request)).rejects.toThrow(/andamento/);
+    await act(async()=>{await getCtx().refreshData();});expect(repo.loadSnapshot).not.toHaveBeenCalled();
+    await act(async()=>{release({replayed:false});await pending;});
+    expect(getCtx().purchases).toHaveLength(0);expect(getCtx().accounts[0].current_balance).toBe(1000);expect(getCtx().creditCards).toHaveLength(1);expect(getCtx().isMaintainingWorkspace).toBe(false);
+  });
+  it('keeps data on rejection and never resurrects deleted records when hydration fails after commit',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const state=workspaceMaintenanceFixture();const repo=createMockRepository(state);
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase',initialWorkspaceId:'w'});
+    const request={action:'clear' as const,confirmation_name:'Meu Workspace',expected_fingerprint:'hash',operation_key:'clear'};
+    repo.maintainWorkspace=vi.fn().mockRejectedValue(new Error('Remote failure'));
+    await act(async()=>{await expect(getCtx().maintainWorkspaceAsync('w',request)).rejects.toThrow('Remote failure');});expect(getCtx().purchases).toHaveLength(1);
+    repo.maintainWorkspace=vi.fn().mockRejectedValue('Offline');await act(async()=>{await expect(getCtx().maintainWorkspaceAsync('w',request)).rejects.toThrow('Não foi possível concluir');});expect(getCtx().purchases).toHaveLength(1);
+    repo.maintainWorkspace=vi.fn().mockResolvedValue({replayed:false});repo.loadSnapshot=vi.fn().mockRejectedValue(new Error('Offline'));
+    await act(async()=>{await expect(getCtx().maintainWorkspaceAsync('w',request)).rejects.toThrow(/Operação concluída/);});expect(getCtx().purchases).toHaveLength(0);expect(getCtx().accounts[0].current_balance).toBe(1000);
+    await expect(getCtx().maintainWorkspaceAsync('foreign',request)).rejects.toThrow(/workspace ativo/);
+    await expect(getCtx().previewWorkspaceMaintenanceAsync('foreign')).rejects.toThrow(/Selecione/);
+  });
+  it.each(['admin','member','viewer'] as const)('does not expose owner maintenance to %s',async role=>{
+    const state=createMockSnapshot();state.allWorkspaceMembers=state.allWorkspaceMembers.map(m=>({...m,role}));const repo=createMockRepository(state);
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase'});expect(getCtx().isWorkspaceOwner).toBe(false);
+    await expect(getCtx().previewWorkspaceMaintenanceAsync('ws-1')).rejects.toThrow(/proprietário/);
+    await expect(getCtx().maintainWorkspaceAsync('ws-1',{action:'delete',confirmation_name:'Name',expected_fingerprint:'hash',operation_key:'key'})).rejects.toThrow(/proprietário/);expect(repo.maintainWorkspace).not.toHaveBeenCalled();
+  });
+  it('purges a deleted workspace and all cached children before switching to another owned workspace',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const {applyWorkspaceMaintenance}=await import('../../workspace-maintenance');const state=workspaceMaintenanceFixture();const repo=createMockRepository(state);
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase',initialWorkspaceId:'w'});repo.maintainWorkspace=vi.fn().mockResolvedValue({replayed:true});repo.loadSnapshot=vi.fn().mockResolvedValue(applyWorkspaceMaintenance(state,'w','delete'));
+    await act(async()=>{await getCtx().maintainWorkspaceAsync('w',{action:'delete',confirmation_name:'Meu Workspace',expected_fingerprint:'hash',operation_key:'delete'});});
+    expect(getCtx().workspaces.some(w=>w.id==='w')).toBe(false);expect(getCtx().activeWorkspace.id).toBe('other');expect(getCtx().installments).toHaveLength(0);expect(repo.loadSnapshot).toHaveBeenCalledWith('other');
+  });
+  it('rejects an outdated preview request if the user switches workspaces while queued writes finish',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const state=workspaceMaintenanceFixture();const repo=createMockRepository(state);const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase',initialWorkspaceId:'w'});
+    let enter!:()=>void,release!:(v:any)=>void;const entered=new Promise<void>(r=>{enter=r;});repo.saveAccount=vi.fn().mockImplementation(()=>{enter();return new Promise(r=>{release=r;});});await act(async()=>{getCtx().updateAccount('account',{name:'Queued'});await entered;});
+    const preview=getCtx().previewWorkspaceMaintenanceAsync('w');preview.catch(()=>{});await act(async()=>{await getCtx().setActiveWorkspaceId('other');});
+    await act(async()=>{release({...state.allAccounts[0],name:'Queued'});await expect(preview).rejects.toThrow(/workspace ativo mudou/);});expect(repo.getWorkspaceMaintenancePreview).not.toHaveBeenCalled();
+  });
+  it('finishes an already queued account save before wiping finances and preserves its catalog edit',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const {applyWorkspaceMaintenance}=await import('../../workspace-maintenance');const state=workspaceMaintenanceFixture();const repo=createMockRepository(state);
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase',initialWorkspaceId:'w'});
+    let enter!:()=>void,release!:(value:any)=>void;const entered=new Promise<void>(r=>{enter=r;});repo.saveAccount=vi.fn().mockImplementation(()=>{enter();return new Promise(r=>{release=r;});});
+    await act(async()=>{getCtx().updateAccount('account',{name:'Saved before clear'});await entered;});
+    const canonical=applyWorkspaceMaintenance({...state,allAccounts:state.allAccounts.map(a=>a.id==='account'?{...a,name:'Saved before clear'}:a)},'w','clear');repo.loadSnapshot=vi.fn().mockResolvedValue(canonical);
+    let pending!:Promise<void>;await act(async()=>{pending=getCtx().maintainWorkspaceAsync('w',{action:'clear',confirmation_name:'Meu Workspace',expected_fingerprint:'hash',operation_key:'clear'});await Promise.resolve();});expect(repo.maintainWorkspace).not.toHaveBeenCalled();
+    await act(async()=>{release({...state.allAccounts[0],name:'Saved before clear'});await pending;});
+    expect(repo.maintainWorkspace).toHaveBeenCalledOnce();expect(getCtx().accounts[0]).toMatchObject({name:'Saved before clear',current_balance:1000});
+  });
+  it('waits for queued writes before maintenance and prevents an older refresh from restoring cleared data',async()=>{
+    const {workspaceMaintenanceFixture}=await import('../test-utils/workspace-maintenance-fixture');const {applyWorkspaceMaintenance}=await import('../../workspace-maintenance');const state=workspaceMaintenanceFixture();const repo=createMockRepository(state);
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase',initialWorkspaceId:'w'});
+    let releaseRefresh!:(v:any)=>void;const old=new Promise<any>(r=>{releaseRefresh=r;});repo.loadSnapshot=vi.fn().mockReturnValueOnce(old).mockResolvedValue(applyWorkspaceMaintenance(state,'w','clear'));
+    let refreshing!:Promise<void>,maintaining!:Promise<void>;await act(async()=>{const ctx=getCtx();refreshing=ctx.refreshData();maintaining=ctx.maintainWorkspaceAsync('w',{action:'clear',confirmation_name:'Meu Workspace',expected_fingerprint:'hash',operation_key:'clear'});await maintaining;});
+    await act(async()=>{releaseRefresh(state);await refreshing;});expect(getCtx().purchases).toHaveLength(0);
+  });
   it('awaits a monthly repayment batch, loads canonical counts, and rolls back a rejected batch', async () => {
     const { purchaseDateFixture } = await import('../test-utils/purchase-date-fixture');
     const { monthlyRepaymentPlan, applyMonthlyRepayments } = await import('../../monthly-repayments');

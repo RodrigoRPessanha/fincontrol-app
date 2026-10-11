@@ -1,5 +1,7 @@
 'use client';
 
+import { assertWorkspaceOwner, applyWorkspaceMaintenance, WorkspaceMaintenanceRequest } from '../workspace-maintenance';
+
 import { MonthlyRepaymentChange, applyMonthlyRepayments } from '../monthly-repayments';
 
 import { PurchaseDateChange } from '../financial-engine/purchase-dates';
@@ -400,6 +402,9 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(dataMode === 'supabase');
   const [isSaving, setIsSaving] = useState(false);
+  const [isMaintainingWorkspace, setIsMaintainingWorkspace] = useState(false);
+  const maintenancePendingRef = useRef(false);
+  const maintenanceEpochRef = useRef(0);
   const [error, setError] = useState<Error | null>(null);
   const savingCountRef = useRef(0);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -482,8 +487,8 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     };
   });
 
-  const commitState = useCallback((next: FinanceState) => {
-    if (dataMode === 'local' && localReadyRef.current && canPersistRef.current) {
+  const commitState = useCallback((next: FinanceState, persistLocal = true) => {
+    if (persistLocal && dataMode === 'local' && localReadyRef.current && canPersistRef.current) {
       try { saveFinanceSnapshot(localStorage, next); }
       catch (err) { setError(err instanceof Error ? err : new Error(String(err))); throw err; }
     }
@@ -636,12 +641,15 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
   }, [resolveCanonicalId]);
 
   const refreshData = useCallback(async () => {
+    if (maintenancePendingRef.current) return;
+    const maintenanceEpoch = maintenanceEpochRef.current;
     setIsLoading(true);
     setError(null);
     try {
       if (dataMode === 'supabase') {
         const targetId = stateRef.current.activeWorkspaceId;
         const snapshot = await effectiveRepository.loadSnapshot(targetId);
+        if (maintenanceEpochRef.current !== maintenanceEpoch || maintenancePendingRef.current) return;
         const reconciled = mergeSnapshotWithPendingState(snapshot, stateRef.current, pendingEntityIdsRef.current);
         if (snapshot.allWorkspaceMembers.some((m) => m.workspace_id === targetId && m.user_id === auth?.user?.id)) {
           unresolvedWorkspacesRef.current.delete(targetId);
@@ -698,6 +706,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
       targetWorkspaceId?: string | ((result: T) => string),
       entityId?: string
     ): { result: T; done: Promise<T> } => {
+      if (maintenancePendingRef.current) throw new Error('Aguarde a manutenção do workspace terminar antes de salvar.');
       if (dataMode === 'supabase') boundary.assertCurrent();
       if (dataMode === 'supabase' && !currentUserId) {
         throw new Error('Operação não permitida: usuário não autenticado no modo Supabase.');
@@ -1034,6 +1043,51 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     isLoading || !auth?.user?.id || currentWorkspaceRole === null || currentWorkspaceRole === 'viewer'
   );
 
+  const isWorkspaceOwner = isLoaded && !isLoading && activeWorkspace.owner_id === (dataMode === 'local' ? currentUserId || 'usr-1' : currentUserId) && workspaceMembers.some(m => m.user_id === activeWorkspace.owner_id && m.role === 'owner');
+
+  const handlePreviewWorkspaceMaintenanceAsync = useCallback(async (id: string) => {
+    if (maintenancePendingRef.current) throw new Error('Aguarde a manutenção do workspace terminar.');
+    if (id !== stateRef.current.activeWorkspaceId || !isLoaded || isLoading) throw new Error('Selecione o workspace antes de continuar.');
+    assertWorkspaceOwner(stateRef.current,id,dataMode === 'local' ? currentUserId || 'usr-1' : currentUserId || '');
+    await mutationQueueRef.current;
+    boundary.assertCurrent();
+    const workspaceId = resolveCanonicalId(id);
+    if (workspaceId !== stateRef.current.activeWorkspaceId) throw new Error('O workspace ativo mudou. Abra uma nova prévia.');
+    assertWorkspaceOwner(stateRef.current,workspaceId,dataMode === 'local' ? currentUserId || 'usr-1' : currentUserId || '');
+    return effectiveRepository.getWorkspaceMaintenancePreview(workspaceId);
+  }, [isLoaded, isLoading, dataMode, currentUserId, boundary, effectiveRepository, resolveCanonicalId]);
+
+  const handleMaintainWorkspaceAsync = useCallback(async (id: string, request: WorkspaceMaintenanceRequest) => {
+    if (maintenancePendingRef.current) throw new Error('Uma manutenção já está em andamento.');
+    if (id !== stateRef.current.activeWorkspaceId || !isLoaded || isLoading) throw new Error('O workspace ativo mudou. Abra uma nova prévia.');
+    assertWorkspaceOwner(stateRef.current,id,dataMode === 'local' ? currentUserId || 'usr-1' : currentUserId || '');
+    maintenancePendingRef.current = true; maintenanceEpochRef.current += 1;
+    setIsMaintainingWorkspace(true); savingCountRef.current += 1; setIsSaving(true);
+    let committed = false;
+    try {
+      await mutationQueueRef.current;
+      boundary.assertCurrent();
+      const workspaceId = resolveCanonicalId(id);
+      if (workspaceId !== stateRef.current.activeWorkspaceId) throw new Error('O workspace ativo mudou. Abra uma nova prévia.');
+      assertWorkspaceOwner(stateRef.current,workspaceId,dataMode === 'local' ? currentUserId || 'usr-1' : currentUserId || '');
+      const result = await effectiveRepository.maintainWorkspace(workspaceId,request);
+      committed = true;
+      boundary.assertCurrent();
+      if (dataMode === 'local' && result.snapshot) commitState(result.snapshot,false);
+      else if (!result.replayed || request.action === 'delete') commitState(applyWorkspaceMaintenance(stateRef.current,workspaceId,request.action),dataMode !== 'local');
+      const target = stateRef.current.activeWorkspaceId;
+      const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(target));
+      boundary.assertCurrent();
+      if (stateRef.current.activeWorkspaceId === target) commitState(fresh,dataMode !== 'local');
+    } catch (cause) {
+      const message = committed ? 'Operação concluída, mas não foi possível atualizar a tela. Recarregue os dados.' : cause instanceof Error ? cause.message : 'Não foi possível concluir a operação.';
+      const error = new Error(message); setError(error); throw error;
+    } finally {
+      maintenancePendingRef.current = false; maintenanceEpochRef.current += 1; setIsMaintainingWorkspace(false);
+      savingCountRef.current = Math.max(0,savingCountRef.current-1); if (!savingCountRef.current) setIsSaving(false);
+    }
+  }, [isLoaded,isLoading,dataMode,currentUserId,boundary,effectiveRepository,resolveCanonicalId,commitState]);
+
   const settlements = useMemo(
     () => allSettlements.filter((s) => s.workspace_id === activeWorkspace.id),
     [allSettlements, activeWorkspace.id]
@@ -1051,7 +1105,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
 
   // Executa processamento de recorrências
   const processPendingRecurring = useCallback(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || maintenancePendingRef.current) return;
     if (dataMode === 'supabase') {
       effectiveRepository
         .materializeRecurring(stateRef.current.activeWorkspaceId)
@@ -1078,6 +1132,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
   // Handlers que delegam para os módulos de domínio com mutação otimista
   const handleSetActiveWorkspaceId = useCallback(
     async (id: string) => {
+      if (maintenancePendingRef.current) throw new Error('Aguarde a manutenção do workspace terminar.');
       const seq = ++workspaceSwitchSeqRef.current;
       if (dataMode === 'supabase') {
         const workspaceId = resolveCanonicalId(id);
@@ -2273,6 +2328,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         isLoaded,
         isLoading,
         isSaving,
+        isWorkspaceOwner,
+        isMaintainingWorkspace,
+        previewWorkspaceMaintenanceAsync: handlePreviewWorkspaceMaintenanceAsync,
+        maintainWorkspaceAsync: handleMaintainWorkspaceAsync,
         isWorkspaceReadOnly,
         error,
         clearError,

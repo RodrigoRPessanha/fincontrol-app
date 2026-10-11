@@ -1407,6 +1407,36 @@ export type Database = {
           },
         ]
       }
+      workspace_maintenance_operations: {
+        Row: {
+          action: string
+          completed_at: string
+          confirmation_name: string
+          expected_fingerprint: string
+          operation_key: string
+          owner_id: string
+          workspace_id: string
+        }
+        Insert: {
+          action: string
+          completed_at?: string
+          confirmation_name: string
+          expected_fingerprint: string
+          operation_key: string
+          owner_id: string
+          workspace_id: string
+        }
+        Update: {
+          action?: string
+          completed_at?: string
+          confirmation_name?: string
+          expected_fingerprint?: string
+          operation_key?: string
+          owner_id?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       workspace_members: {
         Row: {
           created_at: string
@@ -1652,6 +1682,16 @@ export type Database = {
         }
         Returns: string
       }
+      fn_maintain_workspace: {
+        Args: {
+          p_action: string
+          p_confirmation_name: string
+          p_expected_fingerprint: string
+          p_operation_key: string
+          p_workspace_id: string
+        }
+        Returns: Json
+      }
       fn_mark_monthly_repayments: {
         Args: {
           p_expected: Json
@@ -1685,6 +1725,10 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: string
+      }
+      fn_preview_workspace_maintenance: {
+        Args: { p_workspace_id: string }
+        Returns: Json
       }
       fn_purchase_date_schedule: {
         Args: { p_purchase_date: string; p_purchase_id: string }
@@ -1841,6 +1885,10 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: string
+      }
+      fn_workspace_maintenance_snapshot: {
+        Args: { p_workspace_id: string }
+        Returns: Json
       }
       has_workspace_role: {
         Args: { p_roles: string[]; p_workspace_id: string }

@@ -1,3 +1,4 @@
+import { WorkspaceMaintenancePreview, WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult } from '../workspace-maintenance';
 import { MonthlyRepaymentChange } from '../monthly-repayments';
 import { PurchaseDateChange } from '../financial-engine/purchase-dates';
 import { PurchaseRepaymentCount } from '../purchase-repayments';
@@ -256,9 +257,29 @@ export class SupabaseFinanceRepository implements FinanceRepository {
     return mapWorkspaceRowToDomain(data);
   }
 
+  async getWorkspaceMaintenancePreview(id: string): Promise<WorkspaceMaintenancePreview> {
+    const {data,error} = await this.client.rpc('fn_preview_workspace_maintenance',{p_workspace_id:id});
+    if (error) throw RepositoryError.fromPostgrestError(error,'workspaces');
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new RepositoryError('Prévia do workspace indisponível.','DATABASE_ERROR');
+    const preview = data as unknown as WorkspaceMaintenancePreview;
+    if (preview.workspace_id !== id || typeof preview.name !== 'string' || typeof preview.fingerprint !== 'string' || !preview.counts || !preview.retained) throw new RepositoryError('Prévia do workspace inválida.','DATABASE_ERROR');
+    const countKeys = ['transactions','purchases','installments','payments','transfers','settlements','bills','recurring','budgets','goals','goal_deposits'];
+    const retainedKeys = ['accounts','cards','methods','categories','people','members'];
+    if (typeof preview.can_delete !== 'boolean' || !Number.isFinite(preview.initial_balance_total) || !countKeys.every(key => Number.isInteger(preview.counts[key]) && preview.counts[key] >= 0) || !retainedKeys.every(key => Number.isInteger(preview.retained[key]) && preview.retained[key] >= 0)) throw new RepositoryError('Contagens da prévia inválidas. Atualize os dados antes de continuar.','DATABASE_ERROR');
+    return preview;
+  }
+
+  async maintainWorkspace(id: string, request: WorkspaceMaintenanceRequest): Promise<WorkspaceMaintenanceResult> {
+    const {data,error} = await this.client.rpc('fn_maintain_workspace',{p_workspace_id:id,p_action:request.action,p_confirmation_name:request.confirmation_name,p_expected_fingerprint:request.expected_fingerprint,p_operation_key:request.operation_key});
+    if (error) throw RepositoryError.fromPostgrestError(error,'workspaces');
+    const result = data as unknown as WorkspaceMaintenanceResult | null;
+    if (!result || typeof result.replayed !== 'boolean') throw new RepositoryError('Resposta de manutenção indisponível. Atualize os dados antes de tentar novamente.','DATABASE_ERROR');
+    return {replayed:result.replayed};
+  }
+
   async deleteWorkspace(id: string): Promise<void> {
-    const { error } = await this.client.from('workspaces').delete().eq('id', id);
-    if (error) throw RepositoryError.fromPostgrestError(error, 'workspaces');
+    const preview = await this.getWorkspaceMaintenancePreview(id);
+    await this.maintainWorkspace(id,{action:'delete',confirmation_name:preview.name,expected_fingerprint:preview.fingerprint,operation_key:crypto.randomUUID()});
   }
 
   async getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
