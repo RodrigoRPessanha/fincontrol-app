@@ -123,4 +123,3 @@ BEGIN
     RETURN TRUE;
 END;
 $$;
-
