@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { resolveCategory, toCents, fromCents } from '@/lib/financial-engine';
+import { EditPurchaseDateModal } from '@/components/installments/EditPurchaseDateModal';
 import { InstallmentDetailModal } from '@/components/installments/InstallmentDetailModal';
 import { PaymentModal } from '@/components/transactions/PaymentModal';
 import { Installment, Purchase } from '@/lib/types';
@@ -25,6 +26,8 @@ export default function InstallmentsPage() {
   const { purchases, installments, allWorkspaceCreditCards, allWorkspaceCategories, isWorkspaceReadOnly } = useFinance();
 
   const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [datePurchaseId, setDatePurchaseId] = useState<string | null>(null);
+  const datePurchase = purchases.find((p) => p.id === datePurchaseId);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<{
     type: 'installment';
@@ -182,6 +185,7 @@ export default function InstallmentsPage() {
                 </div>
               </div>
 
+              {!isWorkspaceReadOnly && <button type="button" aria-label={`Corrigir data de ${purchase.description}`} onClick={(event) => { event.stopPropagation(); setDatePurchaseId(purchase.id); }} className="mt-3 min-h-11 rounded-xl border border-indigo-200 px-3 text-xs font-semibold text-indigo-600 dark:border-indigo-800 dark:text-indigo-400">Corrigir data da compra</button>}
               <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-center text-xs font-bold text-indigo-600 hover:underline">
                 Visualizar Todas as Parcelas →
               </div>
@@ -191,11 +195,13 @@ export default function InstallmentsPage() {
       </div>
 
       {/* Modais */}
+      {datePurchase && <EditPurchaseDateModal key={`${datePurchase.workspace_id}:${datePurchase.id}`} purchase={datePurchase} onClose={() => setDatePurchaseId(null)} />}
       <InstallmentDetailModal
         isOpen={!!selectedPurchase}
         onClose={() => setSelectedPurchase(null)}
         purchase={selectedPurchase}
         isReadOnly={isWorkspaceReadOnly}
+        onEditDate={() => { if (selectedPurchase) { setDatePurchaseId(selectedPurchase.id); setSelectedPurchase(null); } }}
         onPayInstallment={(inst, pur) => {
           setPaymentTarget({
             type: 'installment',

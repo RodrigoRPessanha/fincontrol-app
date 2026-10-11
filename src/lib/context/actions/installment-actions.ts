@@ -1,3 +1,4 @@
+import { PurchaseDateChange, reschedulePurchaseState } from '../../financial-engine/purchase-dates';
 import { withPurchaseRepayments } from '../../purchase-repayments';
 import { findOperationReceipt } from './operation-receipts';
 import {
@@ -123,16 +124,17 @@ export function createInstallmentPurchase(
       );
     }
 
+    const dueDate = billId ? deps.getState().allCreditCardBills.find(b => b.id === billId)!.due_date : s.dueDate;
     return {
       id: deps.generateId('inst'),
       purchase_id: newPurchase.id,
       installment_number: s.installmentNumber,
       amount: s.amount,
-      due_date: s.dueDate,
+      due_date: dueDate,
       credit_card_bill_id: billId,
       status: s.isPaid ? 'paid' : 'pending',
       paid_amount: s.isPaid ? s.amount : 0,
-      paid_at: s.isPaid ? s.dueDate : null,
+      paid_at: s.isPaid ? dueDate : null,
       created_at: deps.now().toISOString(),
     };
   });
@@ -174,4 +176,10 @@ export function createInstallmentPurchase(
   });
 
   return newPurchase;
+}
+
+export function reschedulePurchaseDate(deps: FinanceActionDeps, id: string, change: PurchaseDateChange): Purchase {
+  const state = reschedulePurchaseState(deps.getState(), id, change, () => deps.generateId('bill'), deps.now().toISOString());
+  deps.commit(state);
+  return state.allPurchases.find((p) => p.id === id)!;
 }

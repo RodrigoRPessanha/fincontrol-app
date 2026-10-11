@@ -214,6 +214,7 @@ describe('Card & Bill Mappers', () => {
       institution: 'Nubank',
       last_four_digits: '1234',
       credit_limit: 5000,
+      closing_days_before_due: null,
       closing_day: 10,
       due_day: 17,
       linked_payment_account_id: 'acc-1',

@@ -12,6 +12,7 @@ interface InstallmentDetailModalProps {
   isOpen: boolean;
   isReadOnly?: boolean;
   onClose: () => void;
+  onEditDate?: () => void;
   purchase: Purchase | null;
   onPayInstallment: (inst: Installment, purchase: Purchase) => void;
 }
@@ -20,6 +21,7 @@ export function InstallmentDetailModal({
   isOpen,
   isReadOnly = false,
   onClose,
+  onEditDate,
   purchase,
   onPayInstallment,
 }: InstallmentDetailModalProps) {
@@ -164,7 +166,8 @@ export function InstallmentDetailModal({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-800 mt-2">
+        <div className="flex flex-wrap justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800 mt-2">
+          {!readOnly && onEditDate && <button type="button" onClick={onEditDate} className="min-h-11 rounded-xl border border-indigo-200 px-4 text-sm text-indigo-600 dark:border-indigo-800 dark:text-indigo-400">Corrigir data da compra</button>}
           <button
             type="button"
             onClick={onClose}

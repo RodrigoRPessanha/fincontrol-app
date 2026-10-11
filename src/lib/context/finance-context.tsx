@@ -1,5 +1,8 @@
 'use client';
 
+import { MonthlyRepaymentChange, applyMonthlyRepayments } from '../monthly-repayments';
+
+import { PurchaseDateChange } from '../financial-engine/purchase-dates';
 import { PurchaseRepaymentCount, withPurchaseRepayments } from '../purchase-repayments';
 import { isOperationReplay } from '../repositories/operation-result';
 import { normalizeMoney } from '../financial-engine';
@@ -1319,10 +1322,10 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     [deps, effectiveRepository, runMutation, resolveCanonicalId]
   );
 
-  const handleAddCreditCard = useCallback(
+  const executeAddCreditCard = useCallback(
     (cardData: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      return runMutation(
+      return runMutationInternal(
         () => actions.addCreditCard(deps, cardData),
         async (res) => {
           const saved = await effectiveRepository.saveCreditCard({
@@ -1341,13 +1344,13 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         targetWorkspaceId
       );
     },
-    [deps, effectiveRepository, runMutation, commitState, registerCanonicalId, resolveCanonicalId]
+    [deps, effectiveRepository, runMutationInternal, commitState, registerCanonicalId, resolveCanonicalId]
   );
 
-  const handleUpdateCreditCard = useCallback(
+  const executeUpdateCreditCard = useCallback(
     (id: string, data: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
-      return runMutation(
+      return runMutationInternal(
         () => actions.updateCreditCard(deps, resolveCanonicalId(id), data),
         async () => {
           const saved = await effectiveRepository.saveCreditCard({
@@ -1367,8 +1370,13 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         id
       );
     },
-    [deps, effectiveRepository, runMutation, resolveCanonicalId, commitState]
+    [deps, effectiveRepository, runMutationInternal, resolveCanonicalId, commitState]
   );
+
+  const handleAddCreditCard = useCallback((...args: Parameters<typeof executeAddCreditCard>) => executeAddCreditCard(...args).result, [executeAddCreditCard]);
+  const handleUpdateCreditCard = useCallback((...args: Parameters<typeof executeUpdateCreditCard>) => { executeUpdateCreditCard(...args); }, [executeUpdateCreditCard]);
+  const handleAddCreditCardAsync = useCallback(async (...args: Parameters<typeof executeAddCreditCard>) => executeAddCreditCard(...args).done, [executeAddCreditCard]);
+  const handleUpdateCreditCardAsync = useCallback(async (...args: Parameters<typeof executeUpdateCreditCard>) => { await executeUpdateCreditCard(...args).done; }, [executeUpdateCreditCard]);
 
   const executePayCreditCardBill = useCallback(
     (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string, operationKey?: string) => {
@@ -1710,6 +1718,46 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     },
     [deps, effectiveRepository, runMutation, commitState, resolveCanonicalId, registerCanonicalId]
   );
+
+  const handleReschedulePurchaseDateAsync = useCallback(async (id: string, change: PurchaseDateChange) => {
+    if (isWorkspaceReadOnly) throw new Error('Sem permissão para corrigir a data da compra.');
+    const workspaceId = stateRef.current.activeWorkspaceId;
+    await runMutationInternal(() => actions.reschedulePurchaseDate(deps,id,change), async (_updated, acknowledge) => {
+      const request = { ...change, expected_schedule: change.expected_schedule.map((row) => ({ ...row,
+        installment_id: resolveCanonicalId(row.installment_id), old_bill_id: resolveCanonicalId(row.old_bill_id), target_bill_id: resolveCanonicalId(row.target_bill_id) })) };
+      await effectiveRepository.reschedulePurchase(resolveCanonicalId(id),resolveCanonicalId(workspaceId),request);
+      boundary.assertCurrent();
+      acknowledge?.();
+      const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(workspaceId));
+      boundary.assertCurrent();
+      const current = stateRef.current;
+      for (const inst of current.allInstallments.filter((i) => i.purchase_id===id)) {
+        const remote = fresh.allInstallments.find((i) => i.id===resolveCanonicalId(inst.id));
+        if (inst.credit_card_bill_id && remote?.credit_card_bill_id) registerCanonicalId(inst.credit_card_bill_id,remote.credit_card_bill_id);
+      }
+      acknowledge?.({ allPurchases:fresh.allPurchases,allInstallments:fresh.allInstallments,allCreditCardBills:fresh.allCreditCardBills });
+      if (current.activeWorkspaceId===resolveCanonicalId(workspaceId)) commitState(mergeSnapshotWithPendingState(fresh,stateRef.current,pendingEntityIdsRef.current));
+    },workspaceId,id).done;
+  },[isWorkspaceReadOnly,deps,runMutationInternal,effectiveRepository,boundary,resolveCanonicalId,registerCanonicalId,commitState]);
+
+  const handleMarkMonthlyRepaymentsAsync = useCallback(async (month: string, participantId: string, expected: MonthlyRepaymentChange[]) => {
+    if (isWorkspaceReadOnly) throw new Error('Sem permissão para registrar repasses.');
+    const workspaceId = stateRef.current.activeWorkspaceId;
+    await runMutationInternal(() => {
+      const state = deps.getState();
+      const purchases = applyMonthlyRepayments(workspaceId, month, participantId, state.allPurchases, state.allInstallments, expected);
+      deps.commit({ ...state, allPurchases: purchases });
+      return purchases;
+    }, async (_updated, acknowledge) => {
+      await effectiveRepository.markMonthlyRepayments(resolveCanonicalId(workspaceId), month, resolveCanonicalId(participantId), expected.map(c => ({ ...c, purchase_id: resolveCanonicalId(c.purchase_id) })));
+      boundary.assertCurrent();
+      acknowledge?.();
+      const fresh = await effectiveRepository.loadSnapshot(resolveCanonicalId(workspaceId));
+      boundary.assertCurrent();
+      acknowledge?.({ allPurchases: fresh.allPurchases });
+      if (stateRef.current.activeWorkspaceId === resolveCanonicalId(workspaceId)) commitState(mergeSnapshotWithPendingState(fresh, stateRef.current, pendingEntityIdsRef.current));
+    }, workspaceId).done;
+  }, [isWorkspaceReadOnly, deps, runMutationInternal, effectiveRepository, resolveCanonicalId, boundary, commitState]);
 
   const handleUpdatePurchaseRepaymentsAsync = useCallback(async (id: string, counts: PurchaseRepaymentCount[], expectedVersion: number) => {
     const workspaceId = stateRef.current.activeWorkspaceId;
@@ -2250,6 +2298,8 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         creditCardBills,
         addCreditCard: handleAddCreditCard,
         updateCreditCard: handleUpdateCreditCard,
+        addCreditCardAsync: handleAddCreditCardAsync,
+        updateCreditCardAsync: handleUpdateCreditCardAsync,
         payCreditCardBill: handlePayCreditCardBill,
         payCreditCardBillAsync: handlePayCreditCardBillAsync,
 
@@ -2278,6 +2328,8 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         createInstallmentPurchase: handleCreateInstallmentPurchase,
         createInstallmentPurchaseAsync: handleCreateInstallmentPurchaseAsync,
         updatePurchaseRepaymentsAsync: handleUpdatePurchaseRepaymentsAsync,
+        markMonthlyRepaymentsAsync: handleMarkMonthlyRepaymentsAsync,
+        reschedulePurchaseDateAsync: handleReschedulePurchaseDateAsync,
 
         payments,
         recordPayment: handleRecordPayment,

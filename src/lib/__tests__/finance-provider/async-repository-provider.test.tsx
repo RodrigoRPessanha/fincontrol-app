@@ -237,6 +237,8 @@ function createMockRepository(snapshot: FinanceState) {
     } as any)),
     deleteCategory: vi.fn().mockResolvedValue(undefined),
     updatePurchaseRepayments: vi.fn(),
+    markMonthlyRepayments: vi.fn().mockResolvedValue(undefined),
+    reschedulePurchase: vi.fn(),
     patchTransaction: vi.fn().mockImplementation(async (id, workspaceId, changes) => ({ ...snapshot.allTransactions.find((tx) => tx.id === id && tx.workspace_id === workspaceId), ...changes })),
     getTransactions: vi.fn().mockImplementation(async () => snapshot.allTransactions),
     saveTransaction: vi.fn().mockImplementation(async (data) => ({
@@ -331,6 +333,37 @@ function createMockRepository(snapshot: FinanceState) {
 import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 
 describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
+  it.each([false,true])('reschedules an imported paid purchase and protects confirmed changes from hydration failure (%s)', async (failHydration) => {
+    const { purchaseDateFixture }=await import('../test-utils/purchase-date-fixture');
+    const { purchaseDateSchedule,reschedulePurchaseState }=await import('../../financial-engine/purchase-dates');
+    const fixture=purchaseDateFixture();
+    const scope=(rows:any[])=>rows.map((row)=>({...row,workspace_id:'ws-1'}));
+    const snapshot=createMockSnapshot({allPurchases:scope(fixture.allPurchases),allInstallments:fixture.allInstallments,allCreditCards:scope(fixture.allCreditCards),allCreditCardBills:scope(fixture.allCreditCardBills),allAccounts:scope(fixture.allAccounts),allTransactions:[],allPayments:[]});
+    const repo=createMockRepository(snapshot);
+    repo.reschedulePurchase=vi.fn().mockImplementation(async (id,ws,change)=>{
+      Object.assign(snapshot,reschedulePurchaseState(snapshot,id,change,()=> 'server-new-bill','2049-12-05T00:00:00Z'));
+    });
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase'});
+    const request={purchase_date:'2049-12-10',expected_version:3,expected_schedule:purchaseDateSchedule(snapshot,snapshot.allPurchases[0],'2049-12-10')};
+    if(failHydration)repo.loadSnapshot=vi.fn().mockRejectedValue(new Error('Snapshot offline'));
+    await act(async()=>{
+      if(failHydration)await expect(getCtx().reschedulePurchaseDateAsync('p',request)).rejects.toThrow('Snapshot offline');
+      else await getCtx().reschedulePurchaseDateAsync('p',request);
+    });
+    expect(repo.reschedulePurchase).toHaveBeenCalledOnce();
+    expect(getCtx().purchases.find((p)=>p.id==='p')?.purchase_date).toBe('2049-12-10');
+    expect(getCtx().installments.find((i)=>i.id==='i1')).toMatchObject({due_date:'2050-01-10',paid_amount:200,paid_at:'2049-12-01'});
+    if(failHydration){repo.loadSnapshot=vi.fn().mockImplementation(async(ws)=>({...snapshot,activeWorkspaceId:ws}));await act(async()=>{await getCtx().refreshData();});}
+    expect(getCtx().installments.find((i)=>i.id==='i1')?.credit_card_bill_id).toBe('server-new-bill');
+    expect(getCtx().purchases.find((p)=>p.id==='p')?.splits?.[1].repaid_amount).toBe(100);
+    expect(getCtx().accounts[0].current_balance).toBe(1000);
+  });
+  it('rejects purchase-date changes for a viewer before optimistic mutation',async()=>{
+    const snapshot=createMockSnapshot();snapshot.allWorkspaceMembers[0].role='viewer';const repo=createMockRepository(snapshot);
+    const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase'});
+    await expect(getCtx().reschedulePurchaseDateAsync('missing',{purchase_date:'2050-01-01',expected_version:0,expected_schedule:[]})).rejects.toThrow(/permissão/);
+    expect(repo.reschedulePurchase).not.toHaveBeenCalled();
+  });
   it('awaits historical repayments, scopes the purchase and rolls back a rejected adjustment', async () => {
     const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
     const purchase = { id: 'repay-p', workspace_id: 'ws-1', total_amount: 600, installment_count: 3, paid_by_member_id: 'wsm-1', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 300 }, { member_id: 'wsm-2', amount: 300 }] } as any;
@@ -3533,6 +3566,49 @@ describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
     expect(ws2.owner_id).toBe('usr-1');
   });
 
+  it('awaits a monthly repayment batch, loads canonical counts, and rolls back a rejected batch', async () => {
+    const { purchaseDateFixture } = await import('../test-utils/purchase-date-fixture');
+    const { monthlyRepaymentPlan, applyMonthlyRepayments } = await import('../../monthly-repayments');
+    const fixture = purchaseDateFixture();
+    const snapshot = createMockSnapshot({allPurchases:fixture.allPurchases.map(p => ({...p,workspace_id:'ws-1'})),allInstallments:fixture.allInstallments});
+    const person = snapshot.allPurchases[0].splits!.find(s => s.person_id)!.person_id!;
+    const repo = createMockRepository(snapshot);
+    const plan = monthlyRepaymentPlan('ws-1','2050-03',person,snapshot.allPurchases,snapshot.allInstallments);
+    const canonical = {...snapshot,allPurchases:applyMonthlyRepayments('ws-1','2050-03',person,snapshot.allPurchases,snapshot.allInstallments,plan)};
+    const { getCtx } = await mountTestProvider({repository:repo,initialDataMode:'supabase'});
+    repo.loadSnapshot = vi.fn().mockResolvedValue(canonical);
+    await act(async () => { await getCtx().markMonthlyRepaymentsAsync('2050-03',person,plan); });
+    expect(repo.markMonthlyRepayments).toHaveBeenCalledWith('ws-1','2050-03',person,plan);
+    expect(getCtx().purchases[0].splits).toEqual(canonical.allPurchases[0].splits);
+    await act(async () => { await getCtx().markMonthlyRepaymentsAsync('2050-03',person,[]); });
+    const future = monthlyRepaymentPlan('ws-1','2050-04',person,getCtx().purchases,snapshot.allInstallments);
+    repo.markMonthlyRepayments = vi.fn().mockRejectedValue(new Error('Monthly offline'));
+    await act(async () => { await expect(getCtx().markMonthlyRepaymentsAsync('2050-04',person,future)).rejects.toThrow('Monthly offline'); });
+    expect(getCtx().purchases[0].splits).toEqual(canonical.allPurchases[0].splits);
+    repo.markMonthlyRepayments = vi.fn().mockResolvedValue(undefined);
+    repo.loadSnapshot = vi.fn().mockRejectedValue(new Error('Snapshot offline'));
+    await act(async () => { await expect(getCtx().markMonthlyRepaymentsAsync('2050-04',person,future)).rejects.toThrow('Snapshot offline'); });
+    expect(getCtx().purchases[0].splits?.find(s => s.person_id===person)?.repaid_installments_count).toBe(3);
+  });
+  it('denies a monthly repayment batch for a viewer before any remote call',async()=>{
+    const snapshot=createMockSnapshot();snapshot.allWorkspaceMembers=snapshot.allWorkspaceMembers.map(m=>({...m,role:'viewer'}));
+    const repo=createMockRepository(snapshot);const {getCtx}=await mountTestProvider({repository:repo,initialDataMode:'supabase'});
+    await expect(getCtx().markMonthlyRepaymentsAsync('2050-03','b',[])).rejects.toThrow(/permissão/);expect(repo.markMonthlyRepayments).not.toHaveBeenCalled();
+  });
+  it('awaits card edits, preserves bill history, and rejects invalid card calendars before persistence', async () => {
+    const snapshot = createMockSnapshot();
+    const repo = createMockRepository(snapshot);
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { await getCtx().updateCreditCardAsync('card-1', { credit_limit: 15000, closing_days_before_due: 7 }); });
+    expect(getCtx().creditCards.find(c => c.id === 'card-1')).toMatchObject({ credit_limit: 15000, closing_days_before_due: 7 });
+    expect(getCtx().creditCardBills).toEqual(snapshot.allCreditCardBills);
+    for (const patch of [{ closing_day: 0 }, { due_day: 32 }, { closing_days_before_due: 28 }, { closing_days_before_due: 1.5 }, { name: ' ' }]) {
+      expect(() => getCtx().updateCreditCard('card-1', patch)).toThrow();
+    }
+    repo.saveCreditCard = vi.fn().mockRejectedValue(new Error('Card offline'));
+    await act(async () => { await expect(getCtx().updateCreditCardAsync('card-1', { credit_limit: 20000 })).rejects.toThrow('Card offline'); });
+    expect(getCtx().creditCards.find(c => c.id === 'card-1')?.credit_limit).not.toBe(20000);
+  });
   it('fornece resultado aguardável da persistência remota em recordPaymentAsync e payCreditCardBillAsync capturando rejeição do repositório', async () => {
     const snapshot = createMockSnapshot({
       allTransactions: [

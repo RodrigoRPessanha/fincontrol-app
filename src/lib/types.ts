@@ -49,7 +49,8 @@ export interface CreditCard {
   institution: string;
   last_four_digits?: string;
   credit_limit: number;
-  closing_day: number; // 1-31
+  closing_day: number; // 1-31 (fixed mode)
+  closing_days_before_due?: number | null; // 1-27; null keeps fixed closing day
   due_day: number; // 1-31
   linked_payment_account_id?: string;
   color: string;

@@ -3,8 +3,9 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
-import { monthlySharedExpenses } from '@/lib/financial-engine/monthly-splits';
+import { monthlySharedExpenses, monthlySplitBalances } from '@/lib/financial-engine/monthly-splits';
 import { PurchaseRepaymentModal } from '@/components/splits/PurchaseRepaymentModal';
+import { MonthlyRepaymentModal } from '@/components/splits/MonthlyRepaymentModal';
 import { MonthlySplitOverview } from '@/components/splits/MonthlySplitOverview';
 import { calculateMemberNetBalances } from '@/lib/financial-engine';
 import { formatCurrency } from '@/lib/utils';
@@ -42,6 +43,7 @@ export default function SplitsPage() {
     isWorkspaceReadOnly,
   } = useFinance();
 
+  const [showMonthlyRepayments, setShowMonthlyRepayments] = useState(false);
   const [repaymentPurchaseId, setRepaymentPurchaseId] = useState<string | null>(null);
   const repaymentPurchase = purchases.find((p) => p.id === repaymentPurchaseId);
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
@@ -78,6 +80,9 @@ export default function SplitsPage() {
 
   const monthly = useMemo(() => monthlySharedExpenses(activeWorkspace.id, month, transactions, purchases, installments, creditCardBills),
     [activeWorkspace.id, month, transactions, purchases, installments, creditCardBills]);
+
+  const monthlyBalances = useMemo(() => monthlySplitBalances(activeWorkspace.id, monthly.items, currentMembers, effectivePeople), [activeWorkspace.id, monthly.items, currentMembers, effectivePeople]);
+  const repaymentParticipants = useMemo(() => [...new Set(purchases.filter(p => p.workspace_id === activeWorkspace.id).flatMap(p => (p.splits || []).filter(s => (s.person_id || s.member_id) !== (p.paid_by_person_id || p.paid_by_member_id)).map(s => (s.person_id || s.member_id)!)))], [purchases, activeWorkspace.id]);
 
   // Acertos realizados no workspace
   const workspaceSettlements = useMemo(() => {
@@ -243,7 +248,8 @@ export default function SplitsPage() {
         </div>
       )}
 
-      <MonthlySplitOverview month={month} onMonthChange={setMonth} items={monthly.items} responsibilities={monthly.responsibilities} warnings={monthly.warnings} getName={getParticipantName} />
+      <MonthlySplitOverview month={month} onMonthChange={setMonth} items={monthly.items} responsibilities={monthly.responsibilities} warnings={monthly.warnings} getName={getParticipantName} debts={monthlyBalances.pairwiseDebts} onMarkRepayments={isWorkspaceReadOnly || !repaymentParticipants.length ? undefined : () => setShowMonthlyRepayments(true)} />
+      {showMonthlyRepayments && <MonthlyRepaymentModal key={`${activeWorkspace.id}:${month}`} month={month} participants={repaymentParticipants} getName={getParticipantName} onClose={() => setShowMonthlyRepayments(false)} />}
       <SharedExpensesList splitItems={monthly.items} currentMembers={currentMembers} getMemberName={getParticipantName} onEditRepayments={isWorkspaceReadOnly ? undefined : setRepaymentPurchaseId} />
       {repaymentPurchase && <PurchaseRepaymentModal key={`${activeWorkspace.id}:${repaymentPurchase.id}`} purchase={repaymentPurchase} getName={getParticipantName} onClose={() => setRepaymentPurchaseId(null)} />}
 
