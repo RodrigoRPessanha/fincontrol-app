@@ -309,6 +309,11 @@ export function calculateMemberNetBalances(
       if (splitId) {
         const splitCents = toCents(split.amount);
         shareMap.set(splitId, (shareMap.get(splitId) || 0) + splitCents);
+        if (splitId !== payerId) {
+          const repaid = toCents(split.repaid_amount || 0);
+          settledOutMap.set(splitId, (settledOutMap.get(splitId) || 0) + repaid);
+          settledInMap.set(payerId, (settledInMap.get(payerId) || 0) + repaid);
+        }
       }
     }
   }

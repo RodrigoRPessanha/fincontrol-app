@@ -7,6 +7,24 @@ import * as FinanceContext from '@/lib/context/finance-context';
 import { WorkspaceMember, Workspace, CreditCard, PaymentMethod, Account, Category } from '@/lib/types';
 
 describe('QuickAddModal Comprehensive UI Tests', () => {
+  it.each([false, true])('defaults repaid installments to my paid count and permits independent override (%s)', async (override) => {
+    vi.mocked(FinanceContext.useFinance).mockReturnValue({ ...FinanceContext.useFinance(), paymentMethods: [] } as any);
+    const container = document.createElement('div'); const root = createRoot(container);
+    await act(async () => root.render(<QuickAddModal isOpen onClose={mockOnClose} />));
+    const cardOption = findNode(container, (n) => n.tagName === 'OPTION' && getReactProps(n)?.value?.startsWith('card:'));
+    await act(async () => { getReactProps(cardOption.parentNode).onChange({ target: { value: getReactProps(cardOption).value } }); getReactProps(findNode(container, (n) => n.tagName === 'INPUT' && getReactProps(n)?.placeholder === '0,00')).onChange({ target: { value: '600' } }); });
+    const total = findNode(container, (n) => n.tagName === 'SELECT' && findNode(n, (child) => child.tagName === 'OPTION' && getReactProps(child)?.value === 3));
+    const rule = findNode(container, (n) => n.tagName === 'SELECT' && getReactProps(n).value === 'individual');
+    await act(async () => { getReactProps(total).onChange({ target: { value: '3' } }); getReactProps(rule).onChange({ target: { value: 'equal' } }); });
+    const paid = findNode(container, (n) => n.tagName === 'SELECT' && !getReactProps(n)['aria-label'] && getReactProps(n).value === 0);
+    await act(async () => getReactProps(paid).onChange({ target: { value: '2' } }));
+    const repaid = findNode(container, (n) => n.tagName === 'SELECT' && getReactProps(n)['aria-label']?.startsWith('Parcelas repassadas por'));
+    expect(getReactProps(repaid).value).toBe(2);
+    if (override) await act(async () => getReactProps(repaid).onChange({ target: { value: '1' } }));
+    await act(async () => getReactProps(findNode(container, (n) => n.tagName === 'FORM')).onSubmit({ preventDefault() {} }));
+    expect(mockCreateInstallmentPurchase).toHaveBeenCalledWith(expect.objectContaining({ paid_installments_count: 2, splits: expect.arrayContaining([expect.objectContaining({ member_id: 'wsm-2', repaid_installments_count: override ? 1 : 2 })]) }));
+    await act(async () => root.unmount());
+  });
   it('records an existing card directly without a duplicate payment method', async () => {
     vi.mocked(FinanceContext.useFinance).mockReturnValue({ ...FinanceContext.useFinance(), paymentMethods: [] } as any);
     const container = (globalThis as any).document.createElement('div'); const root = createRoot(container);

@@ -4,6 +4,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import { monthlySharedExpenses } from '@/lib/financial-engine/monthly-splits';
+import { PurchaseRepaymentModal } from '@/components/splits/PurchaseRepaymentModal';
 import { MonthlySplitOverview } from '@/components/splits/MonthlySplitOverview';
 import { calculateMemberNetBalances } from '@/lib/financial-engine';
 import { formatCurrency } from '@/lib/utils';
@@ -41,6 +42,8 @@ export default function SplitsPage() {
     isWorkspaceReadOnly,
   } = useFinance();
 
+  const [repaymentPurchaseId, setRepaymentPurchaseId] = useState<string | null>(null);
+  const repaymentPurchase = purchases.find((p) => p.id === repaymentPurchaseId);
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const settlementPending = useRef(false);
   const [isSettling, setIsSettling] = useState(false);
@@ -241,7 +244,8 @@ export default function SplitsPage() {
       )}
 
       <MonthlySplitOverview month={month} onMonthChange={setMonth} items={monthly.items} responsibilities={monthly.responsibilities} warnings={monthly.warnings} getName={getParticipantName} />
-      <SharedExpensesList splitItems={monthly.items} currentMembers={currentMembers} getMemberName={getParticipantName} />
+      <SharedExpensesList splitItems={monthly.items} currentMembers={currentMembers} getMemberName={getParticipantName} onEditRepayments={isWorkspaceReadOnly ? undefined : setRepaymentPurchaseId} />
+      {repaymentPurchase && <PurchaseRepaymentModal key={`${activeWorkspace.id}:${repaymentPurchase.id}`} purchase={repaymentPurchase} getName={getParticipantName} onClose={() => setRepaymentPurchaseId(null)} />}
 
       {/* Seção 4: Gerenciamento de Pessoas Cadastradas (Rateio por Nome) */}
       <PeopleManager

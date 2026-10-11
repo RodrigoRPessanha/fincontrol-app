@@ -1,5 +1,6 @@
 'use client';
 
+import { PurchaseRepaymentCount, withPurchaseRepayments } from '../purchase-repayments';
 import { isOperationReplay } from '../repositories/operation-result';
 import { normalizeMoney } from '../financial-engine';
 import { assertTransactionPatch, reconcileEditedDueStatus } from '../transaction-edit';
@@ -1710,6 +1711,27 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
     [deps, effectiveRepository, runMutation, commitState, resolveCanonicalId, registerCanonicalId]
   );
 
+  const handleUpdatePurchaseRepaymentsAsync = useCallback(async (id: string, counts: PurchaseRepaymentCount[], expectedVersion: number) => {
+    const workspaceId = stateRef.current.activeWorkspaceId;
+    const original = stateRef.current.allPurchases.find((p) => p.id === id && p.workspace_id === workspaceId);
+    if (!original) throw new Error('Compra não encontrada no workspace ativo.');
+    if ((original.repayment_version || 0) !== expectedVersion) throw new Error('Os repasses foram alterados. Atualize os dados.');
+    await runMutationInternal(() => {
+      const state = deps.getState();
+      const updated = { ...withPurchaseRepayments(original, state.allInstallments, counts), repayment_version: expectedVersion + 1 };
+      deps.commit({ ...state, allPurchases: state.allPurchases.map((p) => p.id === id ? updated : p) });
+      return updated;
+    }, async (_updated, acknowledge) => {
+      const saved = await effectiveRepository.updatePurchaseRepayments(resolveCanonicalId(id), resolveCanonicalId(workspaceId),
+        counts.map((entry) => ({ ...entry, participant_id: resolveCanonicalId(entry.participant_id) })), expectedVersion);
+      boundary.assertCurrent();
+      const state = stateRef.current;
+      commitState({ ...state, allPurchases: state.allPurchases.map((p) => resolveCanonicalId(p.id) === saved.id ? saved : p) });
+      acknowledge?.({ allPurchases: [saved] });
+      return saved;
+    }, workspaceId, id).done;
+  }, [deps, runMutationInternal, effectiveRepository, resolveCanonicalId, boundary, commitState]);
+
   const executeCreateInstallmentPurchase = useCallback(
     (data: Parameters<typeof actions.createInstallmentPurchase>[1]) => {
       const targetWorkspaceId = stateRef.current.activeWorkspaceId;
@@ -2255,6 +2277,7 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
         installments,
         createInstallmentPurchase: handleCreateInstallmentPurchase,
         createInstallmentPurchaseAsync: handleCreateInstallmentPurchaseAsync,
+        updatePurchaseRepaymentsAsync: handleUpdatePurchaseRepaymentsAsync,
 
         payments,
         recordPayment: handleRecordPayment,

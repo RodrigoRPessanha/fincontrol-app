@@ -1,3 +1,4 @@
+import { withPurchaseRepayments } from '../../purchase-repayments';
 import { findOperationReceipt } from './operation-receipts';
 import {
   Purchase,
@@ -92,7 +93,7 @@ export function createInstallmentPurchase(
   const effectiveSplits = effectiveSplitType !== 'individual' ? data.splits : undefined;
   const userId = deps.getUserId();
 
-  const newPurchase: Purchase = {
+  let newPurchase: Purchase = {
     ...data,
     id: deps.generateId('pur'),
     workspace_id: targetWsId,
@@ -136,6 +137,10 @@ export function createInstallmentPurchase(
     };
   });
 
+  newPurchase = withPurchaseRepayments(newPurchase, generatedInstallments, (effectiveSplits || []).filter((s) =>
+    (s.person_id || s.member_id) !== (data.paid_by_person_id || data.paid_by_member_id)).map((s) => ({
+      participant_id: (s.person_id || s.member_id)!, count: s.repaid_installments_count ?? 0,
+    })));
   const generatedPayments: Payment[] = [];
   if (paidCount > 0) {
     generatedInstallments.forEach((inst, idx) => {

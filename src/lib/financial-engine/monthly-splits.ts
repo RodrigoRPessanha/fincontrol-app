@@ -13,6 +13,7 @@ export interface MonthlySharedExpense {
   isPurchase: boolean;
   installmentCount: number;
   installmentNumber?: number;
+  purchaseId?: string;
 }
 
 /** Read-only projection. Never changes the accumulated settlement ledger. */
@@ -64,7 +65,7 @@ export function monthlySharedExpenses(
       if (row.status === 'cancelled' || bill?.status === 'cancelled' || !row.due_date.startsWith(month)) continue;
       const splits = allocations.sort((a, b) => a.index - b.index).map((part) => ({ ...shares[part.index], amount: fromCents(part.cents) }));
       items.push({ ...purchase, id: `${purchase.id}:${row.id}`, amount: row.amount, date: row.due_date,
-        splits, isPurchase: true, installmentCount: purchase.installment_count, installmentNumber: row.installment_number });
+        splits, purchaseId: purchase.id, isPurchase: true, installmentCount: purchase.installment_count, installmentNumber: row.installment_number });
     }
   }
   const responsibilityCents = new Map<string, number>();

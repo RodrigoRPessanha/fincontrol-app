@@ -23,6 +23,8 @@ export function mapPurchaseSplitsToDomain(rows: PurchaseSplitRow[]): Transaction
     member_id: r.member_id ?? undefined,
     person_id: r.person_id ?? undefined,
     amount: readMoney(r.amount),
+    repaid_installments_count: r.repaid_installments_count ?? 0,
+    repaid_amount: readMoney(r.repaid_amount ?? 0),
     percentage: r.percentage !== null && r.percentage !== undefined ? Number(r.percentage) : undefined,
   }));
 }
@@ -90,6 +92,7 @@ export function mapPurchaseRowToDomain(
     total_amount: readMoney(row.total_amount),
     installment_count: row.installment_count,
     paid_installments_count: row.paid_installments_count ?? 0,
+    repayment_version: row.repayment_version ?? 0,
     paid_by_member_id: row.paid_by_member_id ?? undefined,
     paid_by_person_id: row.paid_by_person_id ?? undefined,
     split_type: (row.split_type as SplitType) ?? undefined,

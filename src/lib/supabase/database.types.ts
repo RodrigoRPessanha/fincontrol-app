@@ -731,6 +731,8 @@ export type Database = {
           percentage: number | null
           person_id: string | null
           purchase_id: string
+          repaid_amount: number
+          repaid_installments_count: number
           updated_at: string
           workspace_id: string
         }
@@ -742,6 +744,8 @@ export type Database = {
           percentage?: number | null
           person_id?: string | null
           purchase_id: string
+          repaid_amount?: number
+          repaid_installments_count?: number
           updated_at?: string
           workspace_id: string
         }
@@ -753,6 +757,8 @@ export type Database = {
           percentage?: number | null
           person_id?: string | null
           purchase_id?: string
+          repaid_amount?: number
+          repaid_installments_count?: number
           updated_at?: string
           workspace_id?: string
         }
@@ -803,6 +809,7 @@ export type Database = {
           paid_installments_count: number | null
           payment_method_id: string | null
           purchase_date: string
+          repayment_version: number
           split_type: string
           total_amount: number
           updated_at: string
@@ -823,6 +830,7 @@ export type Database = {
           paid_installments_count?: number | null
           payment_method_id?: string | null
           purchase_date?: string
+          repayment_version?: number
           split_type?: string
           total_amount: number
           updated_at?: string
@@ -843,6 +851,7 @@ export type Database = {
           paid_installments_count?: number | null
           payment_method_id?: string | null
           purchase_date?: string
+          repayment_version?: number
           split_type?: string
           total_amount?: number
           updated_at?: string
@@ -1485,6 +1494,13 @@ export type Database = {
         }
         Returns: string
       }
+      fn_calculate_purchase_repayments: {
+        Args: { p_purchase_id: string }
+        Returns: {
+          repaid_amount: number
+          split_id: string
+        }[]
+      }
       fn_check_routine_privilege: {
         Args: { p_privilege?: string; p_routine: string }
         Returns: boolean
@@ -1678,6 +1694,15 @@ export type Database = {
       fn_reverse_goal_deposit: {
         Args: { p_deposit_id: string; p_workspace_id: string }
         Returns: undefined
+      }
+      fn_set_purchase_repayments: {
+        Args: {
+          p_counts: Json
+          p_expected_version: number
+          p_purchase_id: string
+          p_workspace_id: string
+        }
+        Returns: string
       }
       fn_set_purchase_splits: {
         Args: { p_purchase_id: string; p_splits: Json; p_workspace_id: string }

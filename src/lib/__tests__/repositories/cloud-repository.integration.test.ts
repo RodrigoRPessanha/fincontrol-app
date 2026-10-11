@@ -1498,6 +1498,18 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     await repo.deleteTransaction(expense.id);
     await repo.deleteCategory(cat.id);
   });
+  it('creates historical repayments atomically, updates counts, rejects stale versions and deletes the purchase safely', async () => {
+    const person = await repo.savePerson({ workspace_id: testWorkspaceId, name: 'QA Historical repayments' }); let id = '';
+    try {
+      const created = await repo.savePurchase({ workspace_id: testWorkspaceId, description: 'Repayments 600/3', total_amount: 600, installment_count: 3, purchase_date: fixtureDates.today, paid_by_member_id: ownerMemberId, split_type: 'equal', splits: [{ member_id: ownerMemberId, amount: 300 }, { person_id: person.id, amount: 300, repaid_installments_count: 2 }] }); id = created.id;
+      const loaded = (await repo.getPurchases(testWorkspaceId)).find((p) => p.id === id)!;
+      expect(loaded.splits?.find((s) => s.person_id === person.id)).toMatchObject({ repaid_installments_count: 2, repaid_amount: 200 });
+      const changed = await repo.updatePurchaseRepayments(id, testWorkspaceId, [{ participant_id: person.id, count: 1 }], loaded.repayment_version!);
+      expect(changed.splits?.find((s) => s.person_id === person.id)?.repaid_amount).toBe(100);
+      await expect(repo.updatePurchaseRepayments(id, testWorkspaceId, [], loaded.repayment_version!)).rejects.toMatchObject({ code: 'CONFLICT', originalError: { code: 'PT409' } });
+      await expect(repo.updatePurchaseRepayments(id, testWorkspaceId, [{ participant_id: person.id, count: 4 }], changed.repayment_version!)).rejects.toThrow();
+    } finally { if (id) await repo.deletePurchase(id); await repo.deletePerson(person.id); }
+  });
   it('edits a transaction through the partial RPC and returns a clear HTTP conflict for a stale version', async () => {
     const method = await repo.savePaymentMethod({ workspace_id: testWorkspaceId, name: 'Patch HTTP QA', type: 'pix', active: true });
     let id = '';

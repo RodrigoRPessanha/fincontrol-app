@@ -1,3 +1,4 @@
+import { PurchaseRepaymentCount, withPurchaseRepayments } from '../purchase-repayments';
 import {
   Account,
   Budget,
@@ -589,6 +590,10 @@ export class LocalFinanceRepository implements FinanceRepository {
       const index = state.allPurchases.findIndex((p) => p.id === purchase.id);
       if (index !== -1) {
         const oldPurchase = state.allPurchases[index];
+        if (oldPurchase.splits?.some((share) => (share.repaid_installments_count || 0) > 0) &&
+          (purchase.splits !== undefined || purchase.total_amount !== oldPurchase.total_amount || purchase.installment_count !== oldPurchase.installment_count || purchase.purchase_date !== oldPurchase.purchase_date || purchase.paid_by_member_id !== oldPurchase.paid_by_member_id || purchase.paid_by_person_id !== oldPurchase.paid_by_person_id || purchase.credit_card_id !== oldPurchase.credit_card_id || purchase.split_type !== oldPurchase.split_type)) {
+          throw new RepositoryError('Ajuste os repasses antes de alterar o rateio da compra.', 'VALIDATION_FAILED');
+        }
         const newTotal = purchase.total_amount;
         if (newTotal !== oldPurchase.total_amount) {
           const purchaseInsts = state.allInstallments.filter((i) => i.purchase_id === purchase.id);
@@ -691,6 +696,7 @@ export class LocalFinanceRepository implements FinanceRepository {
         const updated: Purchase = {
           ...oldPurchase,
           ...purchase,
+          repayment_version: (oldPurchase.repayment_version || 0) + 1,
           id: purchase.id,
         };
         state.allPurchases = [
@@ -703,7 +709,7 @@ export class LocalFinanceRepository implements FinanceRepository {
       }
     }
 
-    const newPurchase: Purchase = {
+    let newPurchase: Purchase = {
       ...purchase,
       id: purchase.id || generateId(),
       created_at: new Date().toISOString(),
@@ -740,8 +746,21 @@ export class LocalFinanceRepository implements FinanceRepository {
       }
     }
 
+    newPurchase = withPurchaseRepayments(newPurchase, state.allInstallments, (newPurchase.splits || []).filter((share) =>
+      (share.person_id || share.member_id) !== (newPurchase.paid_by_person_id || newPurchase.paid_by_member_id)).map((share) => ({ participant_id: (share.person_id || share.member_id)!, count: share.repaid_installments_count || 0 })));
+    state.allPurchases = state.allPurchases.map((p) => p.id === newPurchase.id ? newPurchase : p);
     this.saveState(state);
     return newPurchase;
+  }
+
+  async updatePurchaseRepayments(id: string, workspaceId: string, counts: PurchaseRepaymentCount[], expectedVersion: number): Promise<Purchase> {
+    const state = this.getState();
+    const original = state.allPurchases.find((p) => p.id === id && p.workspace_id === workspaceId);
+    if (!original) throw new RepositoryError('Compra não encontrada.', 'NOT_FOUND');
+    if ((original.repayment_version || 0) !== expectedVersion) throw new RepositoryError('Os repasses foram alterados. Atualize os dados.', 'CONFLICT');
+    const updated = { ...withPurchaseRepayments(original, state.allInstallments, counts), repayment_version: expectedVersion + 1 };
+    this.saveState({ ...state, allPurchases: state.allPurchases.map((p) => p.id === id ? updated : p) });
+    return updated;
   }
 
   async deletePurchase(id: string): Promise<void> {
