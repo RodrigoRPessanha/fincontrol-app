@@ -1,3 +1,4 @@
+import { PurchaseRepaymentCount } from '../purchase-repayments';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database, Json } from '../supabase/database.types';
 import {
@@ -778,6 +779,16 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       ...mapPurchaseRowToDomain(savedRow),
       splits: purchase.splits,
     }, recovered);
+  }
+
+  async updatePurchaseRepayments(id: string, workspaceId: string, counts: PurchaseRepaymentCount[], expectedVersion: number): Promise<Purchase> {
+    const { error } = await this.client.rpc('fn_set_purchase_repayments', {
+      p_workspace_id: workspaceId, p_purchase_id: id, p_counts: counts as unknown as Json, p_expected_version: expectedVersion,
+    });
+    if (error) throw RepositoryError.fromPostgrestError(error, 'purchases');
+    const saved = (await this.getPurchases(workspaceId)).find((p) => p.id === id);
+    if (!saved) throw new RepositoryError('Atualize os dados para conferir os repasses salvos.', 'NOT_FOUND');
+    return saved;
   }
 
   async deletePurchase(id: string): Promise<void> {

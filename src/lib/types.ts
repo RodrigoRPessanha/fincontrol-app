@@ -140,6 +140,8 @@ export interface TransactionSplit {
   person_id?: string | null;
   amount: number;
   percentage?: number;
+  repaid_installments_count?: number;
+  repaid_amount?: number;
 }
 
 export interface PurchaseSplit {
@@ -150,6 +152,8 @@ export interface PurchaseSplit {
   person_id?: string | null;
   amount: number;
   percentage?: number;
+  repaid_installments_count?: number;
+  repaid_amount?: number;
 }
 
 export interface Settlement {
@@ -242,6 +246,7 @@ export interface Purchase {
   total_amount: number;
   installment_count: number;
   paid_installments_count?: number;
+  repayment_version?: number;
   paid_by_member_id?: string | null;
   paid_by_person_id?: string | null;
   split_type?: SplitType | null;

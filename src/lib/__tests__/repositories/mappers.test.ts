@@ -361,7 +361,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       description: 'Notebook',
       total_amount: 3000,
       installment_count: 10,
-      paid_installments_count: 2,
+      repayment_version: 0, paid_installments_count: 2,
       purchase_date: '2026-01-01',
       category_id: 'cat-1',
       credit_card_id: 'card-1',
@@ -378,7 +378,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
 
     const pSplitRows = [
       {
-        id: 'ps-1',
+        id: 'ps-1', repaid_installments_count: 0, repaid_amount: 0,
         purchase_id: 'pur-1',
         workspace_id: 'ws-1',
         member_id: 'mem-1',
@@ -434,8 +434,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(instInsertNulls.paid_at).toBeNull();
 
     const splitsWithNullAmount = mapPurchaseSplitsToDomain([
-      { id: 'ps-1', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', person_id: null, amount: 0, percentage: null, created_at: '2026-01-01' },
-      { id: 'ps-2', workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-2', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01' },
+      { id: 'ps-1', repaid_installments_count: 0, repaid_amount: 0, workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-1', person_id: null, amount: 0, percentage: null, created_at: '2026-01-01' },
+      { id: 'ps-2', repaid_installments_count: 0, repaid_amount: 0, workspace_id: 'ws-1', updated_at: '2026-01-01', purchase_id: 'pur-1', member_id: 'm-2', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01' },
     ]);
     expect(splitsWithNullAmount[0].amount).toBe(0);
     expect(splitsWithNullAmount[0].percentage).toBeUndefined();
@@ -744,7 +744,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       description: 'P Null',
       total_amount: 0,
       installment_count: 1,
-      paid_installments_count: null,
+      repayment_version: 0, paid_installments_count: null,
       purchase_date: '2026-04-01',
       category_id: null,
       credit_card_id: null,
@@ -1042,7 +1042,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
       purchase_date: '2026-04-01',
       credit_card_id: undefined,
       category_id: undefined,
-      paid_installments_count: undefined,
+      repayment_version: 0, paid_installments_count: undefined,
       paid_by_member_id: undefined,
       split_type: undefined,
       created_by: undefined,
@@ -1070,8 +1070,8 @@ describe('Purchase, Installment & Settlement Mappers', () => {
     expect(txSplitsWithPercentage[1].percentage).toBeUndefined();
 
     const pSplitsWithPercentage = mapPurchaseSplitsToDomain([
-      { id: 'ps-p', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-1', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01', updated_at: '2026-01-01' },
-      { id: 'ps-np', purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-2', person_id: null, amount: 50, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: 'ps-p', repaid_installments_count: 0, repaid_amount: 0, purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-1', person_id: null, amount: 50, percentage: 50, created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: 'ps-np', repaid_installments_count: 0, repaid_amount: 0, purchase_id: 'p-1', workspace_id: 'ws-1', member_id: 'm-2', person_id: null, amount: 50, percentage: null, created_at: '2026-01-01', updated_at: '2026-01-01' },
     ]);
     expect(pSplitsWithPercentage[0].percentage).toBe(50);
     expect(pSplitsWithPercentage[1].percentage).toBeUndefined();
@@ -1085,7 +1085,7 @@ describe('Purchase, Installment & Settlement Mappers', () => {
         total_amount: 100,
         installment_count: 1,
         purchase_date: '2026-04-01',
-        paid_installments_count: 1,
+        repayment_version: 0, paid_installments_count: 1,
         account_id: null,
         credit_card_id: null,
         category_id: null,

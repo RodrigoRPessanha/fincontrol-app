@@ -236,6 +236,7 @@ function createMockRepository(snapshot: FinanceState) {
       created_at: '2026-01-01',
     } as any)),
     deleteCategory: vi.fn().mockResolvedValue(undefined),
+    updatePurchaseRepayments: vi.fn(),
     patchTransaction: vi.fn().mockImplementation(async (id, workspaceId, changes) => ({ ...snapshot.allTransactions.find((tx) => tx.id === id && tx.workspace_id === workspaceId), ...changes })),
     getTransactions: vi.fn().mockImplementation(async () => snapshot.allTransactions),
     saveTransaction: vi.fn().mockImplementation(async (data) => ({
@@ -330,6 +331,22 @@ function createMockRepository(snapshot: FinanceState) {
 import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 
 describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
+  it('awaits historical repayments, scopes the purchase and rolls back a rejected adjustment', async () => {
+    const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
+    const purchase = { id: 'repay-p', workspace_id: 'ws-1', total_amount: 600, installment_count: 3, paid_by_member_id: 'wsm-1', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 300 }, { member_id: 'wsm-2', amount: 300 }] } as any;
+    snapshot.allPurchases.push(purchase);
+    snapshot.allInstallments.push(...[1, 2, 3].map((n) => ({ id: `repay-i${n}`, purchase_id: purchase.id, installment_number: n, amount: 200, due_date: `2026-0${n}-10`, status: 'pending' } as any)));
+    const { withPurchaseRepayments } = await import('../../purchase-repayments');
+    repo.updatePurchaseRepayments = vi.fn().mockImplementation(async (_id, _ws, counts, version) => { const saved = { ...withPurchaseRepayments(purchase, snapshot.allInstallments, counts), repayment_version: version + 1 }; snapshot.allPurchases = snapshot.allPurchases.map((p) => p.id === saved.id ? saved : p); return saved; });
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => { await getCtx().updatePurchaseRepaymentsAsync(purchase.id, [{ participant_id: 'wsm-2', count: 2 }], 0); });
+    expect(getCtx().purchases.find((p) => p.id === purchase.id)?.splits?.[1].repaid_amount).toBe(200);
+    await expect(getCtx().updatePurchaseRepaymentsAsync('foreign', [], 0)).rejects.toThrow(/workspace/);
+    await expect(getCtx().updatePurchaseRepaymentsAsync(purchase.id, [], 0)).rejects.toThrow(/alterados/);
+    repo.updatePurchaseRepayments = vi.fn().mockRejectedValue(new Error('Rejected repayment'));
+    await act(async () => { await expect(getCtx().updatePurchaseRepaymentsAsync(purchase.id, [], 1)).rejects.toThrow('Rejected repayment'); });
+    expect(getCtx().purchases.find((p) => p.id === purchase.id)?.splits?.[1].repaid_amount).toBe(200);
+  });
   it('sends an empty split list when changing an unpaid expense back to individual', async () => {
     const snapshot = createMockSnapshot(); const repo = createMockRepository(snapshot);
     Object.assign(snapshot.allTransactions[0], { updated_at: '2026-10-01T00:00:00Z', split_type: 'equal', splits: [{ member_id: 'wsm-1', amount: 40 }, { member_id: 'wsm-2', amount: 40 }] });

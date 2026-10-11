@@ -1,5 +1,6 @@
 'use client';
 
+import { RepaymentCountFields } from '../../splits/RepaymentCountFields';
 import React, { useState, useMemo } from 'react';
 import { WorkspaceMember, SplitType, TransactionSplit, Person, SplitParticipant } from '@/lib/types';
 import { Users, Plus, UserPlus, Check } from 'lucide-react';
@@ -24,6 +25,10 @@ export interface SplitFieldsProps {
   onAddPerson?: (name: string) => Promise<Person | null | undefined> | Person | null | undefined;
   selectedParticipantIds?: string[];
   onToggleParticipant?: (id: string) => void;
+  repaymentTotal?: number;
+  repaymentDefault?: number;
+  repaymentCounts?: Record<string, number>;
+  onRepaymentCountChange?: (id: string, count: number) => void;
 }
 
 export function SplitFields({
@@ -43,6 +48,7 @@ export function SplitFields({
   onAddPerson,
   selectedParticipantIds,
   onToggleParticipant,
+  repaymentTotal, repaymentDefault = 0, repaymentCounts = {}, onRepaymentCountChange,
 }: SplitFieldsProps) {
   const currentAmount = typeof totalAmount === 'number' ? totalAmount : numAmount;
   // All hooks must stay at the very top of the component
@@ -461,6 +467,10 @@ export function SplitFields({
           )}
         </>
       )}
+      {splitType !== 'individual' && repaymentTotal && onRepaymentCountChange ? <RepaymentCountFields
+        participants={activeParticipants.filter((part) => part.id !== effectivePayerId)} total={repaymentTotal}
+        counts={Object.fromEntries(activeParticipants.map((part) => [part.id, Math.min(repaymentTotal, repaymentCounts[part.id] ?? repaymentDefault)]))}
+        onChange={onRepaymentCountChange} /> : null}
     </div>
   );
 }

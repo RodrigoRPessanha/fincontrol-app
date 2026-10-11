@@ -17,11 +17,13 @@ export interface SharedExpenseItem {
   isPurchase: boolean;
   installmentCount: number;
   installmentNumber?: number;
+  purchaseId?: string;
 }
 
 export interface SharedExpensesListProps {
   splitItems: SharedExpenseItem[];
   currentMembers: WorkspaceMember[];
+  onEditRepayments?: (purchaseId: string) => void;
   getMemberName: (id?: string | null) => string;
 }
 
@@ -29,6 +31,7 @@ export function SharedExpensesList({
   splitItems,
   currentMembers,
   getMemberName,
+  onEditRepayments,
 }: SharedExpensesListProps) {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -80,6 +83,7 @@ export function SharedExpensesList({
               </div>
 
               <div className="flex flex-col sm:items-end">
+                {item.purchaseId && onEditRepayments && <button type="button" className="mb-2 min-h-11 rounded-xl border border-teal-300 px-3 text-xs text-teal-700 dark:border-teal-800 dark:text-teal-300" onClick={() => onEditRepayments(item.purchaseId!)}>Ajustar repasses de {item.description}</button>}
                 <span className="text-sm font-bold text-slate-900 dark:text-white">
                   {formatCurrency(item.amount)}
                 </span>
@@ -89,7 +93,7 @@ export function SharedExpensesList({
                       key={sIdx}
                       className="text-[11px] rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                     >
-                      {getMemberName(split.person_id || split.member_id)}: {formatCurrency(split.amount)}
+                      {getMemberName(split.person_id || split.member_id)}: {formatCurrency(split.amount)}{item.isPurchase && (split.repaid_installments_count || 0) > 0 && <> • {split.repaid_installments_count} parcela(s) já repassada(s)</>}
                     </span>
                   ))}
                 </div>

@@ -19,6 +19,7 @@ import {
   WorkspaceMember,
   WorkspaceRole,
 } from '../types';
+import { PurchaseRepaymentCount } from '../purchase-repayments';
 import { FinanceState } from '../context/finance-state';
 
 /**
@@ -76,6 +77,7 @@ export interface FinanceRepository {
   getPurchases(workspaceId: string): Promise<Purchase[]>;
   savePurchase(purchase: Omit<Purchase, 'id' | 'created_at'> & { id?: string }): Promise<Purchase>;
   deletePurchase(id: string): Promise<void>;
+  updatePurchaseRepayments(id: string, workspaceId: string, counts: PurchaseRepaymentCount[], expectedVersion: number): Promise<Purchase>;
   getInstallments(purchaseId: string): Promise<Installment[]>;
 
   // Pagamentos

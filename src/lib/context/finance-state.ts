@@ -115,6 +115,8 @@ export interface FinanceContextType {
 
   createInstallmentPurchaseAsync: (data: Parameters<FinanceContextType['createInstallmentPurchase']>[0]) => Promise<Purchase>;
 
+  updatePurchaseRepaymentsAsync: (id: string, counts: import('../purchase-repayments').PurchaseRepaymentCount[], expectedVersion: number) => Promise<void>;
+
   payments: Payment[];
   recordPayment: (data: {
     operation_key?: string;

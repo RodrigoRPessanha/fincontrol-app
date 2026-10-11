@@ -76,6 +76,23 @@ describe('LocalFinanceRepository', () => {
     expect(changed).toMatchObject({ description: 'New', status: 'overdue' });
     expect(await repo.patchTransaction(tx.id, 'ws-1', { due_date: '2050-01-01' })).toMatchObject({ status: 'pending' });
   });
+  it('persists and replaces historical repayments with workspace and version guards', async () => {
+    const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);
+    const purchase = await repo.savePurchase({ workspace_id: 'ws-1', description: 'Split', total_amount: 600, installment_count: 3, purchase_date: '2026-01-01', paid_by_member_id: 'a', splits: [{ member_id: 'a', amount: 300 }, { person_id: 'b', amount: 300, repaid_installments_count: 2 }], split_type: 'equal' });
+    expect(purchase.splits?.[1].repaid_amount).toBe(200);
+    await expect(repo.updatePurchaseRepayments(purchase.id, 'foreign', [], 0)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(repo.updatePurchaseRepayments(purchase.id, 'ws-1', [], 5)).rejects.toMatchObject({ code: 'CONFLICT' });
+    const updated = await repo.updatePurchaseRepayments(purchase.id, 'ws-1', [{ participant_id: 'b', count: 1 }], 0);
+    expect(updated.splits?.[1].repaid_amount).toBe(100);
+    await expect(repo.savePurchase(updated)).rejects.toThrow(/repasses/);
+    const base = { ...updated, splits: undefined };
+    for (const patch of [{ total_amount: 601 }, { installment_count: 4 }, { purchase_date: '2026-02-01' }, { paid_by_member_id: 'other' }, { paid_by_person_id: null }, { credit_card_id: null }, { split_type: 'custom' as const }]) {
+      await expect(repo.savePurchase({ ...base, ...patch })).rejects.toThrow();
+    }
+    await repo.savePurchase({ ...base, description: 'Only metadata' });
+
+    expect((await repo.getPurchases('ws-1')).find((p) => p.id === purchase.id)?.repayment_version).toBe(2);
+  });
   it('updates payment methods without clearing links and preserves used methods', async () => {
     const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);
     const method = await repo.savePaymentMethod({ workspace_id: 'ws-1', name: 'Unused', type: 'pix', active: true });

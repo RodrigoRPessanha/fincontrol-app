@@ -40,6 +40,17 @@ describe('SupabaseFinanceRepository', () => {
     loaded.mockResolvedValueOnce([]);
     await expect(repo.patchTransaction('t', 'w', { description: 'New' }, 'v')).rejects.toThrow(/indisponível/);
   });
+  it('adjusts purchase repayments through the versioned RPC and reads authoritative shares', async () => {
+    const { client } = createMockSupabaseClient(); client.rpc = vi.fn().mockResolvedValue({ data: 'p', error: null });
+    const repo = new SupabaseFinanceRepository(client as any);
+    const loaded = vi.spyOn(repo, 'getPurchases').mockResolvedValue([{ id: 'p', splits: [{ person_id: 'b', amount: 300, repaid_amount: 200 }] } as any]);
+    const counts = [{ participant_id: 'b', count: 2 }];
+    expect((await repo.updatePurchaseRepayments('p', 'w', counts, 0)).splits?.[0].repaid_amount).toBe(200);
+    expect(client.rpc).toHaveBeenCalledWith('fn_set_purchase_repayments', { p_workspace_id: 'w', p_purchase_id: 'p', p_counts: counts, p_expected_version: 0 });
+    (client.rpc as any).mockResolvedValueOnce({ error: { code: 'PT409', message: 'Stale' } });
+    await expect(repo.updatePurchaseRepayments('p', 'w', counts, 0)).rejects.toMatchObject({ code: 'CONFLICT' });
+    loaded.mockResolvedValueOnce([]); await expect(repo.updatePurchaseRepayments('p', 'w', counts, 0)).rejects.toThrow(/Atualize/);
+  });
   it('patches only edited method fields, scopes the workspace and exposes backend errors', async () => {
     const { client, queryBuilder } = createMockSupabaseClient();
     queryBuilder.single.mockResolvedValue({ data: { id: 'pm', workspace_id: 'ws', name: 'Pix', type: 'pix', active: false }, error: null });

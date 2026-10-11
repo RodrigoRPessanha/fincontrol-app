@@ -52,6 +52,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
   const [paymentMethodId, setPaymentMethodId] = useState('');
   const [installmentCount, setInstallmentCount] = useState(1);
   const [paidInstallmentsCount, setPaidInstallmentsCount] = useState(0);
+  const [repaymentCounts, setRepaymentCounts] = useState<Record<string, number>>({});
 
   // Rateio de Despesas (Splitwise)
   const [paidByMemberId, setPaidByMemberId] = useState('');
@@ -141,6 +142,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
     setSelectedCreditCardId('');
     setInstallmentCount(1);
     setPaidInstallmentsCount(0);
+    setRepaymentCounts({});
     setPaidByMemberId('');
     setPaidByPersonId('');
     setSplitType('individual');
@@ -235,7 +237,8 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           paid_by_member_id: isPayerPerson ? undefined : effectivePayerId,
           paid_by_person_id: isPayerPerson ? effectivePayerId : undefined,
           split_type: effectiveSplitType !== 'individual' ? effectiveSplitType : undefined,
-          splits: resolvedSplits,
+          splits: resolvedSplits?.map((share) => ({ ...share, repaid_installments_count:
+            (share.person_id || share.member_id) === effectivePayerId ? 0 : Math.min(installmentCount, repaymentCounts[(share.person_id || share.member_id)!] ?? paidInstallmentsCount) })),
         };
         await createInstallmentPurchaseAsync({ ...payload, operation_key: await attempt.getKey(payload) });
       } else {
@@ -426,6 +429,10 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
           {type !== 'transfer' && (
             <SplitFields
               type={type}
+              repaymentTotal={isCreditCardSelected && installmentCount > 1 ? installmentCount : undefined}
+              repaymentDefault={paidInstallmentsCount}
+              repaymentCounts={repaymentCounts}
+              onRepaymentCountChange={(id, count) => setRepaymentCounts((previous) => ({ ...previous, [id]: count }))}
               workspaceMembers={workspaceMembers}
               people={people}
               paidByMemberId={paidByMemberId}
