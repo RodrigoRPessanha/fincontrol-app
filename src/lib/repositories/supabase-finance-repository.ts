@@ -1,3 +1,5 @@
+import { MonthlyRepaymentChange } from '../monthly-repayments';
+import { PurchaseDateChange } from '../financial-engine/purchase-dates';
 import { PurchaseRepaymentCount } from '../purchase-repayments';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Database, Json } from '../supabase/database.types';
@@ -441,6 +443,7 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       if (card.institution !== undefined) updateData.institution = card.institution;
       if (card.last_four_digits !== undefined) updateData.last_four_digits = card.last_four_digits;
       if (card.credit_limit !== undefined) updateData.credit_limit = roundCurrency(card.credit_limit);
+      if (card.closing_days_before_due !== undefined) updateData.closing_days_before_due = card.closing_days_before_due;
       if (card.closing_day !== undefined) updateData.closing_day = card.closing_day;
       if (card.due_day !== undefined) updateData.due_day = card.due_day;
       if (card.linked_payment_account_id !== undefined) updateData.linked_payment_account_id = card.linked_payment_account_id;
@@ -779,6 +782,19 @@ export class SupabaseFinanceRepository implements FinanceRepository {
       ...mapPurchaseRowToDomain(savedRow),
       splits: purchase.splits,
     }, recovered);
+  }
+
+  async reschedulePurchase(id: string, workspaceId: string, change: PurchaseDateChange): Promise<void> {
+    const { error } = await this.client.rpc('fn_reschedule_purchase_date', {
+      p_workspace_id: workspaceId, p_purchase_id: id, p_purchase_date: change.purchase_date,
+      p_expected_version: change.expected_version, p_expected_schedule: change.expected_schedule as unknown as Json,
+    });
+    if (error) throw RepositoryError.fromPostgrestError(error, 'purchases');
+  }
+
+  async markMonthlyRepayments(workspaceId: string, month: string, participantId: string, expected: MonthlyRepaymentChange[]): Promise<void> {
+    const { error } = await this.client.rpc('fn_mark_monthly_repayments', { p_workspace_id: workspaceId, p_month: month, p_participant_id: participantId, p_expected: expected as unknown as Json });
+    if (error) throw RepositoryError.fromPostgrestError(error, 'purchases');
   }
 
   async updatePurchaseRepayments(id: string, workspaceId: string, counts: PurchaseRepaymentCount[], expectedVersion: number): Promise<Purchase> {

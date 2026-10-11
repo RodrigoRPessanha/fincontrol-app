@@ -66,7 +66,7 @@ export function InstallmentFields({
               <option value="">Selecione o cartão (obrigatório)</option>
               {creditCards.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} (Fecha dia {c.closing_day})
+                  {c.name} ({c.closing_days_before_due != null ? `Fecha ${c.closing_days_before_due} dias antes do vencimento` : `Fecha dia ${c.closing_day}`})
                 </option>
               ))}
             </select>

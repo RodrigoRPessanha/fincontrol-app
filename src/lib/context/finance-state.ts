@@ -71,6 +71,8 @@ export interface FinanceContextType {
   creditCardBills: CreditCardBill[];
   addCreditCard: (card: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => CreditCard;
   updateCreditCard: (id: string, card: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => void;
+  addCreditCardAsync: (card: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>) => Promise<CreditCard>;
+  updateCreditCardAsync: (id: string, card: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>) => Promise<void>;
   payCreditCardBill: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string, operationKey?: string) => Payment;
   payCreditCardBillAsync: (billId: string, accountId?: string | null, amount?: number, paymentDate?: string, notes?: string, operationKey?: string) => Promise<Payment>;
 
@@ -115,6 +117,9 @@ export interface FinanceContextType {
 
   createInstallmentPurchaseAsync: (data: Parameters<FinanceContextType['createInstallmentPurchase']>[0]) => Promise<Purchase>;
 
+  reschedulePurchaseDateAsync: (id: string, change: import('../financial-engine/purchase-dates').PurchaseDateChange) => Promise<void>;
+
+  markMonthlyRepaymentsAsync: (month: string, participantId: string, expected: import('../monthly-repayments').MonthlyRepaymentChange[]) => Promise<void>;
   updatePurchaseRepaymentsAsync: (id: string, counts: import('../purchase-repayments').PurchaseRepaymentCount[], expectedVersion: number) => Promise<void>;
 
   payments: Payment[];

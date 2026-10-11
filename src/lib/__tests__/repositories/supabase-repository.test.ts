@@ -26,6 +26,13 @@ function createMockSupabaseClient() {
 }
 
 describe('SupabaseFinanceRepository', () => {
+  it('sends a monthly repayment batch through the atomic RPC and propagates conflicts',async()=>{
+    const {client}=createMockSupabaseClient();const repo=new SupabaseFinanceRepository(client);
+    await repo.markMonthlyRepayments('w','2026-10','b',[]);
+    expect(client.rpc).toHaveBeenCalledWith('fn_mark_monthly_repayments',{p_workspace_id:'w',p_month:'2026-10',p_participant_id:'b',p_expected:[]});
+    (client.rpc as any).mockResolvedValueOnce({error:{code:'PT409',message:'Changed'}});
+    await expect(repo.markMonthlyRepayments('w','2026-10','b',[])).rejects.toMatchObject({code:'CONFLICT'});
+  });
   it('patches with a version, reads complete relations and reports conflicts without stale overwrites', async () => {
     const { client } = createMockSupabaseClient(); const repo = new SupabaseFinanceRepository(client);
     const loaded = vi.spyOn(repo, 'getTransactions').mockResolvedValue([{ id: 't', workspace_id: 'w', description: 'New', splits: [{ person_id: 'p', amount: 10 }] } as any]);
@@ -39,6 +46,16 @@ describe('SupabaseFinanceRepository', () => {
     }
     loaded.mockResolvedValueOnce([]);
     await expect(repo.patchTransaction('t', 'w', { description: 'New' }, 'v')).rejects.toThrow(/indisponível/);
+  });
+  it('awaits the purchase-date RPC independently of snapshot hydration and preserves backend errors', async () => {
+    const { client } = createMockSupabaseClient(); client.rpc=vi.fn().mockResolvedValue({data:'p',error:null});
+    const repo=new SupabaseFinanceRepository(client as any); const loaded=vi.spyOn(repo,'loadSnapshot');
+    const change={purchase_date:'2050-01-10',expected_version:3,expected_schedule:[]};
+    await repo.reschedulePurchase('p','w',change);
+    expect(client.rpc).toHaveBeenCalledWith('fn_reschedule_purchase_date',{p_workspace_id:'w',p_purchase_id:'p',p_purchase_date:change.purchase_date,p_expected_version:3,p_expected_schedule:[]});
+    expect(loaded).not.toHaveBeenCalled();
+    (client.rpc as any).mockResolvedValueOnce({error:{code:'PT409',message:'Changed preview'}});
+    await expect(repo.reschedulePurchase('p','w',change)).rejects.toMatchObject({code:'CONFLICT'});
   });
   it('adjusts purchase repayments through the versioned RPC and reads authoritative shares', async () => {
     const { client } = createMockSupabaseClient(); client.rpc = vi.fn().mockResolvedValue({ data: 'p', error: null });

@@ -1,7 +1,7 @@
 import { CreditCard, Installment, Purchase } from '../types';
 import { format, parseISO, isValid, addMonths } from 'date-fns';
-import { toCents, fromCents, getActualDaysInMonth } from './money';
-import { calculateCardBillDates } from './credit-cards';
+import { toCents, fromCents } from './money';
+import { calculateCardBillDates, cardDatesForCycle } from './credit-cards';
 
 /**
  * Divide o valor total de uma compra em N parcelas sem perder centavos.
@@ -69,7 +69,8 @@ export function splitInstallments(
     const firstBill = calculateCardBillDates(
       purchaseDateStr,
       creditCard.closing_day,
-      creditCard.due_day
+      creditCard.due_day,
+      creditCard.closing_days_before_due
     );
     const [firstYearStr, firstMonthStr] = firstBill.referenceMonth.split('-');
     let startYear = parseInt(firstYearStr, 10);
@@ -92,22 +93,7 @@ export function splitInstallments(
       const cycleMonthStr = String(cycleMonth).padStart(2, '0');
       const referenceMonth = `${cycleYear}-${cycleMonthStr}`;
 
-      const maxClosingDays = getActualDaysInMonth(cycleYear, cycleMonth);
-      const realClosingDay = Math.min(safeClosing, maxClosingDays);
-      const closingDate = `${cycleYear}-${cycleMonthStr}-${String(realClosingDay).padStart(2, '0')}`;
-
-      let dueYear = cycleYear;
-      let dueMonth = cycleMonth;
-      if (safeDue < safeClosing) {
-        dueMonth += 1;
-        if (dueMonth > 12) {
-          dueMonth = 1;
-          dueYear += 1;
-        }
-      }
-      const maxDueDays = getActualDaysInMonth(dueYear, dueMonth);
-      const realDueDay = Math.min(safeDue, maxDueDays);
-      const dueDate = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(realDueDay).padStart(2, '0')}`;
+      const { closingDate, dueDate } = cardDatesForCycle(referenceMonth, safeClosing, safeDue, creditCard.closing_days_before_due);
 
       results.push({
         installmentNumber: i,

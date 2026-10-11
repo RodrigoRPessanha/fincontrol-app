@@ -120,7 +120,7 @@ export function QuickAddModal({ isOpen, onClose }: QuickAddModalProps) {
 
   // Cálculo da primeira fatura e preview exato ao centavo via splitInstallments
   const billPreview = selectedCard
-    ? calculateCardBillDates(transactionDate, selectedCard.closing_day, selectedCard.due_day)
+    ? calculateCardBillDates(transactionDate, selectedCard.closing_day, selectedCard.due_day, selectedCard.closing_days_before_due)
     : null;
 
   const numAmount = parseCurrencyInput(amountStr) || 0;

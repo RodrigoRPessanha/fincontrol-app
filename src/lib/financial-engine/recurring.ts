@@ -463,7 +463,7 @@ export function processRecurringBatchState(
         if (effectiveCardId) {
           const card = creditCards.find((c) => c.id === effectiveCardId && c.workspace_id === rec.workspace_id);
           if (card) {
-            const billDates = calculateCardBillDates(currOccurrence, card.closing_day, card.due_day);
+            const billDates = calculateCardBillDates(currOccurrence, card.closing_day, card.due_day, card.closing_days_before_due);
             const billRes = resolveOrCreateCreditCardBill({
               bills: updatedBills,
               cardId: card.id,
@@ -478,7 +478,7 @@ export function processRecurringBatchState(
             updatedBills = billRes.updatedBills;
             billId = billRes.billId;
             hasChanges = true;
-            calculatedDueDate = billDates.dueDate;
+            calculatedDueDate = billRes.updatedBills.find(b => b.id === billRes.billId)!.due_date;
           }
         }
 

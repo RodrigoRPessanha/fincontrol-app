@@ -497,7 +497,7 @@ export default function DashboardPage() {
                           {card.name}
                         </h4>
                         <span className="text-[10px] text-slate-400">
-                          •••• {card.last_four_digits} | Fecha dia {card.closing_day} | Vence dia {card.due_day}
+                          •••• {card.last_four_digits} | {card.closing_days_before_due != null ? `Fecha ${card.closing_days_before_due} dias antes do vencimento` : `Fecha dia ${card.closing_day}`} | Vence dia {card.due_day}
                         </span>
                       </div>
                       {currentBill && (

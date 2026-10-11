@@ -10,10 +10,19 @@ import {
 } from '../../financial-engine';
 import { FinanceActionDeps } from './types';
 
+function validateCardCalendar(card: Partial<CreditCard>): void {
+  for (const value of [card.closing_day, card.due_day]) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 31)) throw new Error('Dias do cartão devem estar entre 1 e 31.');
+  }
+  if (card.closing_days_before_due != null && (!Number.isInteger(card.closing_days_before_due) || card.closing_days_before_due < 1 || card.closing_days_before_due > 27)) throw new Error('Antecedência do fechamento deve ser de 1 a 27 dias.');
+  if (card.name !== undefined && !card.name.trim()) throw new Error('Informe o nome do cartão.');
+}
+
 export function addCreditCard(
   deps: FinanceActionDeps,
   cardData: Omit<CreditCard, 'id' | 'workspace_id' | 'created_at'>
 ): CreditCard {
+  validateCardCalendar(cardData);
   cardData = { ...cardData, credit_limit: normalizeMoney(cardData.credit_limit, 'Limite do cartão', 'nonnegative') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;
@@ -44,6 +53,7 @@ export function updateCreditCard(
   id: string,
   data: Omit<Partial<CreditCard>, 'id' | 'workspace_id' | 'created_at'>
 ): void {
+  validateCardCalendar(data);
   if (data.credit_limit !== undefined) data = { ...data, credit_limit: normalizeMoney(data.credit_limit, 'Limite do cartão', 'nonnegative') };
   const state = deps.getState();
   const targetWsId = state.activeWorkspaceId;

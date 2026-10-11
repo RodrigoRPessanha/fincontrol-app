@@ -54,6 +54,8 @@ describe('Purchase repayment interface', () => {
     const { container } = await mount(<SplitsPage />); const buttons = nodes(container, (n) => n.tagName === 'BUTTON' && text(n).startsWith('Ajustar repasses de'));
     expect(buttons.length).toBe(3); await act(async () => props(buttons[0]).onClick()); expect(text(container)).toContain('Ajustar parcelas repassadas');
     await act(async () => props(nodes(container, (n) => props(n).children === 'Cancelar')[0]).onClick()); expect(text(container)).not.toContain('Ajustar parcelas repassadas');
+    await act(async () => props(nodes(container, n => props(n).children === 'Marcar parcelas repassadas até este mês')[0]).onClick()); expect(text(container)).toContain('Quem já repassou?');
+    await act(async () => props(nodes(container, n => props(n).children === 'Cancelar')[0]).onClick()); expect(text(container)).not.toContain('Quem já repassou?');
     expect(text(container)).toContain('Responsabilidade no mês');
   });
   it('traps keyboard focus and ignores Escape while a repayment save is pending', async () => {

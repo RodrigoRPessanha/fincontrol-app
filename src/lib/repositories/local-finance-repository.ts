@@ -1,3 +1,5 @@
+import { MonthlyRepaymentChange, applyMonthlyRepayments } from '../monthly-repayments';
+import { PurchaseDateChange, reschedulePurchaseState } from '../financial-engine/purchase-dates';
 import { PurchaseRepaymentCount, withPurchaseRepayments } from '../purchase-repayments';
 import {
   Account,
@@ -751,6 +753,18 @@ export class LocalFinanceRepository implements FinanceRepository {
     state.allPurchases = state.allPurchases.map((p) => p.id === newPurchase.id ? newPurchase : p);
     this.saveState(state);
     return newPurchase;
+  }
+
+  async reschedulePurchase(id: string, workspaceId: string, change: PurchaseDateChange): Promise<void> {
+    const state = this.getState();
+    const updated = reschedulePurchaseState({ ...state, activeWorkspaceId: workspaceId }, id, change, generateId, new Date().toISOString());
+    this.saveState({ ...updated, activeWorkspaceId: state.activeWorkspaceId });
+  }
+
+  async markMonthlyRepayments(workspaceId: string, month: string, participantId: string, expected: MonthlyRepaymentChange[]): Promise<void> {
+    const state = this.getState();
+    const purchases = applyMonthlyRepayments(workspaceId, month, participantId, state.allPurchases, state.allInstallments, expected);
+    this.saveState({ ...state, allPurchases: purchases });
   }
 
   async updatePurchaseRepayments(id: string, workspaceId: string, counts: PurchaseRepaymentCount[], expectedVersion: number): Promise<Purchase> {
