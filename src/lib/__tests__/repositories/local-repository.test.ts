@@ -67,6 +67,15 @@ function seedInstallment(
 }
 
 describe('LocalFinanceRepository', () => {
+  it('persists a monthly repayment batch once and rejects a stale preview atomically', async () => {
+    const { purchaseDateFixture } = await import('../test-utils/purchase-date-fixture');
+    const { monthlyRepaymentPlan } = await import('../../monthly-repayments');
+    const storage=createMockStorage();const repo=new LocalFinanceRepository(storage);const state=purchaseDateFixture();saveFinanceSnapshot(storage,state);
+    const plan=monthlyRepaymentPlan('w','2050-03','b',state.allPurchases,state.allInstallments);
+    await repo.markMonthlyRepayments('w','2050-03','b',plan);
+    expect((await repo.loadSnapshot('w')).allPurchases[0].splits?.[1]).toMatchObject({repaid_installments_count:2,repaid_amount:200});
+    await expect(repo.markMonthlyRepayments('w','2050-03','b',plan)).rejects.toThrow(/alterados/);
+  });
   it('patches local transactions, rejects foreign or stale versions and derives overdue state', async () => {
     const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);
     const tx = await repo.saveTransaction({ workspace_id: 'ws-1', description: 'Original', amount: 20, type: 'expense', status: 'pending', transaction_date: '2026-10-01', due_date: '2050-01-01', updated_at: '2026-10-01T00:00:00Z' });
@@ -75,6 +84,19 @@ describe('LocalFinanceRepository', () => {
     const changed = await repo.patchTransaction(tx.id, 'ws-1', { description: 'New', due_date: '2000-01-01' }, tx.updated_at);
     expect(changed).toMatchObject({ description: 'New', status: 'overdue' });
     expect(await repo.patchTransaction(tx.id, 'ws-1', { due_date: '2050-01-01' })).toMatchObject({ status: 'pending' });
+  });
+  it('persists a corrected purchase calendar without touching historical repayments or balances', async () => {
+    const { purchaseDateFixture } = await import('../test-utils/purchase-date-fixture');
+    const { purchaseDateSchedule } = await import('../../financial-engine/purchase-dates');
+    const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage); const state = purchaseDateFixture();
+    saveFinanceSnapshot(storage,state);
+    const schedule = purchaseDateSchedule(state,state.allPurchases[0],'2049-12-10');
+    await repo.reschedulePurchase('p','w',{purchase_date:'2049-12-10',expected_version:3,expected_schedule:schedule});
+    const saved = await repo.loadSnapshot('w');
+    expect(saved.allPurchases[0]).toMatchObject({purchase_date:'2049-12-10',repayment_version:4});
+    expect(saved.allInstallments[0]).toMatchObject({due_date:'2050-01-10',paid_amount:200,paid_at:'2049-12-01'});
+    expect(saved.allPurchases[0].splits?.[1].repaid_amount).toBe(100); expect(saved.allAccounts[0].current_balance).toBe(1000);
+    await expect(repo.reschedulePurchase('p','w',{purchase_date:'2049-12-10',expected_version:3,expected_schedule:schedule})).rejects.toThrow(/alterada/);
   });
   it('persists and replaces historical repayments with workspace and version guards', async () => {
     const storage = createMockStorage(); const repo = new LocalFinanceRepository(storage);

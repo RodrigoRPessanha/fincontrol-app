@@ -1,3 +1,4 @@
+import { MonthlyRepaymentChange } from '../monthly-repayments';
 import {
   Account,
   Budget,
@@ -19,6 +20,7 @@ import {
   WorkspaceMember,
   WorkspaceRole,
 } from '../types';
+import { PurchaseDateChange } from '../financial-engine/purchase-dates';
 import { PurchaseRepaymentCount } from '../purchase-repayments';
 import { FinanceState } from '../context/finance-state';
 
@@ -75,8 +77,10 @@ export interface FinanceRepository {
 
   // Compras Parceladas e Parcelas
   getPurchases(workspaceId: string): Promise<Purchase[]>;
+  reschedulePurchase(id: string, workspaceId: string, change: PurchaseDateChange): Promise<void>;
   savePurchase(purchase: Omit<Purchase, 'id' | 'created_at'> & { id?: string }): Promise<Purchase>;
   deletePurchase(id: string): Promise<void>;
+  markMonthlyRepayments(workspaceId: string, month: string, participantId: string, expected: MonthlyRepaymentChange[]): Promise<void>;
   updatePurchaseRepayments(id: string, workspaceId: string, counts: PurchaseRepaymentCount[], expectedVersion: number): Promise<Purchase>;
   getInstallments(purchaseId: string): Promise<Installment[]>;
 

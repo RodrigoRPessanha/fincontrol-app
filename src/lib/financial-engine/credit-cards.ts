@@ -1,5 +1,5 @@
 import { Account, CreditCard, CreditCardBill, PaymentMethod } from '../types';
-import { format, parseISO, isValid, addMonths } from 'date-fns';
+import { format, parseISO, isValid, addMonths, subDays } from 'date-fns';
 import { toCents, fromCents, roundCurrency, getActualDaysInMonth } from './money';
 
 export interface ResolveOrCreateBillParams {
@@ -28,7 +28,8 @@ export interface ResolveOrCreateBillResult {
 export function calculateCardBillDates(
   purchaseDateStr: string,
   closingDay: number,
-  dueDay: number
+  dueDay: number,
+  closingDaysBeforeDue?: number | null
 ): { referenceMonth: string; closingDate: string; dueDate: string } {
   if (!purchaseDateStr || typeof purchaseDateStr !== 'string') {
     throw new Error('Data de compra inválida: string de data obrigatória.');
@@ -41,6 +42,17 @@ export function calculateCardBillDates(
 
   const safeClosing = Math.max(1, Math.min(31, Math.floor(closingDay || 1)));
   const safeDue = Math.max(1, Math.min(31, Math.floor(dueDay || 10)));
+
+  if (closingDaysBeforeDue != null) {
+    if (!Number.isInteger(closingDaysBeforeDue) || closingDaysBeforeDue < 1 || closingDaysBeforeDue > 27) throw new Error('Antecedência do fechamento deve ser de 1 a 27 dias.');
+    let cycle = format(pDate, 'yyyy-MM');
+    let dates = cardDatesForCycle(cycle, closingDay, dueDay, closingDaysBeforeDue);
+    if (purchaseDateStr.slice(0, 10) >= dates.closingDate) {
+      cycle = format(addMonths(parseISO(`${cycle}-01`), 1), 'yyyy-MM');
+      dates = cardDatesForCycle(cycle, closingDay, dueDay, closingDaysBeforeDue);
+    }
+    return dates;
+  }
 
   const pDay = pDate.getDate();
   let billYear = pDate.getFullYear();
@@ -75,6 +87,15 @@ export function calculateCardBillDates(
   const dueDate = `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(realDueDay).padStart(2, '0')}`;
 
   return { referenceMonth, closingDate, dueDate };
+}
+
+/** Reference month stays the month of closing, including relative closing. */
+export function cardDatesForCycle(referenceMonth: string, closingDay: number, dueDay: number, daysBefore?: number | null) {
+  const cycle = parseISO(`${referenceMonth}-01`);
+  const dueMonth = addMonths(cycle, daysBefore != null ? (dueDay <= daysBefore ? 1 : 0) : (dueDay < closingDay ? 1 : 0));
+  const due = new Date(dueMonth.getFullYear(), dueMonth.getMonth(), Math.min(dueDay, getActualDaysInMonth(dueMonth.getFullYear(), dueMonth.getMonth() + 1)));
+  const closing = daysBefore != null ? subDays(due, daysBefore) : new Date(cycle.getFullYear(), cycle.getMonth(), Math.min(closingDay, getActualDaysInMonth(cycle.getFullYear(), cycle.getMonth() + 1)));
+  return { referenceMonth, dueDate: format(due, 'yyyy-MM-dd'), closingDate: format(closing, 'yyyy-MM-dd') };
 }
 
 /**

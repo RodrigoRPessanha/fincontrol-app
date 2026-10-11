@@ -1,4 +1,5 @@
-import { CreditCardBill, Installment, Purchase, Transaction, TransactionSplit } from '../types';
+import { CreditCardBill, Installment, Purchase, Transaction, TransactionSplit, WorkspaceMember, Person, Settlement } from '../types';
+import { calculateMemberNetBalances } from './splits';
 import { fromCents, toCents } from './money';
 
 export interface MonthlySharedExpense {
@@ -75,4 +76,22 @@ export function monthlySharedExpenses(
   }
   return { items: items.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)),
     responsibilities: new Map([...responsibilityCents].map(([id, cents]) => [id, fromCents(cents)])), warnings };
+}
+
+/** Only repayments explicitly tied to these installment numbers affect the monthly projection.
+ * Manual settlements have no competence-month allocation and stay in the accumulated ledger.
+ */
+export function monthlySplitBalances(workspaceId: string, items: MonthlySharedExpense[], members: WorkspaceMember[], people: Person[]) {
+  const projected = items.map(item => ({ ...item, workspace_id: workspaceId, type: 'expense', status: 'pending', transaction_date: item.date, due_date: item.date, created_at: item.date } as Transaction));
+  const repayments: Settlement[] = [];
+  for (const item of items) {
+    const payer = item.paid_by_person_id || item.paid_by_member_id;
+    if (!payer || !item.installmentNumber) continue;
+    for (const share of item.splits) {
+      const participant = share.person_id || share.member_id;
+      if (!participant || participant === payer || (share.repaid_installments_count || 0) < item.installmentNumber || toCents(share.amount) === 0) continue;
+      repayments.push({ id: `${item.id}:${participant}`, workspace_id: workspaceId, from_member_id: share.member_id || null, from_person_id: share.person_id || null, to_member_id: item.paid_by_member_id || null, to_person_id: item.paid_by_person_id || null, amount: share.amount, settlement_date: item.date, created_at: item.date } as Settlement);
+    }
+  }
+  return calculateMemberNetBalances(projected, repayments, members, workspaceId, [], people);
 }

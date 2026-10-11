@@ -1498,6 +1498,71 @@ describe.runIf(isCloudEnabled)('SupabaseFinanceRepository Cloud Integration (Sta
     await repo.deleteTransaction(expense.id);
     await repo.deleteCategory(cat.id);
   });
+  it('atomically marks repayments through a month without touching future shares or financial payments', async () => {
+    const ws = await repo.createWorkspace({ name: 'QA Monthly repayments', owner_id: testUserId, currency: 'BRL', tracking_mode: 'expense_tracker' });
+    try {
+      const member = (await repo.getWorkspaceMembers(ws.id)).find(m => m.user_id === testUserId)!;
+      const person = await repo.savePerson({workspace_id:ws.id,name:'QA Monthly person'});
+      for (let n=0;n<2;n++) await repo.savePurchase({workspace_id:ws.id,description:`Monthly QA ${n}`,total_amount:600,installment_count:3,purchase_date:'2050-09-10',paid_by_member_id:member.id,split_type:'equal',splits:[{member_id:member.id,amount:300},{person_id:person.id,amount:300,repaid_installments_count:0}]});
+      const before = await repo.loadSnapshot(ws.id);
+      const { monthlyRepaymentPlan } = await import('../../monthly-repayments');
+      const plan = monthlyRepaymentPlan(ws.id,'2050-10',person.id,before.allPurchases,before.allInstallments);
+      expect(plan).toHaveLength(2); expect(plan.every(c => c.count===2)).toBe(true);
+      await repo.markMonthlyRepayments(ws.id,'2050-10',person.id,plan);
+      const after = await repo.loadSnapshot(ws.id);
+      for (const p of after.allPurchases) expect(p.splits?.find(s => s.person_id===person.id)).toMatchObject({repaid_installments_count:2,repaid_amount:200});
+      expect(after.allPayments).toEqual(before.allPayments); expect(after.allInstallments).toEqual(before.allInstallments); expect(after.allAccounts).toEqual(before.allAccounts);
+      await expect(repo.markMonthlyRepayments(ws.id,'2050-10',person.id,plan)).rejects.toMatchObject({code:'CONFLICT',originalError:{code:'PT409'}});
+      await repo.markMonthlyRepayments(ws.id,'2050-10',person.id,[]);
+      expect(monthlyRepaymentPlan(ws.id,'2050-11',person.id,after.allPurchases,after.allInstallments).every(c => c.count===3)).toBe(true);
+    } finally { await repo.deleteWorkspace(ws.id); }
+  });
+  it('persists card edits and relative closing across purchases, transactions and historical bill dates', async () => {
+    const ws = await repo.createWorkspace({ name: 'QA Relative card calendar', owner_id: testUserId, currency: 'BRL', tracking_mode: 'expense_tracker' });
+    try {
+      const card = await repo.saveCreditCard({ workspace_id: ws.id, name: 'Relative QA', institution: 'QA', credit_limit: 1000, closing_day: 22, due_day: 1, closing_days_before_due: 7, color: '#6366f1', active: true });
+      const purchase = await repo.savePurchase({ workspace_id: ws.id, description: 'Relative 600/3', total_amount: 600, installment_count: 3, purchase_date: '2050-02-20', credit_card_id: card.id, paid_installments_count: 1 });
+      const before = await repo.loadSnapshot(ws.id);
+      expect(before.allInstallments.filter(i => i.purchase_id === purchase.id).sort((a,b) => a.installment_number-b.installment_number).map(i => i.due_date)).toEqual(['2050-03-01','2050-04-01','2050-05-01']);
+      expect(before.allCreditCardBills.sort((a,b) => a.reference_month.localeCompare(b.reference_month)).map(b => b.closing_date)).toEqual(['2050-02-22','2050-03-25','2050-04-24']);
+      const edited = await repo.saveCreditCard({ ...card, name: 'Relative edited', credit_limit: 2000, closing_days_before_due: 10 });
+      expect(edited).toMatchObject({ name: 'Relative edited', credit_limit: 2000, closing_days_before_due: 10 });
+      const after = await repo.loadSnapshot(ws.id);
+      expect(after.allCreditCardBills).toEqual(expect.arrayContaining(before.allCreditCardBills));
+      expect(after.allInstallments).toEqual(expect.arrayContaining(before.allInstallments));
+      const tx = await repo.saveTransaction({ workspace_id: ws.id, description: 'Relative closing boundary', amount: 10, type: 'expense', status: 'pending', transaction_date: '2050-05-22', due_date: '2050-05-22', credit_card_id: card.id });
+      expect(tx.due_date).toBe('2050-07-01');
+      const latest = await repo.loadSnapshot(ws.id);
+      const original = latest.allPurchases.find(p => p.id === purchase.id)!;
+      const { purchaseDateSchedule } = await import('../../financial-engine/purchase-dates');
+      await repo.reschedulePurchase(purchase.id, ws.id, { purchase_date: '2050-01-10', expected_version: original.repayment_version!, expected_schedule: purchaseDateSchedule(latest, original, '2050-01-10') });
+      expect((await repo.getInstallments(purchase.id)).find(i => i.installment_number === 1)?.due_date).toBe('2050-02-01');
+    } finally { await repo.deleteWorkspace(ws.id); }
+  });
+  it('corrects imported paid purchase dates through the real RPC and preserves repayments and payment timestamps', async () => {
+    const ws=await repo.createWorkspace({name:'QA Purchase date correction',owner_id:testUserId,currency:'BRL',tracking_mode:'expense_tracker'});
+    try {
+      const member=(await repo.getWorkspaceMembers(ws.id)).find((m)=>m.user_id===testUserId)!;
+      const person=await repo.savePerson({workspace_id:ws.id,name:'QA Date Person'});
+      const card=await repo.saveCreditCard({workspace_id:ws.id,name:'QA Date Card',institution:'QA',credit_limit:10000,closing_day:20,due_day:10,color:'#000000',active:true});
+      const purchase=await repo.savePurchase({workspace_id:ws.id,description:'600/3 date correction',total_amount:600,installment_count:3,purchase_date:'2050-01-10',credit_card_id:card.id,paid_installments_count:1,paid_by_member_id:member.id,split_type:'equal',splits:[{member_id:member.id,amount:300},{person_id:person.id,amount:300,repaid_installments_count:1}]});
+      const {purchaseDateSchedule}=await import('../../financial-engine/purchase-dates');
+      const before=await repo.loadSnapshot(ws.id);const original=before.allPurchases.find((p)=>p.id===purchase.id)!;
+      const paidBefore=before.allInstallments.find((i)=>i.purchase_id===purchase.id && i.installment_number===1)!;
+      const request={purchase_date:'2049-12-10',expected_version:original.repayment_version!,expected_schedule:purchaseDateSchedule(before,original,'2049-12-10')};
+      await repo.reschedulePurchase(purchase.id,ws.id,request);
+      const after=await repo.loadSnapshot(ws.id);const changed=after.allPurchases.find((p)=>p.id===purchase.id)!;
+      expect(changed.purchase_date).toBe('2049-12-10');expect(changed.splits?.find((s)=>s.person_id===person.id)).toMatchObject({repaid_installments_count:1,repaid_amount:100});
+      const rows=after.allInstallments.filter((i)=>i.purchase_id===purchase.id).sort((a,b)=>a.installment_number-b.installment_number);
+      expect(rows.map((i)=>i.due_date)).toEqual(['2050-01-10','2050-02-10','2050-03-10']);
+      expect(rows[0]).toMatchObject({id:paidBefore.id,paid_at:paidBefore.paid_at,paid_amount:200,status:'paid'});
+      expect(after.allPayments).toHaveLength(0);expect(after.allCreditCardBills.reduce((sum,b)=>sum+b.paid_amount,0)).toBe(200);
+      await expect(repo.reschedulePurchase(purchase.id,ws.id,request)).rejects.toMatchObject({code:'CONFLICT',originalError:{code:'PT409'}});
+      const closingRequest={purchase_date:'2050-01-20',expected_version:changed.repayment_version!,expected_schedule:purchaseDateSchedule(after,changed,'2050-01-20')};
+      await repo.reschedulePurchase(purchase.id,ws.id,closingRequest);
+      expect((await repo.getInstallments(purchase.id)).find((i)=>i.installment_number===1)?.due_date).toBe('2050-03-10');
+    } finally { await repo.deleteWorkspace(ws.id); }
+  });
   it('creates historical repayments atomically, updates counts, rejects stale versions and deletes the purchase safely', async () => {
     const person = await repo.savePerson({ workspace_id: testWorkspaceId, name: 'QA Historical repayments' }); let id = '';
     try {

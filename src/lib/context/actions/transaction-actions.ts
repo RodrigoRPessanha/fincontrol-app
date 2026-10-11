@@ -84,7 +84,8 @@ export function addTransaction(
     const billDates = calculateCardBillDates(
       txData.transaction_date,
       card.closing_day,
-      card.due_day
+      card.due_day,
+      card.closing_days_before_due
     );
     if (explicitBill && (explicitBill.credit_card_id !== cardId || explicitBill.reference_month !== billDates.referenceMonth)) {
       throw new Error('Fatura informada não corresponde ao ciclo do cartão.');

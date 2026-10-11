@@ -2,7 +2,7 @@
 
 import { ContextualHelp } from '@/components/help/ContextualHelp';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useOperationAttempt } from '@/lib/hooks/use-operation-attempt';
 import { useFinance } from '@/lib/context/finance-context';
 import {
@@ -36,7 +36,8 @@ export default function AccountsPage() {
     addAccount,
     updateAccount,
     deleteAccount,
-    addCreditCard,
+    addCreditCardAsync,
+    updateCreditCardAsync,
     createTransferAsync,
     activeWorkspace,
     isWorkspaceReadOnly,
@@ -68,10 +69,22 @@ export default function AccountsPage() {
   const [accBalance, setAccBalance] = useState('');
   const [accColor, setAccColor] = useState('#10b981');
 
+  const [editingCard, setEditingCard] = useState<CreditCard | null>(null);
+  const [isSavingCard, setIsSavingCard] = useState(false);
+  const cardPending = useRef(false);
+  const cardDialog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isNewCardOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    cardDialog.current?.querySelector?.<HTMLInputElement>('input')?.focus?.();
+    return () => previous?.focus?.();
+  }, [isNewCardOpen]);
+  const [cardFormWorkspaceId, setCardFormWorkspaceId] = useState(activeWorkspace.id);
   const [cardName, setCardName] = useState('');
   const [cardInstitution, setCardInstitution] = useState('');
   const [cardLastDigits, setCardLastDigits] = useState('');
   const [cardLimit, setCardLimit] = useState('');
+  const [cardClosingOffset, setCardClosingOffset] = useState<number | null>(null);
   const [cardClosingDay, setCardClosingDay] = useState(3);
   const [cardDueDay, setCardDueDay] = useState(10);
   const [cardAccountId, setCardAccountId] = useState('');
@@ -115,24 +128,32 @@ export default function AccountsPage() {
     }
   };
 
-  const handleCreateCard = (e: React.FormEvent) => {
+  const handleCreateCard = async (e: React.FormEvent) => {
+    if (cardPending.current) { e.preventDefault(); return; }
     e.preventDefault();
     setFormError(null);
     try {
       const lim = parseMoneyField(cardLimit, 'Limite do cartão');
       if (!cardName.trim() || lim <= 0) return;
 
-      addCreditCard({
+      const cardData = {
         name: cardName.trim(),
         institution: cardInstitution.trim() || 'Cartão',
-        last_four_digits: cardLastDigits.trim() || undefined,
+        last_four_digits: cardLastDigits.trim(),
         credit_limit: lim,
+        closing_days_before_due: cardClosingOffset,
         closing_day: Number(cardClosingDay) || 1,
         due_day: Number(cardDueDay) || 10,
         linked_payment_account_id: cardAccountId || undefined,
-        color: '#6366f1',
-        active: true,
-      });
+        color: editingCard?.color || '#6366f1',
+        active: editingCard?.active ?? true,
+      };
+      cardPending.current = true;
+      setIsSavingCard(true);
+      if (editingCard) await updateCreditCardAsync(editingCard.id, cardData);
+      else await addCreditCardAsync(cardData);
+      setEditingCard(null);
+      setCardClosingOffset(null); setCardClosingDay(3); setCardDueDay(10);
 
       setCardName('');
       setCardInstitution('');
@@ -142,6 +163,9 @@ export default function AccountsPage() {
       setIsNewCardOpen(false);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    } finally {
+      cardPending.current = false;
+      setIsSavingCard(false);
     }
   };
 
@@ -217,7 +241,7 @@ export default function AccountsPage() {
 
           {!isWorkspaceReadOnly && activeTab === 'cards' && (
             <button
-              onClick={() => setIsNewCardOpen(true)}
+              onClick={() => { setCardFormWorkspaceId(activeWorkspace.id); setEditingCard(null); setCardName(''); setCardInstitution(''); setCardLimit(''); setCardLastDigits(''); setCardClosingOffset(null); setCardClosingDay(3); setCardDueDay(10); setCardAccountId(''); setFormError(null); setIsNewCardOpen(true); }}
               className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-500"
             >
               <Plus className="h-4 w-4" />
@@ -393,22 +417,28 @@ export default function AccountsPage() {
                 key={card.id}
                 className="rounded-3xl bg-white p-6 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 space-y-4"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-600/20">
                       <CreditCardIcon className="h-5 w-5" />
                     </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">{card.name}</h4>
+                    <div className="min-w-0">
+                      <h4 className="break-words text-sm font-bold text-slate-900 dark:text-white">{card.name}</h4>
                       <p className="text-xs text-slate-400">Final •••• {card.last_four_digits}</p>
                     </div>
                   </div>
+                  {!isWorkspaceReadOnly && <button type="button" className="shrink-0 rounded-xl px-3 py-2 text-xs font-semibold text-indigo-600" onClick={() => {
+                    setCardFormWorkspaceId(activeWorkspace.id); setEditingCard(card); setCardName(card.name); setCardInstitution(card.institution);
+                    setCardLastDigits(card.last_four_digits || ''); setCardLimit(String(card.credit_limit));
+                    setCardClosingOffset(card.closing_days_before_due ?? null); setCardClosingDay(card.closing_day); setCardDueDay(card.due_day);
+                    setCardAccountId(card.linked_payment_account_id || ''); setFormError(null); setIsNewCardOpen(true);
+                  }}>Editar</button>}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/40">
                     <span className="text-[10px] text-slate-400">Fechamento:</span>
-                    <p className="font-bold text-slate-700 dark:text-slate-200">Dia {card.closing_day}</p>
+                    <p className="font-bold text-slate-700 dark:text-slate-200">{card.closing_days_before_due != null ? `${card.closing_days_before_due} dias antes do vencimento` : `Dia ${card.closing_day}`}</p>
                   </div>
                   <div className="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/40">
                     <span className="text-[10px] text-slate-400">Vencimento:</span>
@@ -645,15 +675,24 @@ export default function AccountsPage() {
       )}
 
       {/* Modal Novo Cartão */}
-      {isNewCardOpen && !isWorkspaceReadOnly && (
+      {isNewCardOpen && cardFormWorkspaceId === activeWorkspace.id && !isWorkspaceReadOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Cartão de Crédito</h3>
+          <div ref={cardDialog} role="dialog" aria-modal="true" aria-labelledby="card-dialog-title" onKeyDown={event => {
+            if (event.key === 'Escape' && !isSavingCard) { setIsNewCardOpen(false); setEditingCard(null); }
+            if (event.key === 'Tab') {
+              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input:not([hidden]):not(:disabled), select:not(:disabled), button:not(:disabled)'));
+              const first = controls[0]; const last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+          }} className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-100 dark:border-slate-800 max-h-[90dvh] overflow-y-auto">
+            <h3 id="card-dialog-title" className="text-base font-bold text-slate-900 dark:text-white">{editingCard ? 'Editar Cartão de Crédito' : 'Cadastrar Cartão de Crédito'}</h3>
+            <p className="mt-2 text-xs text-slate-500">Alterações no cadastro não modificam faturas, pagamentos ou parcelas já existentes.</p>
             <form onSubmit={handleCreateCard} className="mt-4 space-y-3">
             {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{formError}</p>}
               <div>
-                <label className="block text-xs font-semibold uppercase text-slate-500">Nome do Cartão</label>
-                <input
+                <label htmlFor="card-name" className="block text-xs font-semibold uppercase text-slate-500">Nome do Cartão</label>
+                <input id="card-name"
                   type="text"
                   required
                   placeholder="Ex: Nubank Ultravioleta"
@@ -662,12 +701,18 @@ export default function AccountsPage() {
                   className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
                 />
               </div>
+              <div>
+                <label htmlFor="card-institution" className="block text-xs font-semibold uppercase text-slate-500">Instituição</label>
+                <input id="card-institution" value={cardInstitution} onChange={e => setCardInstitution(e.target.value)} className="mt-1 w-full rounded-xl border p-2 text-xs dark:bg-slate-800" />
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500">Últimos 4 dígitos</label>
-                  <input
+                  <label htmlFor="card-digits" className="block text-xs font-semibold uppercase text-slate-500">Últimos 4 dígitos</label>
+                  <input id="card-digits"
                     type="text"
                     maxLength={4}
+                    inputMode="numeric"
+                    pattern="[0-9]{4}|"
                     placeholder="1234"
                     value={cardLastDigits}
                     onChange={(e) => setCardLastDigits(e.target.value)}
@@ -675,8 +720,8 @@ export default function AccountsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500">Limite Total</label>
-                  <input
+                  <label htmlFor="card-limit" className="block text-xs font-semibold uppercase text-slate-500">Limite Total</label>
+                  <input id="card-limit"
                     type="text"
                     required
                     placeholder="10000,00"
@@ -686,45 +731,42 @@ export default function AccountsPage() {
                   />
                 </div>
               </div>
+              <div>
+                <label htmlFor="card-closing-rule" className="block text-xs font-semibold uppercase text-slate-500">Regra de fechamento</label>
+                <select id="card-closing-rule" value={cardClosingOffset == null ? 'fixed' : 'relative'} onChange={e => setCardClosingOffset(e.target.value === 'fixed' ? null : 7)} className="mt-1 w-full rounded-xl border p-2 text-xs dark:border-slate-700 dark:bg-slate-800">
+                  <option value="fixed">Dia fixo</option><option value="relative">Dias antes do vencimento</option>
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500">Dia Fechamento</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    required
-                    value={cardClosingDay}
-                    onChange={(e) => setCardClosingDay(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
-                  />
+                  {cardClosingOffset == null ? <>
+                    <label htmlFor="card-closing" className="block text-xs font-semibold uppercase text-slate-500">Dia Fechamento</label>
+                    <input id="card-closing" type="number" min={1} max={31} required value={cardClosingDay} onChange={e => setCardClosingDay(Number(e.target.value))} className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+                  </> : <>
+                    <label htmlFor="card-offset" className="block text-xs font-semibold uppercase text-slate-500">Dias de antecedência</label>
+                    <input id="card-offset" aria-label="Dias antes do vencimento" type="number" min={1} max={27} required value={cardClosingOffset} onChange={e => setCardClosingOffset(Number(e.target.value))} className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
+                  </>}
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500">Dia Vencimento</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    required
-                    value={cardDueDay}
-                    onChange={(e) => setCardDueDay(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
-                  />
+                  <label htmlFor="card-due" className="block text-xs font-semibold uppercase text-slate-500">Dia Vencimento</label>
+                  <input id="card-due" type="number" min={1} max={31} required value={cardDueDay} onChange={e => setCardDueDay(Number(e.target.value))} className="mt-1 w-full rounded-xl border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800" />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
-                  onClick={() => setIsNewCardOpen(false)}
+                  disabled={isSavingCard}
+                  onClick={() => { setIsNewCardOpen(false); setCardClosingOffset(null); setCardClosingDay(3); setCardDueDay(10); setCardInstitution(''); setEditingCard(null); setCardName(''); setCardLastDigits(''); setCardLimit(''); setCardAccountId(''); }}
                   className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
+                  disabled={isSavingCard}
                   className="rounded-xl bg-indigo-600 px-5 py-2 text-xs font-bold text-white hover:bg-indigo-500"
                 >
-                  Salvar Cartão
+                  {isSavingCard ? 'Salvando…' : 'Salvar Cartão'}
                 </button>
               </div>
             </form>

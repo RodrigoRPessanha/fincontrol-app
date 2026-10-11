@@ -242,6 +242,7 @@ export type Database = {
         Row: {
           active: boolean
           closing_day: number
+          closing_days_before_due: number | null
           color: string
           created_at: string
           credit_limit: number
@@ -257,6 +258,7 @@ export type Database = {
         Insert: {
           active?: boolean
           closing_day: number
+          closing_days_before_due?: number | null
           color?: string
           created_at?: string
           credit_limit?: number
@@ -272,6 +274,7 @@ export type Database = {
         Update: {
           active?: boolean
           closing_day?: number
+          closing_days_before_due?: number | null
           color?: string
           created_at?: string
           credit_limit?: number
@@ -1501,6 +1504,20 @@ export type Database = {
           split_id: string
         }[]
       }
+      fn_card_cycle_calendar: {
+        Args: {
+          p_card: Database["public"]["Tables"]["credit_cards"]["Row"]
+          p_cycle: string
+        }
+        Returns: {
+          closing_date: string
+          due_date: string
+        }[]
+      }
+      fn_card_purchase_cycle: {
+        Args: { p_card_id: string; p_date: string; p_inclusive?: boolean }
+        Returns: string
+      }
       fn_check_routine_privilege: {
         Args: { p_privilege?: string; p_routine: string }
         Returns: boolean
@@ -1635,8 +1652,25 @@ export type Database = {
         }
         Returns: string
       }
+      fn_mark_monthly_repayments: {
+        Args: {
+          p_expected: Json
+          p_month: string
+          p_participant_id: string
+          p_workspace_id: string
+        }
+        Returns: number
+      }
       fn_materialize_recurring_transactions: {
         Args: { p_target_date?: string; p_workspace_id?: string }
+        Returns: Json
+      }
+      fn_monthly_repayment_plan: {
+        Args: {
+          p_month: string
+          p_participant_id: string
+          p_workspace_id: string
+        }
         Returns: Json
       }
       fn_normalize_money: {
@@ -1651,6 +1685,10 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: string
+      }
+      fn_purchase_date_schedule: {
+        Args: { p_purchase_date: string; p_purchase_id: string }
+        Returns: Json
       }
       fn_record_goal_deposit: {
         Args: {
@@ -1687,6 +1725,16 @@ export type Database = {
           p_settlement_date?: string
           p_to_member_id?: string
           p_to_person_id?: string
+          p_workspace_id: string
+        }
+        Returns: string
+      }
+      fn_reschedule_purchase_date: {
+        Args: {
+          p_expected_schedule: Json
+          p_expected_version: number
+          p_purchase_date: string
+          p_purchase_id: string
           p_workspace_id: string
         }
         Returns: string
