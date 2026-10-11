@@ -173,41 +173,48 @@ function TransactionsContent() {
 
       {/* Barra de Filtros Avançados */}
       <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200/80 dark:bg-slate-900 dark:border-slate-800 space-y-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(160px,1fr)_auto_minmax(140px,1fr)_minmax(150px,1fr)]">
           {/* Busca por texto */}
-          <div className="relative lg:col-span-2">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <div className="relative min-w-0 sm:col-span-2 xl:col-span-1">
+            <label htmlFor="transaction-list-search" className="mb-1 block text-xs font-semibold text-slate-500">Descrição</label>
+            <Search className="pointer-events-none absolute bottom-3.5 left-3.5 h-4 w-4 text-slate-400" />
             <input
+              id="transaction-list-search"
               type="text"
               placeholder="Buscar por descrição..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 py-2 pl-10 pr-4 text-xs text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              className="h-11 w-full min-w-0 rounded-2xl border border-slate-300 bg-slate-50/50 py-2 pl-10 pr-4 text-xs text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
 
           {/* Período de consulta */}
-          <div>
+          <div className="min-w-0">
             <label htmlFor="transaction-list-month" className="mb-1 block text-xs font-semibold text-slate-500">Período {monthFilter ? '' : '— todos os meses'}</label>
             <input
               id="transaction-list-month"
               type="month"
               value={monthFilter}
               onChange={(e) => setMonthFilter(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 py-2 px-3 text-xs text-slate-900 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              className="h-11 w-full min-w-0 rounded-2xl border border-slate-300 bg-slate-50/50 py-2 px-3 text-xs text-slate-900 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setMonthFilter('')} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs dark:border-slate-700">Todos os meses</button>
-            <button type="button" onClick={() => setMonthFilter(format(new Date(), 'yyyy-MM'))} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs dark:border-slate-700">Mês atual</button>
+          <div className="min-w-0">
+            <span className="mb-1 block text-xs font-semibold text-slate-500">Atalhos do período</span>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setMonthFilter('')} className="h-11 whitespace-nowrap rounded-2xl border border-slate-300 px-3 text-xs dark:border-slate-700">Todos os meses</button>
+              <button type="button" onClick={() => setMonthFilter(format(new Date(), 'yyyy-MM'))} className="h-11 whitespace-nowrap rounded-2xl border border-slate-300 px-3 text-xs dark:border-slate-700">Mês atual</button>
+            </div>
           </div>
           {/* Tipo */}
-          <div>
+          <div className="min-w-0">
+            <label htmlFor="transaction-list-type" className="mb-1 block text-xs font-semibold text-slate-500">Tipo</label>
             <select
+              id="transaction-list-type"
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as any)}
-              className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 py-2 px-3 text-xs text-slate-900 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              className="h-11 w-full min-w-0 rounded-2xl border border-slate-300 bg-slate-50/50 py-2 px-3 text-xs text-slate-900 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             >
               <option value="all">Todos os Tipos</option>
               <option value="expense">Apenas Despesas</option>
@@ -216,11 +223,13 @@ function TransactionsContent() {
           </div>
 
           {/* Status */}
-          <div>
+          <div className="min-w-0">
+            <label htmlFor="transaction-list-status" className="mb-1 block text-xs font-semibold text-slate-500">Status</label>
             <select
+              id="transaction-list-status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-slate-50/50 py-2 px-3 text-xs text-slate-900 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              className="h-11 w-full min-w-0 rounded-2xl border border-slate-300 bg-slate-50/50 py-2 px-3 text-xs text-slate-900 focus:border-emerald-500 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             >
               <option value="all">Todos os Status</option>
               <option value="paid">Pagas / Recebidas</option>
