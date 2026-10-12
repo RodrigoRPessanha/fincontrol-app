@@ -25,7 +25,25 @@ function createMockSupabaseClient() {
   return { client, queryBuilder };
 }
 
+function maintenancePreviewMock(id='w',name='Name') {
+  return {workspace_id:id,name,fingerprint:'hash',can_delete:true,counts:{transactions:0,purchases:0,installments:0,payments:0,transfers:0,settlements:0,bills:0,recurring:0,budgets:0,goals:0,goal_deposits:0},retained:{accounts:0,cards:0,methods:0,categories:0,people:0,members:0},initial_balance_total:0};
+}
+
 describe('SupabaseFinanceRepository', () => {
+  it('previews and executes owner-only workspace maintenance, propagating permission and conflict errors',async()=>{
+    const {client}=createMockSupabaseClient();const repo=new SupabaseFinanceRepository(client);
+    const preview=maintenancePreviewMock();
+    (client.rpc as any).mockResolvedValueOnce({data:preview,error:null});expect(await repo.getWorkspaceMaintenancePreview('w')).toEqual(preview);
+    expect(client.rpc).toHaveBeenCalledWith('fn_preview_workspace_maintenance',{p_workspace_id:'w'});
+    const req={action:'clear' as const,confirmation_name:'Name',expected_fingerprint:'hash',operation_key:'key'};
+    for(const replayed of [false,true]) {(client.rpc as any).mockResolvedValueOnce({data:{replayed},error:null});expect(await repo.maintainWorkspace('w',req)).toEqual({replayed});}
+    expect(client.rpc).toHaveBeenCalledWith('fn_maintain_workspace',{p_workspace_id:'w',p_action:'clear',p_confirmation_name:'Name',p_expected_fingerprint:'hash',p_operation_key:'key'});
+    (client.rpc as any).mockResolvedValueOnce({data:null,error:{code:'42501',message:'Owner only'}});await expect(repo.getWorkspaceMaintenancePreview('w')).rejects.toMatchObject({code:'FORBIDDEN'});
+    (client.rpc as any).mockResolvedValueOnce({data:null,error:{code:'PT409',message:'Changed'}});await expect(repo.maintainWorkspace('w',req)).rejects.toMatchObject({code:'CONFLICT'});
+    for(const data of [null,[],{...preview,workspace_id:'other'},{...preview,name:null},{...preview,fingerprint:null},{...preview,counts:null},{...preview,retained:null}]) {(client.rpc as any).mockResolvedValueOnce({data,error:null});await expect(repo.getWorkspaceMaintenancePreview('w')).rejects.toThrow(/Prévia/);}
+    for(const patch of [{can_delete:null},{initial_balance_total:Infinity},{counts:{...preview.counts,settlements:null}},{counts:{...preview.counts,transactions:-1}},{counts:{...preview.counts,goal_deposits:1.5}},{retained:{...preview.retained,members:'1'}},{retained:{...preview.retained,accounts:-1}}]) {(client.rpc as any).mockResolvedValueOnce({data:{...preview,...patch},error:null});await expect(repo.getWorkspaceMaintenancePreview('w')).rejects.toThrow(/Contagens/);}
+    for(const data of [null,{}, {replayed:'yes'}]) {(client.rpc as any).mockResolvedValueOnce({data,error:null});await expect(repo.maintainWorkspace('w',req)).rejects.toThrow(/Resposta/);}
+  });
   it('sends a monthly repayment batch through the atomic RPC and propagates conflicts',async()=>{
     const {client}=createMockSupabaseClient();const repo=new SupabaseFinanceRepository(client);
     await repo.markMonthlyRepayments('w','2026-10','b',[]);
@@ -275,11 +293,8 @@ describe('SupabaseFinanceRepository', () => {
     const updatedWs = await repo.updateWorkspace('ws-1', { name: 'Ws Renamed' });
     expect(updatedWs.name).toBe('Ws Renamed');
 
-    // deleteWorkspace
-    (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
-    });
+    // deleteWorkspace uses the owner-only maintenance RPC.
+    (client.rpc as any).mockResolvedValueOnce({data:maintenancePreviewMock('ws-1','Ws Renamed'),error:null}).mockResolvedValueOnce({data:{replayed:false},error:null});
     await expect(repo.deleteWorkspace('ws-1')).resolves.toBeUndefined();
 
     // getWorkspaceMembers
@@ -1105,10 +1120,7 @@ describe('SupabaseFinanceRepository', () => {
     });
     await expect(repo.updateWorkspace('ws-1', { name: 'X' })).rejects.toThrow(RepositoryError);
 
-    (client.from as any).mockReturnValueOnce({
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: err }),
-    });
+    (client.rpc as any).mockResolvedValueOnce({data:null,error:err});
     await expect(repo.deleteWorkspace('ws-1')).rejects.toThrow(RepositoryError);
 
     // Members

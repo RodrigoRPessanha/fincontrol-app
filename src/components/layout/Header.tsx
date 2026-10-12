@@ -33,6 +33,7 @@ export function Header() {
     viewPerspective,
     setViewPerspective,
     isWorkspaceReadOnly,
+    isMaintainingWorkspace,
   } = useFinance();
   const { user, logout, isLoading: isAuthLoading } = useAuth();
   const router = useRouter();
@@ -72,6 +73,7 @@ export function Header() {
         <div className="flex items-center gap-3">
           <div className="relative">
             <button
+              disabled={isMaintainingWorkspace}
               onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
               className="flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >

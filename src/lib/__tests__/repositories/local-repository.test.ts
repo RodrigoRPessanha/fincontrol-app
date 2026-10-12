@@ -164,10 +164,12 @@ describe('LocalFinanceRepository', () => {
     });
     expect(created.id).toBeDefined();
     expect(created.name).toBe('Novo Workspace');
+    expect(await repo.getWorkspaceMembers(created.id)).toEqual([expect.objectContaining({workspace_id:created.id,user_id:'user-xyz',role:'owner'})]);
 
     const updated = await repo.updateWorkspace(created.id, { name: 'Workspace Renomeado' });
     expect(updated.name).toBe('Workspace Renomeado');
 
+    await repo.createWorkspace({name:'Outro do mesmo proprietário',owner_id:'user-xyz',currency:'BRL',tracking_mode:'full'});
     await repo.deleteWorkspace(created.id);
     const workspaces = await repo.getWorkspaces();
     expect(workspaces.some((w) => w.id === created.id)).toBe(false);

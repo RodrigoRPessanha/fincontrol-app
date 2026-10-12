@@ -113,7 +113,7 @@ SELECT is(
 );
 
 -- 3.4. Member NÃO pode excluir workspace
-DELETE FROM public.workspaces WHERE id = (SELECT ws_id FROM rbac_vars);
+DO $$ BEGIN BEGIN DELETE FROM public.workspaces WHERE id=(SELECT ws_id FROM rbac_vars); RAISE EXCEPTION 'Direct workspace delete unexpectedly allowed'; EXCEPTION WHEN insufficient_privilege THEN NULL; END; END $$;
 SELECT is(
     (SELECT count(*)::INT FROM public.workspaces WHERE id = (SELECT ws_id FROM rbac_vars)),
     1,
