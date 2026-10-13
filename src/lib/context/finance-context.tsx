@@ -1646,6 +1646,8 @@ function FinanceProviderSession({ children, repository, initialDataMode, initial
             commitState({
               ...current,
               allTransactions: current.allTransactions.map((t) => (t.id === res.id ? (pendingEntityIdsRef.current.get(res.id)! > 1 ? { ...saved, ...t, id: saved.id } : saved) : t)),
+              // Keep the optimistic payment linked when the server replaces the transaction ID.
+              allPayments: current.allPayments.map((payment) => payment.workspace_id === current.activeWorkspaceId && payment.transaction_id === res.id ? { ...payment, transaction_id: saved.id } : payment),
             });
           }
           return saved;
