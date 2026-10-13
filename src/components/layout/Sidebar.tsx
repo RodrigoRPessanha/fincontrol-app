@@ -1,5 +1,7 @@
 'use client';
 
+import { BrandIcon } from '@/components/shared/BrandIcon';
+
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -16,7 +18,6 @@ import {
   Users,
   Settings,
   ShieldCheck,
-  Sparkles,
   Scale,
   BookOpen,
 } from 'lucide-react';
@@ -58,9 +59,7 @@ export function Sidebar() {
       <div className="flex min-h-0 flex-1 flex-col gap-6">
         {/* Logo & App Brand */}
         <div className="flex items-center gap-3 px-2 pt-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 text-white shadow-lg shadow-emerald-500/20">
-            <Sparkles className="h-5 w-5" />
-          </div>
+          <BrandIcon className="h-12 w-12" />
           <div>
             <h1 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
               FinControl
