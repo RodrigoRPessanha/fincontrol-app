@@ -1,12 +1,14 @@
 'use client';
 
+import { BrandIcon } from '@/components/shared/BrandIcon';
+
 import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/context/auth-context';
 import { getSafeRedirectPath } from '@/lib/utils';
 import { getAuthErrorMessage } from '@/lib/auth-errors';
-import { ShieldCheck, Mail, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 
 function LoginForm() {
   const router = useRouter();
@@ -43,8 +45,8 @@ function LoginForm() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
       <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-8 space-y-6">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 mb-2">
-            <ShieldCheck className="w-6 h-6" />
+          <div className="mb-2 inline-flex items-center justify-center">
+            <BrandIcon className="h-20 w-20" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             FinControl
