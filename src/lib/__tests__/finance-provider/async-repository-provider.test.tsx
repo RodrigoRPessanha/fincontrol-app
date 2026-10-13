@@ -1,3 +1,4 @@
+import { calculateDashboardSummary } from '../../financial-engine';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -335,6 +336,25 @@ function createMockRepository(snapshot: FinanceState) {
 import { setupFinanceHarness } from '../test-utils/finance-provider-harness';
 
 describe('FinanceProvider - Repositório Assíncrono e Modo Supabase', () => {
+  it.each(['expense_tracker', 'full'] as const)('keeps a paid Pix counted once after canonical ID reconciliation in %s', async (mode) => {
+    const snapshot = createMockSnapshot({ allTransactions: [], allPayments: [], allCreditCardBills: [] });
+    snapshot.allWorkspaces[0].tracking_mode = mode;
+    const repo = createMockRepository(snapshot);
+    repo.saveTransaction = vi.fn(async (data) => ({ ...data, id: 'canonical-pix', created_at: '2026-10-13' }));
+    const { getCtx } = await mountTestProvider({ repository: repo, initialDataMode: 'supabase' });
+    await act(async () => {
+      await getCtx().addTransactionAsync({ description: 'Pix regression', type: 'expense', amount: 258,
+        status: 'paid', transaction_date: '2026-10-13', due_date: '2026-10-13', paid_at: '2026-10-13',
+        payment_method_id: 'pm-1', account_id: mode === 'full' ? 'acc-1' : undefined });
+    });
+    expect(getCtx().transactions[0].id).toBe('canonical-pix');
+    expect(getCtx().payments).toHaveLength(1);
+    expect(getCtx().payments[0].transaction_id).toBe('canonical-pix');
+    const summary = calculateDashboardSummary(getCtx().transactions, [], [], [], getCtx().payments, '2026-10');
+    expect(summary.realized.expense).toBe(258);
+    expect(summary.planned.expense).toBe(258);
+  });
+
   it.each([false,true])('reschedules an imported paid purchase and protects confirmed changes from hydration failure (%s)', async (failHydration) => {
     const { purchaseDateFixture }=await import('../test-utils/purchase-date-fixture');
     const { purchaseDateSchedule,reschedulePurchaseState }=await import('../../financial-engine/purchase-dates');
