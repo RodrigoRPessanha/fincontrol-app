@@ -55,7 +55,7 @@ export function Sidebar() {
   });
 
   return (
-    <aside className="hidden lg:flex h-screen w-64 flex-col justify-between border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 sticky top-0">
+    <aside className="hidden lg:flex h-dvh w-64 shrink-0 self-start flex-col justify-between border-r border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 sticky top-0">
       <div className="flex min-h-0 flex-1 flex-col gap-6">
         {/* Logo & App Brand */}
         <div className="flex items-center gap-3 px-2 pt-2">

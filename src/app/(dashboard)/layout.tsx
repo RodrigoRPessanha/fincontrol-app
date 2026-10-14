@@ -11,12 +11,12 @@ export default function DashboardLayout({
 }) {
   return (
     <>
-      <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 overflow-x-hidden">
+      <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 overflow-x-clip">
         {/* Desktop Sidebar */}
         <Sidebar />
 
         {/* Main Content Area */}
-        <div className="flex flex-1 flex-col pb-20 lg:pb-8 min-w-0 max-w-full overflow-x-hidden">
+        <div className="flex flex-1 flex-col pb-20 lg:pb-8 min-w-0 max-w-full overflow-x-clip">
           <Header />
           <main className="flex-1 px-4 py-6 sm:px-8 max-w-7xl w-full mx-auto min-w-0">
             <GlobalErrorBanner />
